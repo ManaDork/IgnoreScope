@@ -6,37 +6,24 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-build/
-develop-eggs/
+
+# Distribution / packaging
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+build/
 *.egg-info/
-.installed.cfg
 *.egg
+.eggs/
 
 # Virtual environments
-.venv/
 venv/
+.venv/
 ENV/
 
 # Claude Code local files
 .claude/
 
-# MCP local config
-.mcp.json
-
 # IgnoreScope local config
 IgnoreScope/.recent_projects.json
-IgnoreScope/.claude/
 
 # IDE
 .idea/
@@ -49,12 +36,10 @@ IgnoreScope/.claude/
 .coverage
 htmlcov/
 
-# Source icons (kept in P4, not published)
+# Assets (excluded from GitHub)
 Icons/
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Lock files (platform-specific)
-uv.lock
+nul
