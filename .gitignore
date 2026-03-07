@@ -1,0 +1,57 @@
+# Debug
+**/debug_output_visible_lite.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Claude Code local files
+.claude/
+
+# MCP local config
+.mcp.json
+
+# IgnoreScope local config
+IgnoreScope/.recent_projects.json
+IgnoreScope/.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Lock files (platform-specific)
+uv.lock

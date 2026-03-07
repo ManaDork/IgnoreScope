@@ -1,0 +1,12 @@
+{
+    "background": "#3B4252",
+    "mounted":    "#3D4A3E",
+    "pushed":     "#3D4A3E",
+    "masked":     "#4A3B42",
+    "revealed":   "#4A4838",
+    "visible":    "#4C566A",
+    "mirrored":   "#373E4D",
+    "hidden":     "#2E3440",
+    "warning":    "#D08770",
+    "selected":   "#5E81AC"
+}
