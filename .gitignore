@@ -49,6 +49,9 @@ IgnoreScope/.claude/
 .coverage
 htmlcov/
 
+# Source icons (kept in P4, not published)
+Icons/
+
 # OS
 .DS_Store
 Thumbs.db
