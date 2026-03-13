@@ -9,7 +9,7 @@ description = "Docker container management CLI with masked folders and exception
 requires-python = ">=3.13"
 license = "MIT"
 authors = [
-    {name = "Ira Goeddel"}
+    {name = "ManaDork"}
 ]
 keywords = ["docker", "containers", "file-management", "masked-folders"]
 classifiers = [

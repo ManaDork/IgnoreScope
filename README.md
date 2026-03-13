@@ -20,18 +20,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## Install
 
-### From GitHub Release
-
 ```bash
-uv pip install https://github.com/ManaDork/IgnoreScope/releases/download/v0.1.0/ignorescope_docker-0.1.0-py3-none-any.whl
-```
-
-### From Source
-
-```bash
-git clone https://github.com/ManaDork/IgnoreScope.git
-cd IgnoreScope
-uv pip install .
+uv tool install git+https://github.com/ManaDork/IgnoreScope
 ```
 
 ## Usage
