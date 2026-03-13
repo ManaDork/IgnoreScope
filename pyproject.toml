@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ignorescope-docker"
+dynamic = ["version"]
+description = "Docker container management CLI with masked folders and exception file handling"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [
+    {name = "Ira Goeddel"}
+]
+keywords = ["docker", "containers", "file-management", "masked-folders"]
+classifiers = [
+    "Private :: Do Not Upload",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "pathspec>=0.12.0",
+    "PyQt6>=6.5.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+IgnoreScope = "IgnoreScope.__main__:main"
+ignorescope-docker = "IgnoreScope.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "IgnoreScope._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["IgnoreScope*"]
+exclude = ["IgnoreScope.setup*", "IgnoreScope.tests*"]
+
+[tool.setuptools.package-data]
+IgnoreScope = ["gui/*.json"]
+
+[tool.setuptools.exclude-package-data]
+"*" = [".claude/*", "venv/*", ".venv/*", "__pycache__/*", "*.pyc"]
+"IgnoreScope.utils" = ["list_format_output.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

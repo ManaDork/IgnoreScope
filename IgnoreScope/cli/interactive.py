@@ -1,0 +1,377 @@
+"""Interactive CLI prompts for IgnoreScope configuration.
+
+Provides interactive setup for creating Docker container configurations,
+and command wrappers for CLI operations.
+"""
+
+import sys
+from pathlib import Path
+from typing import Set
+
+from ..core.config import ScopeDockerConfig, SiblingMount, list_containers
+from ..docker.names import build_docker_name
+from .commands import cmd_create, cmd_push, cmd_pull, cmd_remove
+
+
+def _parse_container_arg(args: list[str]) -> str:
+    """Parse --container argument from command line args.
+
+    Args:
+        args: Command line arguments
+
+    Returns:
+        Container name or 'default' if not specified
+    """
+    for i, arg in enumerate(args):
+        if arg == '--container' and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith('--container='):
+            return arg.split('=', 1)[1]
+    return "default"
+
+
+def _prompt_yes_no(question: str, default: bool = False) -> bool:
+    """Prompt user for yes/no response.
+
+    Args:
+        question: Question to ask
+        default: Default response if user presses Enter
+
+    Returns:
+        True if yes, False if no
+    """
+    default_str = "Y/n" if default else "y/N"
+    response = input(f"{question} ({default_str}): ").strip().lower()
+
+    if response == '':
+        return default
+    return response in ('y', 'yes')
+
+
+def _configure_sibling(sibling_num: int) -> SiblingMount | None:
+    """Configure a single sibling mount interactively.
+
+    Args:
+        sibling_num: Number for display (1, 2, 3...)
+
+    Returns:
+        Configured SiblingMount or None if cancelled
+    """
+    print(f"\n--- Sibling Mount #{sibling_num} ---")
+
+    # Get host path
+    host_path_str = input("Host path (absolute path, or empty to cancel): ").strip()
+    if not host_path_str:
+        return None
+
+    host_path = Path(host_path_str)
+    if not host_path.is_absolute():
+        print("  Error: Path must be absolute")
+        return None
+    if not host_path.exists():
+        print(f"  Warning: Path does not exist: {host_path}")
+        if not _prompt_yes_no("Continue anyway?", default=False):
+            return None
+
+    # Get container path
+    default_container_path = f"/{host_path.name}"
+    container_path_str = input(f"Container path ({default_container_path}): ").strip()
+    container_path = container_path_str if container_path_str else default_container_path
+
+    # Ensure container path starts with /
+    if not container_path.startswith('/'):
+        container_path = '/' + container_path
+
+    sibling = SiblingMount(
+        host_path=host_path,
+        container_path=container_path,
+    )
+
+    # Check if there are folders to configure
+    if not host_path.exists() or not host_path.is_dir():
+        return sibling
+
+    # List folders in sibling
+    folders = sorted([f for f in host_path.iterdir() if f.is_dir() and not f.name.startswith('.')])
+    if not folders:
+        print("  No subfolders found in sibling path")
+        return sibling
+
+    # Mount folders
+    print("\n  Select folders to mount (visible to container):")
+    for folder in folders:
+        if _prompt_yes_no(f"  Mount '{folder.name}'?", default=False):
+            sibling.mounts.add(folder)
+
+    if not sibling.mounts:
+        # If no specific mounts, the entire sibling is accessible
+        return sibling
+
+    # Masked folders
+    mounted_subfolders: Set[Path] = set()
+    for mount in sibling.mounts:
+        if mount.is_dir():
+            for item in mount.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    mounted_subfolders.add(item)
+
+    if mounted_subfolders:
+        print("\n  Select subfolders to mask (hidden from container):")
+        for subfolder in sorted(mounted_subfolders):
+            rel = subfolder.relative_to(host_path)
+            if _prompt_yes_no(f"  Mask '{rel}'?", default=False):
+                sibling.masked.add(subfolder)
+
+    # Revealed folders
+    if sibling.masked:
+        masked_subfolders: Set[Path] = set()
+        for masked_folder in sibling.masked:
+            if masked_folder.is_dir():
+                for item in masked_folder.iterdir():
+                    if item.is_dir() and not item.name.startswith('.'):
+                        masked_subfolders.add(item)
+
+        if masked_subfolders:
+            print("\n  Select subfolders to unmask (punch-through):")
+            for subfolder in sorted(masked_subfolders):
+                rel = subfolder.relative_to(host_path)
+                if _prompt_yes_no(f"  Unmask '{rel}'?", default=False):
+                    sibling.revealed.add(subfolder)
+
+    return sibling
+
+
+def _interactive_create(host_project_root: Path) -> ScopeDockerConfig:
+    """Interactively build a ScopeDockerConfig.
+
+    Prompts user for mounts, masked, and revealed folders.
+
+    Args:
+        host_project_root: Project root directory
+
+    Returns:
+        Configured ScopeDockerConfig instance
+    """
+    config = ScopeDockerConfig(host_project_root=host_project_root)
+
+    print("\n=== IgnoreScope Configuration ===\n")
+
+    # Container root name (derived from host_container_root by __post_init__)
+    derived_root = config.container_root
+    print("--- Container Root Path ---")
+    print(f"Default: {derived_root}")
+    custom_root = input(f"Container root path ({derived_root}): ").strip()
+    if custom_root:
+        # Ensure it starts with /
+        if not custom_root.startswith('/'):
+            custom_root = '/' + custom_root
+        # Remove trailing slash
+        custom_root = custom_root.rstrip('/')
+        config.container_root = custom_root
+
+    # Gather folders to consider
+    print("\nScanning folders in project...")
+    top_level = list(host_project_root.iterdir())
+    folders = sorted([f for f in top_level if f.is_dir() and not f.name.startswith('.')])
+
+    if not folders:
+        print("No folders found in project")
+        return config
+
+    # Mount folders
+    print("\n--- Mount Folders (visible to container) ---")
+    for folder in folders:
+        if _prompt_yes_no(f"Mount '{folder.name}'?", default=False):
+            config.add_mount(folder)
+
+    if not config.mounts:
+        print("No mounts configured. Exiting.")
+        return config
+
+    # Masked folders (within mounted folders)
+    print("\n--- Mask Folders (hidden from container) ---")
+    print("(Select subfolders of mounted folders to mask)")
+
+    mounted_subfolders: Set[Path] = set()
+    for mount in config.mounts:
+        for item in mount.iterdir():
+            if item.is_dir() and not item.name.startswith('.'):
+                mounted_subfolders.add(item)
+
+    for subfolder in sorted(mounted_subfolders):
+        if _prompt_yes_no(f"Mask '{subfolder.relative_to(host_project_root)}'?", default=False):
+            config.add_mask(subfolder)
+
+    # Revealed folders (within masked folders)
+    if config.masked:
+        print("\n--- Unmask Folders (re-expose within masks) ---")
+        print("(Select subfolders of masked folders to unmask)")
+
+        masked_subfolders: Set[Path] = set()
+        for masked_folder in config.masked:
+            for item in masked_folder.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    masked_subfolders.add(item)
+
+        for subfolder in sorted(masked_subfolders):
+            rel_path = subfolder.relative_to(host_project_root)
+            if _prompt_yes_no(f"Unmask '{rel_path}'?", default=False):
+                config.add_reveal(subfolder)
+
+    # Sibling mounts (external directories)
+    print("\n--- Sibling Mounts (external directories) ---")
+    print("Mount folders outside project root as container siblings")
+    print("(e.g., shared libraries at /shared/)")
+
+    siblings = []
+    sibling_num = 1
+    while True:
+        if not _prompt_yes_no(f"Add sibling mount?", default=False):
+            break
+        sibling = _configure_sibling(sibling_num)
+        if sibling:
+            siblings.append(sibling)
+            sibling_num += 1
+            print(f"  Added: {sibling.host_path} -> {sibling.container_path}")
+
+    config.siblings = siblings
+
+    # Scope name
+    print("\n--- Scope Name ---")
+    default_scope = "default"
+    custom_name = input(f"Scope name ({default_scope}): ").strip()
+    scope_name = custom_name if custom_name else default_scope
+    config.scope_name = scope_name
+
+    # Dev mode
+    print("\n--- Pull Mode ---")
+    dev_mode = _prompt_yes_no(
+        "Safe mode: pull to ./Pulled/{timestamp}/ (non-destructive)?",
+        default=True
+    )
+    config.dev_mode = dev_mode
+
+    # Show summary
+    docker_name = build_docker_name(host_project_root, config.scope_name)
+    print("\n=== Configuration Summary ===")
+    print(f"Scope: {config.scope_name}")
+    print(f"Docker container: {docker_name}")
+    print(f"Container root: {config.container_root}")
+    print(f"Pull mode: {'Safe (./Pulled/)' if config.dev_mode else 'Production (overwrite)'}")
+    print(f"Mounts: {len(config.mounts)}")
+    print(f"Masked: {len(config.masked)}")
+    print(f"Revealed: {len(config.revealed)}")
+    print(f"Sibling mounts: {len(config.siblings)}")
+    for sibling in config.siblings:
+        print(f"  {sibling.host_path} -> {sibling.container_path}")
+
+    if _prompt_yes_no("\nProceed with create?", default=True):
+        return config
+
+    return ScopeDockerConfig(host_project_root=host_project_root)
+
+
+def cmd_create_wrapper(host_project_root: Path) -> None:
+    """Wrapper for create command with interactive setup."""
+    config = _interactive_create(host_project_root)
+
+    if not config:
+        print("\nNo configuration. Exiting.")
+        return
+
+    print("\n=== Creating Container ===\n")
+    success, msg = cmd_create(host_project_root, config)
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def cmd_push_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for push command."""
+    scope_name = _parse_container_arg(args)
+    # Filter out --container args from files list
+    specific_files = [a for a in args[2:] if not a.startswith('--container') and a != scope_name]
+    specific_files = specific_files if specific_files else None
+
+    success, msg = cmd_push(host_project_root, scope_name, specific_files)
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def cmd_pull_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for pull command."""
+    scope_name = _parse_container_arg(args)
+    # Filter out --container args from files list
+    specific_files = [a for a in args[2:] if not a.startswith('--container') and a != scope_name]
+    specific_files = specific_files if specific_files else None
+
+    success, msg = cmd_pull(host_project_root, scope_name, specific_files)
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def cmd_remove_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for remove command."""
+    scope_name = _parse_container_arg(args)
+    confirm = '--yes' in args or '-y' in args
+
+    success, msg = cmd_remove(host_project_root, scope_name, confirm=confirm)
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def print_usage() -> None:
+    """Print usage information."""
+    print("""
+IgnoreScope: Docker container management with masked folders
+
+Usage:
+    python -m IgnoreScope gui [--project PATH]
+    python -m IgnoreScope create [--project PATH]
+    python -m IgnoreScope push [--project PATH] [--container NAME] [FILES...]
+    python -m IgnoreScope pull [--project PATH] [--container NAME] [FILES...]
+    python -m IgnoreScope remove [--project PATH] [--container NAME] [--yes]
+
+Commands:
+    gui         Launch graphical configuration editor (PyQt6)
+    create      Interactive CLI setup: mounts, masks, reveals
+    push        Push tracked files to container
+    pull        Pull tracked files from container (./Pulled/ or overwrite)
+    remove      Remove container and volumes
+
+Options:
+    --project PATH     Project root directory (default: current directory)
+    --container NAME   Container name (default: 'default')
+    --yes             Skip confirmation prompts
+    -y                Short form of --yes
+
+Config Location:
+    {project_root}/.ignore_scope/{scope_name}/scope_docker_desktop.json
+
+Examples:
+    python -m IgnoreScope gui
+    python -m IgnoreScope gui --project E:\\MyProject
+    python -m IgnoreScope create
+    python -m IgnoreScope push --container dev config.ini
+    python -m IgnoreScope pull --container prod
+    python -m IgnoreScope remove --container dev --yes
+""".strip())
