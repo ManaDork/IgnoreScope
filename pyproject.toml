@@ -43,7 +43,7 @@ include = ["IgnoreScope*"]
 exclude = ["IgnoreScope.setup*", "IgnoreScope.tests*"]
 
 [tool.setuptools.package-data]
-IgnoreScope = ["gui/*.json"]
+IgnoreScope = ["gui/*.json", "gui/icons/*.png", "gui/icons/*.svg"]
 
 [tool.setuptools.exclude-package-data]
 "*" = [".claude/*", "venv/*", ".venv/*", "__pycache__/*", "*.pyc"]
