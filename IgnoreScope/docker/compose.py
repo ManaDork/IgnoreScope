@@ -69,6 +69,10 @@ def generate_dockerfile_with_llm(
 ) -> tuple[str, str | None]:
     """Generate Dockerfile with LLM installation.
 
+    SHELVED — not called from production code. execute_create() always calls
+    generate_dockerfile() (basic), never this function. No config flag exists
+    to toggle it. Kept for future reference.
+
     Creates a container with:
     - Python 3.11 slim base
     - System packages for LLM

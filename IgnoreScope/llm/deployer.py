@@ -16,6 +16,7 @@ class DeployMethod(Enum):
     """LLM deployment method."""
 
     # Install during Docker image build (baked into image)
+    # SHELVED — not used in production. Kept for potential future use.
     BUILD_TIME = auto()
 
     # Install at container runtime via docker exec

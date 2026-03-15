@@ -26,6 +26,7 @@ class ClaudeDeployer(LLMDeployer):
 
     # Installation URLs and packages
     NATIVE_INSTALL_URL = "https://claude.ai/install.sh"
+    # Legacy fallback from pre-.exe era. Not used by current RUNTIME pipeline.
     NPM_PACKAGE = "@anthropic-ai/claude-code"
 
     # Binary location after native install
@@ -62,6 +63,9 @@ class ClaudeDeployer(LLMDeployer):
     def get_dockerfile_snippets(self) -> dict[str, str]:
         """Get Dockerfile snippets for Claude installation.
 
+        SHELVED — used only by generate_dockerfile_with_llm() which is not
+        wired into production. Kept for future reference.
+
         Returns complete Dockerfile segments for:
         - System packages
         - Claude installation
@@ -89,6 +93,9 @@ ENV CLAUDE_CODE_DISABLE_AUTO_UPDATE=1
 
     def get_entrypoint_script(self, workspace_dir: str = "/workspace") -> str:
         """Generate entrypoint script for Claude containers.
+
+        SHELVED — used only by generate_dockerfile_with_llm() which is not
+        wired into production. Kept for future reference.
 
         The entrypoint:
         1. Sets up environment

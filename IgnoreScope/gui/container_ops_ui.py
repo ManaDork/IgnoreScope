@@ -77,7 +77,7 @@ class DeployWorker(QThread):
             )
             self.finished.emit(result.success, result.message, result.version)
         except Exception as e:
-            self.finished.emit(False, f"Deployment error: {e}", "")
+            self.finished.emit(False, f"Installation error: {e}", "")
 
 
 class ContainerOperations:
@@ -542,6 +542,8 @@ class ContainerOperations:
             self._app.host_project_root, self._app._current_scope
         )
         container_root = self._app._mount_data_tree.container_root
+        project_name = self._app.host_project_root.name
+        work_dir = f"{container_root}/{project_name}"
 
         success, msg = ensure_container_running(container_name)
         if not success:
@@ -555,9 +557,9 @@ class ContainerOperations:
         if not deployer.is_installed(container_name):
             reply = QMessageBox.question(
                 self._app,
-                "LLM Not Installed",
+                "Claude CLI Not Installed",
                 f"{deployer.name} is not installed in container '{container_name}'.\n\n"
-                "Would you like to deploy it now?",
+                "Would you like to install it now?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -565,9 +567,37 @@ class ContainerOperations:
             return
 
         docker_cmd = get_llm_command(
-            container_name, container_root, deployer.BINARY_PATH
+            container_name, work_dir, deployer.BINARY_PATH
         )
         self._launch_terminal(docker_cmd, container_name, "Claude Code")
+
+    def copy_llm_command(self) -> None:
+        """Copy the LLM launch command to clipboard."""
+        if not self._app.host_project_root:
+            QMessageBox.warning(
+                self._app, "No Project", "Please open a project first."
+            )
+            return
+
+        from ..docker.names import build_docker_name
+        container_name = build_docker_name(
+            self._app.host_project_root, self._app._current_scope
+        )
+        container_root = self._app._mount_data_tree.container_root
+        project_name = self._app.host_project_root.name
+        work_dir = f"{container_root}/{project_name}"
+
+        from ..llm import ClaudeDeployer
+        deployer = ClaudeDeployer(auto_launch=False)
+
+        docker_cmd = get_llm_command(
+            container_name, work_dir, deployer.BINARY_PATH
+        )
+
+        QApplication.clipboard().setText(docker_cmd)
+        self._app.statusBar().showMessage(
+            f"Copied to clipboard: {docker_cmd}", 5000
+        )
 
     def deploy_llm_to_container(self) -> None:
         """Deploy Claude Code LLM into the running container."""
@@ -589,17 +619,17 @@ class ContainerOperations:
 
         reply = QMessageBox.question(
             self._app,
-            "Deploy LLM",
-            f"Deploy Claude Code to container '{container_name}'?\n\n"
-            "This will install via npm and may take a few minutes.",
+            "Install Claude CLI",
+            f"Install Claude CLI into container '{container_name}'?\n\n"
+            "This will install via curl and may take a few minutes.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
         progress = self._create_progress_dialog(
-            "Deploying LLM",
-            "Deploying Claude Code...\n\nThis may take a few minutes.",
+            "Installing Claude CLI",
+            "Installing Claude CLI...\n\nThis may take a few minutes.",
         )
 
         self._deploy_worker = DeployWorker(container_name, self._app)
@@ -621,13 +651,13 @@ class ContainerOperations:
             version_info = f" (v{version})" if version else ""
             QMessageBox.information(
                 self._app,
-                "Deployment Complete",
+                "Installation Complete",
                 f"{message}{version_info}",
             )
         else:
             QMessageBox.critical(
                 self._app,
-                "Deployment Failed",
+                "Installation Failed",
                 message,
             )
 
@@ -639,10 +669,21 @@ class ContainerOperations:
 
         try:
             if system == "Windows":
-                subprocess.Popen(
-                    f'start cmd /k "{docker_cmd}"',
-                    shell=True,
-                )
+                from PyQt6.QtCore import QSettings
+                settings = QSettings("IgnoreScope", "IgnoreScope")
+                terminal = settings.value("terminal_preference", "cmd")
+
+                if terminal in ("powershell", "pwsh"):
+                    exe = "pwsh" if terminal == "pwsh" else "powershell"
+                    subprocess.Popen(
+                        f'start {exe} -NoExit -Command "{docker_cmd}"',
+                        shell=True,
+                    )
+                else:
+                    subprocess.Popen(
+                        f'start cmd /k "{docker_cmd}"',
+                        shell=True,
+                    )
             elif system == "Darwin":  # macOS
                 script = f'tell application "Terminal" to do script "{docker_cmd}"'
                 subprocess.Popen(["osascript", "-e", script])

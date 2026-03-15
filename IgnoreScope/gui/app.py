@@ -328,6 +328,7 @@ class IgnoreScopeApp(QMainWindow):
         mm.add_sibling_action.triggered.connect(cm.add_sibling_dialog)
         mm.launch_terminal_action.triggered.connect(co.launch_container_terminal)
         mm.launch_llm_action.triggered.connect(co.launch_llm_in_container)
+        mm.copy_llm_command_action.triggered.connect(co.copy_llm_command)
         mm.open_config_location_action.triggered.connect(co.open_config_location)
         mm.rename_container_root_action.triggered.connect(co.rename_container_root)
         mm.export_structure_action.triggered.connect(cm.export_structure)

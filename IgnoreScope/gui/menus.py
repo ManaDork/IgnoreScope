@@ -8,11 +8,12 @@ docker menu states, and recent projects.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QSettings
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QActionGroup
 from PyQt6.QtWidgets import QMainWindow, QMenu
 
 
@@ -141,7 +142,7 @@ class MenuManager:
 
         docker_menu.addSeparator()
 
-        self.deploy_llm_action = QAction("Deploy LLM to Container", self._app)
+        self.deploy_llm_action = QAction("Install Claude CLI", self._app)
         self.deploy_llm_action.setEnabled(False)
         docker_menu.addAction(self.deploy_llm_action)
 
@@ -182,9 +183,52 @@ class MenuManager:
         self.launch_terminal_action.setEnabled(False)
         tools_menu.addAction(self.launch_terminal_action)
 
-        self.launch_llm_action = QAction("Launch LLM in Container", self._app)
+        self.launch_llm_action = QAction("Launch Claude CLI", self._app)
         self.launch_llm_action.setEnabled(False)
         tools_menu.addAction(self.launch_llm_action)
+
+        self.copy_llm_command_action = QAction("Clipboard: Launch Claude CLI", self._app)
+        self.copy_llm_command_action.setEnabled(False)
+        tools_menu.addAction(self.copy_llm_command_action)
+
+        # ── Terminal Preference Submenu ───────────────────────
+        TERMINALS = [
+            ("cmd",        "CMD",                "cmd.exe"),
+            ("powershell", "PowerShell",         "powershell.exe"),
+            ("pwsh",       "pwsh (PowerShell 7)", "pwsh.exe"),
+        ]
+
+        saved_pref = self._settings.value("terminal_preference", "cmd")
+        # Detect available terminals
+        available = []
+        for key, label, exe in TERMINALS:
+            # cmd and powershell are always present on Windows
+            if key in ("cmd", "powershell") or shutil.which(exe):
+                available.append((key, label))
+
+        # Validate saved preference against available terminals
+        available_keys = [k for k, _ in available]
+        if saved_pref not in available_keys:
+            saved_pref = "cmd"
+            self._settings.setValue("terminal_preference", saved_pref)
+
+        saved_label = next(l for k, l in available if k == saved_pref)
+        self.terminal_menu = QMenu(f"Terminal: {saved_label}", self._app)
+        tools_menu.addMenu(self.terminal_menu)
+
+        self._terminal_action_group = QActionGroup(self._app)
+        self._terminal_action_group.setExclusive(True)
+
+        for key, label in available:
+            action = QAction(label, self._app)
+            action.setCheckable(True)
+            action.setData(key)
+            if key == saved_pref:
+                action.setChecked(True)
+            self._terminal_action_group.addAction(action)
+            self.terminal_menu.addAction(action)
+
+        self._terminal_action_group.triggered.connect(self._on_terminal_changed)
 
         tools_menu.addSeparator()
 
@@ -252,6 +296,13 @@ class MenuManager:
         if hasattr(self._app, 'config_manager'):
             self._app.config_manager.switch_scope(name)
 
+    def _on_terminal_changed(self, action: QAction) -> None:
+        """Handle terminal preference change — save to QSettings, update title."""
+        key = action.data()
+        label = action.text()
+        self._settings.setValue("terminal_preference", key)
+        self.terminal_menu.setTitle(f"Terminal: {label}")
+
     def update_scope_checkmarks(self, active_scope: str) -> None:
         """Set checkmark on the active scope QAction. Update menu title."""
         for action in self._scope_actions:
@@ -315,6 +366,7 @@ class MenuManager:
         self.deploy_llm_action.setEnabled(has_docker_container)
         self.launch_terminal_action.setEnabled(has_docker_container)
         self.launch_llm_action.setEnabled(has_docker_container)
+        self.copy_llm_command_action.setEnabled(has_docker_container)
 
     def update_project_loaded_states(self, loaded: bool) -> None:
         """Enable/disable items that require a loaded project."""
