@@ -1,5 +1,7 @@
 # IgnoreScope
 
+> **Platform: Windows only** — macOS and Linux are not yet tested or supported.
+
 IgnoreScope is a Docker container management tool that uses volume layering to selectively hide directories from your project while allowing individual files to be pushed or pulled at runtime via `docker cp`. It provides both a CLI and a PyQt6 GUI for managing scoped container configurations across multiple projects.
 
 ## Prerequisites
@@ -17,7 +19,7 @@ IgnoreScope requires Docker Desktop to create and manage containers.
    # Expected: Docker version 27.x or later
    ```
 
-**Windows note:** Docker Desktop uses WSL 2 by default. If prompted, follow the WSL 2 kernel update instructions.
+Docker Desktop uses WSL 2 by default on Windows. If prompted, follow the WSL 2 kernel update instructions.
 
 ### Python 3.13+
 
@@ -33,11 +35,7 @@ Download from [python.org](https://www.python.org/downloads/) if needed. Ensure 
 [uv](https://docs.astral.sh/uv/) is used for installation. Install it first:
 
 ```bash
-# Windows
 winget install --id=astral-sh.uv -e
-
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Install
