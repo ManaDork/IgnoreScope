@@ -8,8 +8,7 @@ Or interactively: python -m IgnoreScope.tests.test_docker.test_integration
 
 Test matrix:
 1. Minimal container (no LLM)
-2. Container with Claude Code (native install)
-3. Container with Claude Code (npm install)
+2. Container with Claude Code (curl install)
 """
 
 from __future__ import annotations
@@ -194,9 +193,9 @@ class TestLLMContainer:
     def test_claude_dockerfile_generation(self, temp_project: Path):
         """Test Dockerfile generation with Claude Code."""
         from IgnoreScope.docker.compose import generate_dockerfile_with_llm
-        from IgnoreScope.llm import ClaudeDeployer
+        from IgnoreScope.container_ext import ClaudeInstaller
 
-        deployer = ClaudeDeployer(auto_launch=True)
+        deployer = ClaudeInstaller(auto_launch=True)
         dockerfile, entrypoint = generate_dockerfile_with_llm(
             deployer,
             project_name="TestProject",
@@ -216,28 +215,28 @@ class TestLLMContainer:
         assert "/workspace" in entrypoint
 
     def test_claude_deployer_interface(self):
-        """Test ClaudeDeployer implements required interface."""
-        from IgnoreScope.llm import ClaudeDeployer, DeployMethod
+        """Test ClaudeInstaller implements required interface."""
+        from IgnoreScope.container_ext import ClaudeInstaller, DeployMethod
 
-        deployer = ClaudeDeployer()
+        deployer = ClaudeInstaller()
 
         assert deployer.name == "Claude Code"
         assert deployer.binary_name == "claude"
-        assert DeployMethod.BUILD_TIME in deployer.supported_methods
-        assert DeployMethod.RUNTIME in deployer.supported_methods
+        assert DeployMethod.MINIMAL in deployer.supported_methods
+        assert DeployMethod.FULL in deployer.supported_methods
 
         # Check command generation
-        native_cmds = deployer.get_install_commands(DeployMethod.BUILD_TIME)
-        assert any("curl" in str(cmd) for cmd in native_cmds)
+        minimal_cmds = deployer.get_install_commands(DeployMethod.MINIMAL)
+        assert any("curl" in str(cmd) for cmd in minimal_cmds)
 
-        npm_cmds = deployer.get_install_commands(DeployMethod.RUNTIME)
-        assert any("npm" in str(cmd) for cmd in npm_cmds)
+        full_cmds = deployer.get_install_commands(DeployMethod.FULL)
+        assert any("curl" in str(cmd) for cmd in full_cmds)
 
     def test_version_parsing(self):
         """Test Claude version string parsing."""
-        from IgnoreScope.llm import ClaudeDeployer
+        from IgnoreScope.container_ext import ClaudeInstaller
 
-        deployer = ClaudeDeployer()
+        deployer = ClaudeInstaller()
 
         # Test various version formats
         assert deployer.parse_version_output("claude-code version 1.2.3") == "1.2.3"
@@ -260,17 +259,17 @@ class TestLLMContainer:
 
         This test:
         1. Creates a minimal container
-        2. Deploys Claude via npm (faster for testing)
+        2. Deploys Claude via curl installer
         3. Verifies Claude is installed
 
-        Note: Requires internet access for npm install.
+        Note: Requires internet access for curl install.
         """
         if not docker_available:
             pytest.skip("Docker not available")
 
         from IgnoreScope.core.config import ScopeDockerConfig
         from IgnoreScope.cli.commands import cmd_create, cmd_remove
-        from IgnoreScope.llm import deploy_claude_npm, verify_claude
+        from IgnoreScope.container_ext import deploy_claude, verify_claude
 
         config = ScopeDockerConfig(
             mounts={temp_project / "src"},
@@ -283,8 +282,8 @@ class TestLLMContainer:
             success, msg = cmd_create(temp_project, config)
             assert success, f"Create failed: {msg}"
 
-            # Deploy Claude via npm
-            result = deploy_claude_npm(test_container_name, timeout=300)
+            # Deploy Claude
+            result = deploy_claude(test_container_name, timeout=300)
 
             if result.success:
                 # Verify installation
@@ -374,9 +373,9 @@ class TestMountRootMasking:
     """Test that a bind-mounted folder can be masked at the same path.
 
     Docker volume layering order:
-      1. Bind mount:  host/src → /workspace/.../src:ro   (files visible)
+      1. Bind mount:  host/src → /workspace/.../src       (files visible)
       2. Named volume: mask_src → /workspace/.../src      (overlays, hides files)
-      3. Reveal:       host/.../public → /workspace/.../public:ro (punch-through)
+      3. Reveal:       host/.../public → /workspace/.../public    (punch-through)
     """
 
     @pytest.mark.skipif(
@@ -637,9 +636,9 @@ def run_interactive_tests():
             print(f"\nDeploying Claude to {container_name}...")
             print("This may take 1-2 minutes...")
 
-            from IgnoreScope.llm import deploy_claude_npm, verify_claude
+            from IgnoreScope.container_ext import deploy_claude, verify_claude
 
-            result = deploy_claude_npm(container_name, timeout=300)
+            result = deploy_claude(container_name, timeout=300)
             if result.success:
                 print(f"\n[OK] {result.message}")
                 verify = verify_claude(container_name)

@@ -1,13 +1,52 @@
+# Debug
+**/debug_output_visible_lite.txt
+
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.egg-info/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
 dist/
 build/
-.venv/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
 venv/
+.venv/
+ENV/
+
+# Claude Code local files
+.claude/*
+!.claude/commands/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+
+# IgnoreScope local config
+IgnoreScope/.recent_projects.json
+
+# IDE
 .idea/
-.claude/
 .vscode/
-.mcp.json
-*.whl
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Assets (excluded from GitHub)
+Icons/
+
+# OS
+.DS_Store
+Thumbs.db
+nul

@@ -25,21 +25,24 @@ def compute_visibility(
     revealed: bool,
     pushed: bool,
     container_orphaned: bool,
+    container_only: bool = False,
 ) -> str:
     """Derive aggregate visibility from per-node boolean flags.
 
     MatrixState truth table (first match wins):
 
-        container_orphaned  revealed  masked  mounted  ->  visibility
-        ------------------  --------  ------  -------  |   ----------
-              T               *         *       *      |   "orphaned"
-              F               T         *       *      |   "revealed"
-              F               F         T       T      |   "masked"
-              F               F         F       T      |   "visible"
-              F               F         *       F      |   "hidden"
+        container_orphaned  revealed  masked  mounted  container_only  ->  visibility
+        ------------------  --------  ------  -------  --------------  |   ----------
+              T               *         *       *            *         |   "orphaned"
+              F               T         *       *            *         |   "revealed"
+              F               F         T       T            *         |   "masked"
+              F               F         F       T            *         |   "visible"
+              *               F         F       F            T         |   "container_only"
+              F               F         *       F            F         |   "hidden"
 
     Note: masked requires mounted=T to produce "masked" visibility.
     When masked=T but mounted=F (stale config), falls through to "hidden".
+    container_only is lowest priority — overridden by any host config flag.
 
     Args:
         mounted: Node is under a bind mount
@@ -47,9 +50,10 @@ def compute_visibility(
         revealed: Node is a punch-through within a masked area
         pushed: Node has been pushed via docker cp
         container_orphaned: Node exists in mask volume but has no parent mount
+        container_only: Node exists in container but not on host (scan diff)
 
     Returns:
-        One of: "orphaned", "revealed", "masked", "visible", "hidden"
+        One of: "orphaned", "revealed", "masked", "visible", "container_only", "hidden"
     """
     if container_orphaned:
         return "orphaned"
@@ -59,6 +63,8 @@ def compute_visibility(
         return "masked"
     if mounted:
         return "visible"
+    if container_only and not masked:
+        return "container_only"
     return "hidden"
 
 
@@ -75,7 +81,8 @@ class NodeState:
         revealed: Node is a punch-through within a masked area
         pushed: Node has been pushed via docker cp
         container_orphaned: Pushed file stranded in mask volume, mount removed (TTFF matrix)
-        visibility: Aggregate state — "visible"|"masked"|"mirrored"|"revealed"|"hidden"|"orphaned"
+        container_only: Exists in container but not on host (scan diff discovered)
+        visibility: Aggregate state — "visible"|"masked"|"mirrored"|"revealed"|"hidden"|"orphaned"|"container_only"
         has_pushed_descendant: Any descendant has pushed=True (folders only)
         has_direct_visible_child: Immediate child has revealed=True or pushed=True (folders only)
     """
@@ -85,6 +92,7 @@ class NodeState:
     revealed: bool = False
     pushed: bool = False
     container_orphaned: bool = False
+    container_only: bool = False
     visibility: str = "hidden"
     has_pushed_descendant: bool = False
     has_direct_visible_child: bool = False

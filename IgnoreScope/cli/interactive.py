@@ -10,7 +10,11 @@ from typing import Set
 
 from ..core.config import ScopeDockerConfig, SiblingMount, list_containers
 from ..docker.names import build_docker_name
-from .commands import cmd_create, cmd_push, cmd_pull, cmd_remove
+from .commands import (
+    cmd_create, cmd_push, cmd_pull, cmd_remove,
+    cmd_install_git, cmd_install_p4_mcp,
+    cmd_list, cmd_status, cmd_cp,
+)
 
 
 def _parse_container_arg(args: list[str]) -> str:
@@ -339,6 +343,152 @@ def cmd_remove_wrapper(host_project_root: Path, args: list[str]) -> None:
         sys.exit(1)
 
 
+def cmd_install_git_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for install-git command."""
+    scope_name = _parse_container_arg(args)
+
+    # Parse optional flags
+    distro = "auto"
+    configure = False
+    name = ""
+    email = ""
+    project_dir = ""
+    scope_dir = ""
+    for i, arg in enumerate(args):
+        if arg == '--distro' and i + 1 < len(args):
+            distro = args[i + 1]
+        elif arg.startswith('--distro='):
+            distro = arg.split('=', 1)[1]
+        elif arg == '--configure':
+            configure = True
+        elif arg == '--name' and i + 1 < len(args):
+            name = args[i + 1]
+        elif arg.startswith('--name='):
+            name = arg.split('=', 1)[1]
+        elif arg == '--email' and i + 1 < len(args):
+            email = args[i + 1]
+        elif arg.startswith('--email='):
+            email = arg.split('=', 1)[1]
+        elif arg == '--project-dir' and i + 1 < len(args):
+            project_dir = args[i + 1]
+        elif arg.startswith('--project-dir='):
+            project_dir = arg.split('=', 1)[1]
+        elif arg == '--scope-dir' and i + 1 < len(args):
+            scope_dir = args[i + 1]
+        elif arg.startswith('--scope-dir='):
+            scope_dir = arg.split('=', 1)[1]
+
+    success, msg = cmd_install_git(
+        host_project_root, scope_name, distro, configure, name, email,
+        project_dir, scope_dir,
+    )
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def cmd_install_p4_mcp_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for install-p4-mcp command."""
+    scope_name = _parse_container_arg(args)
+
+    # Parse optional flags
+    devenv_mount = "/devenv"
+    project_dir = ""
+    scope_dir = ""
+    p4port = ""
+    p4user = ""
+    p4client = ""
+    for i, arg in enumerate(args):
+        if arg == '--devenv-mount' and i + 1 < len(args):
+            devenv_mount = args[i + 1]
+        elif arg.startswith('--devenv-mount='):
+            devenv_mount = arg.split('=', 1)[1]
+        elif arg == '--project-dir' and i + 1 < len(args):
+            project_dir = args[i + 1]
+        elif arg.startswith('--project-dir='):
+            project_dir = arg.split('=', 1)[1]
+        elif arg == '--scope-dir' and i + 1 < len(args):
+            scope_dir = args[i + 1]
+        elif arg.startswith('--scope-dir='):
+            scope_dir = arg.split('=', 1)[1]
+        elif arg == '--p4port' and i + 1 < len(args):
+            p4port = args[i + 1]
+        elif arg.startswith('--p4port='):
+            p4port = arg.split('=', 1)[1]
+        elif arg == '--p4user' and i + 1 < len(args):
+            p4user = args[i + 1]
+        elif arg.startswith('--p4user='):
+            p4user = arg.split('=', 1)[1]
+        elif arg == '--p4client' and i + 1 < len(args):
+            p4client = args[i + 1]
+        elif arg.startswith('--p4client='):
+            p4client = arg.split('=', 1)[1]
+
+    success, msg = cmd_install_p4_mcp(
+        host_project_root, scope_name, devenv_mount,
+        project_dir, scope_dir, p4port, p4user, p4client,
+    )
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def cmd_list_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for list command."""
+    success, msg = cmd_list(host_project_root)
+    print(msg)
+    sys.exit(0 if success else 1)
+
+
+def cmd_status_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for status command."""
+    scope_name = _parse_container_arg(args)
+    success, msg = cmd_status(host_project_root, scope_name)
+    print(msg)
+    sys.exit(0 if success else 1)
+
+
+def cmd_cp_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for cp command."""
+    scope_name = _parse_container_arg(args)
+
+    # Collect positional args (source and optional dest) — skip flags
+    positional = []
+    skip_next = False
+    for i, arg in enumerate(args[2:], start=2):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith('--'):
+            if '=' not in arg and i + 1 < len(args):
+                skip_next = True
+            continue
+        positional.append(arg)
+
+    if not positional:
+        print("[ERROR] Usage: python -m IgnoreScope cp [--container NAME] <source> [<dest>]")
+        sys.exit(1)
+
+    source = positional[0]
+    dest = positional[1] if len(positional) > 1 else ""
+
+    success, msg = cmd_cp(host_project_root, scope_name, source, dest)
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
 def print_usage() -> None:
     """Print usage information."""
     print("""
@@ -347,22 +497,47 @@ IgnoreScope: Docker container management with masked folders
 Usage:
     python -m IgnoreScope gui [--project PATH]
     python -m IgnoreScope create [--project PATH]
+    python -m IgnoreScope list [--project PATH]
+    python -m IgnoreScope status [--project PATH] [--container NAME]
     python -m IgnoreScope push [--project PATH] [--container NAME] [FILES...]
     python -m IgnoreScope pull [--project PATH] [--container NAME] [FILES...]
+    python -m IgnoreScope cp [--project PATH] [--container NAME] <source> [<dest>]
     python -m IgnoreScope remove [--project PATH] [--container NAME] [--yes]
+    python -m IgnoreScope install-git [--project PATH] [--container NAME] [--distro auto|debian|alpine]
+                                      [--project-dir DIR] [--scope-dir DIR]
+    python -m IgnoreScope install-p4-mcp [--project PATH] [--container NAME] [--devenv-mount PATH]
+                                         [--project-dir DIR] [--scope-dir DIR]
+                                         [--p4port HOST] [--p4user USER] [--p4client WS]
 
 Commands:
-    gui         Launch graphical configuration editor (PyQt6)
-    create      Interactive CLI setup: mounts, masks, reveals
-    push        Push tracked files to container
-    pull        Pull tracked files from container (./Pulled/ or overwrite)
-    remove      Remove container and volumes
+    gui             Launch graphical configuration editor (PyQt6)
+    create          Interactive CLI setup: mounts, masks, reveals
+    list            List all containers for a project with status
+    status          Show detailed status of a single container
+    push            Push tracked files to container (workflow — tracks files)
+    pull            Pull tracked files from container (./Pulled/ or overwrite)
+    cp              Copy file or directory to container (raw docker cp — no tracking)
+    remove          Remove container and volumes
+    install-git     Install Git into a running container
+    install-p4-mcp  Install P4 MCP Server from devenv mount
 
 Options:
     --project PATH     Project root directory (default: current directory)
     --container NAME   Container name (default: 'default')
     --yes             Skip confirmation prompts
     -y                Short form of --yes
+    --distro TYPE     Distro type for install-git (auto, debian, alpine)
+    --configure       Also configure git identity (requires --name, --email)
+    --name NAME       Git user.name (with --configure)
+    --email EMAIL     Git user.email (with --configure)
+    --devenv-mount PATH  Container devenv mount path for install-p4-mcp (default: /devenv)
+
+  Config Deploy Options (optional — deploys default config files after binary install):
+    --project-dir DIR   Container project root (e.g. /MyProject)
+    --scope-dir DIR     Container scope dir (e.g. /MyProject/.ignore_scope/dev)
+    --p4port HOST       Perforce server address (install-p4-mcp only)
+    --p4user USER       Perforce username (install-p4-mcp only)
+    --p4client WS       Perforce workspace name (install-p4-mcp only)
 
 Config Location:
     {project_root}/.ignore_scope/{scope_name}/scope_docker_desktop.json
@@ -371,7 +546,17 @@ Examples:
     python -m IgnoreScope gui
     python -m IgnoreScope gui --project E:\\MyProject
     python -m IgnoreScope create
+    python -m IgnoreScope list
+    python -m IgnoreScope list --project E:\\MyProject
+    python -m IgnoreScope status --container dev
     python -m IgnoreScope push --container dev config.ini
     python -m IgnoreScope pull --container prod
+    python -m IgnoreScope cp --container dev C:\\tools\\binary /usr/local/bin/binary
+    python -m IgnoreScope cp --container dev C:\\tools\\mydir /opt/mydir
     python -m IgnoreScope remove --container dev --yes
+    python -m IgnoreScope install-git --container dev
+    python -m IgnoreScope install-git --container dev --project-dir /MyProject --scope-dir /MyProject/.ignore_scope/dev
+    python -m IgnoreScope install-p4-mcp --container dev
+    python -m IgnoreScope install-p4-mcp --container dev --devenv-mount /custom
+    python -m IgnoreScope install-p4-mcp --container dev --project-dir /MyProject --scope-dir /MyProject/.ignore_scope/dev --p4port ssl:perforce:1666 --p4user myuser --p4client myworkspace
 """.strip())

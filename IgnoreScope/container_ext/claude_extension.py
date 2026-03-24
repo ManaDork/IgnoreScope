@@ -1,8 +1,7 @@
-"""Claude Code CLI deployer.
+"""Claude Code CLI extension installer.
 
-Provides deployment of Claude Code CLI into containers via:
-- Native installation (curl installer script)
-- NPM installation (@anthropic-ai/claude-code)
+Provides deployment of Claude Code CLI into containers via
+native installation (curl installer script).
 """
 
 from __future__ import annotations
@@ -10,33 +9,30 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from .deployer import LLMDeployer, DeployMethod, DeployResult
+from .install_extension import ExtensionInstaller, DeployMethod, DeployResult
+from ..core.constants import CONTAINER_CLAUDE_AUTH
 
 
-class ClaudeDeployer(LLMDeployer):
-    """Deployer for Claude Code CLI.
+class ClaudeInstaller(ExtensionInstaller):
+    """Installer for Claude Code CLI.
 
-    Supports two installation methods:
-    - NATIVE: curl -fsSL https://claude.ai/install.sh | bash
-    - NPM: npm install -g @anthropic-ai/claude-code
-
-    Native is preferred for build-time (baked into image).
-    NPM is useful for runtime deployment to existing containers.
+    Installs via native curl installer (curl -fsSL https://claude.ai/install.sh | bash).
+    Two deployment variants:
+    - MINIMAL: Single curl command, assumes deps present in image.
+    - FULL: Provisions deps (curl, ca-certificates) via apt-get, then curl install.
     """
 
-    # Installation URLs and packages
+    # Installation URL
     NATIVE_INSTALL_URL = "https://claude.ai/install.sh"
-    # Legacy fallback from pre-.exe era. Not used by current RUNTIME pipeline.
-    NPM_PACKAGE = "@anthropic-ai/claude-code"
 
     # Binary location after native install
     BINARY_PATH = "/root/.local/bin/claude"
 
-    # Auth volume mount point
-    AUTH_MOUNT = "/root/.claude"
+    # Auth volume mount point — single source of truth in core.constants
+    AUTH_MOUNT = CONTAINER_CLAUDE_AUTH
 
     def __init__(self, auto_launch: bool = True):
-        """Initialize Claude deployer.
+        """Initialize Claude installer.
 
         Args:
             auto_launch: If True, entrypoint auto-launches Claude.
@@ -54,7 +50,7 @@ class ClaudeDeployer(LLMDeployer):
 
     @property
     def supported_methods(self) -> list[DeployMethod]:
-        return [DeployMethod.BUILD_TIME, DeployMethod.RUNTIME]
+        return [DeployMethod.MINIMAL, DeployMethod.FULL]
 
     # =========================================================================
     # Build-time deployment (Dockerfile generation)
@@ -99,9 +95,8 @@ ENV CLAUDE_CODE_DISABLE_AUTO_UPDATE=1
 
         The entrypoint:
         1. Sets up environment
-        2. Optionally syncs hooks/settings
-        3. Auto-launches Claude if installed and enabled
-        4. Falls back to shell otherwise
+        2. Auto-launches Claude if installed and enabled
+        3. Falls back to shell otherwise
 
         Args:
             workspace_dir: Container workspace directory
@@ -162,19 +157,18 @@ fi
         """Get installation commands for runtime deployment.
 
         Args:
-            method: BUILD_TIME uses native curl, RUNTIME uses npm
+            method: MINIMAL assumes deps present, FULL provisions deps first.
 
         Returns:
             List of command arrays for docker exec
         """
-        if method == DeployMethod.BUILD_TIME:
-            # Native installation (Dockerfile context — prereqs in separate RUN layer)
+        if method == DeployMethod.MINIMAL:
+            # Assumes curl/ca-certificates already in image
             return [
                 ['bash', '-c', f'curl -fsSL {self.NATIVE_INSTALL_URL} | bash'],
             ]
         else:
-            # Runtime installation — must self-provision prereqs first
-            # Container image is python:3.11-slim with no curl/npm/nodejs
+            # Self-provision prereqs first (python:3.11-slim has no curl)
             return [
                 ['bash', '-c',
                  'apt-get update && apt-get install -y --no-install-recommends '
@@ -228,7 +222,7 @@ fi
     # =========================================================================
 
     def is_installed(self, container_name: str) -> bool:
-        """Quick check if Claude is installed via which lookup.
+        """Quick check if Claude is installed via test -x.
 
         Args:
             container_name: Name of container
@@ -255,9 +249,11 @@ fi
         return f"{volume_name}:{self.AUTH_MOUNT}"
 
 
-# Convenience functions for common operations
-def deploy_claude_native(container_name: str, timeout: int = 300) -> DeployResult:
-    """Deploy Claude using native installer.
+# Convenience function for common deployment
+def deploy_claude(container_name: str, timeout: int = 300) -> DeployResult:
+    """Deploy Claude into running container.
+
+    Uses FULL method (provisions deps, then curl install).
 
     Args:
         container_name: Target container name
@@ -266,28 +262,10 @@ def deploy_claude_native(container_name: str, timeout: int = 300) -> DeployResul
     Returns:
         DeployResult with status
     """
-    deployer = ClaudeDeployer()
+    deployer = ClaudeInstaller()
     return deployer.deploy_runtime(
         container_name,
-        method=DeployMethod.BUILD_TIME,  # Uses curl installer
-        timeout=timeout,
-    )
-
-
-def deploy_claude_npm(container_name: str, timeout: int = 300) -> DeployResult:
-    """Deploy Claude using NPM.
-
-    Args:
-        container_name: Target container name
-        timeout: Installation timeout in seconds
-
-    Returns:
-        DeployResult with status
-    """
-    deployer = ClaudeDeployer()
-    return deployer.deploy_runtime(
-        container_name,
-        method=DeployMethod.RUNTIME,  # Uses npm install
+        method=DeployMethod.FULL,
         timeout=timeout,
     )
 
@@ -301,5 +279,5 @@ def verify_claude(container_name: str) -> DeployResult:
     Returns:
         DeployResult with version if installed
     """
-    deployer = ClaudeDeployer()
+    deployer = ClaudeInstaller()
     return deployer.verify(container_name)

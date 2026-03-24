@@ -53,13 +53,13 @@ class TestVolumeEntryOrdering:
         )
 
         assert len(entries) == 3
-        # Layer 1: bind mount (has host path with ':' and ':ro')
-        assert ":ro" in entries[0], f"Layer 1 should be bind mount: {entries[0]}"
+        # Layer 1: bind mount (has host path with ':')
+        assert ":ro" not in entries[0], f"Layer 1 should be writable bind mount: {entries[0]}"
         # Layer 2: mask volume (named volume, no ':ro')
         assert "mask_" in entries[1], f"Layer 2 should be mask volume: {entries[1]}"
         assert ":ro" not in entries[1]
-        # Layer 3: reveal (bind mount with ':ro')
-        assert ":ro" in entries[2], f"Layer 3 should be reveal mount: {entries[2]}"
+        # Layer 3: reveal (bind mount)
+        assert ":ro" not in entries[2], f"Layer 3 should be writable reveal mount: {entries[2]}"
         assert "public" in entries[2]
 
     def test_multiple_mounts_sorted(self, tmp_path: Path):
@@ -110,7 +110,7 @@ class TestVolumeEntryFormat:
     """Verify exact format of volume entry strings."""
 
     def test_bind_mount_format(self, tmp_path: Path):
-        """Bind mount: {host_posix}:{container_path}:ro"""
+        """Bind mount: {host_posix}:{container_path}"""
         src = tmp_path / "src"
 
         entries, *_ = _compute_volume_entries(
@@ -122,8 +122,8 @@ class TestVolumeEntryFormat:
         )
 
         entry = entries[0]
-        # host_path:container_path:ro  (but host on Windows has drive letter colon)
-        assert entry.endswith(":ro")
+        # host_path:container_path  (but host on Windows has drive letter colon)
+        assert not entry.endswith(":ro")
         assert "/workspace/src" in entry
 
     def test_mask_volume_format(self, tmp_path: Path):
@@ -146,7 +146,7 @@ class TestVolumeEntryFormat:
         assert mask_names == [mask_entry.split(":")[0]]
 
     def test_reveal_format(self, tmp_path: Path):
-        """Reveal: {host_posix}:{container_path}:ro"""
+        """Reveal: {host_posix}:{container_path}"""
         src = tmp_path / "src"
         api = src / "api"
         public = api / "public"
@@ -160,7 +160,7 @@ class TestVolumeEntryFormat:
         )
 
         reveal_entry = entries[2]
-        assert reveal_entry.endswith(":ro")
+        assert not reveal_entry.endswith(":ro")
         assert "/workspace/src/api/public" in reveal_entry
 
     def test_host_container_root_includes_project(self, tmp_path: Path):

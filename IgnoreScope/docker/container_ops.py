@@ -582,8 +582,8 @@ def push_file_to_container(
     if not host_file.exists():
         return False, f"File not found: {host_file}"
 
-    if not host_file.is_file():
-        return False, f"Not a file: {host_file}"
+    if not host_file.is_file() and not host_file.is_dir():
+        return False, f"Not a file or directory: {host_file}"
 
     try:
         result = subprocess.run(
@@ -771,17 +771,17 @@ def get_terminal_command(container_name: str) -> str:
 
 def get_llm_command(
     container_name: str,
-    container_root: str,
+    work_dir: str,
     binary_name: str = "claude",
 ) -> str:
     """Build docker exec command string for launching an LLM CLI in container.
 
     Args:
         container_name: Name of target container
-        container_root: Working directory inside the container
+        work_dir: Working directory inside the container
         binary_name: LLM binary to invoke (default: "claude")
 
     Returns:
         Full docker command string
     """
-    return f"docker exec -it -w {container_root} {container_name} {binary_name}"
+    return f"docker exec -it -w {work_dir} {container_name} {binary_name}"

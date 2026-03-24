@@ -648,27 +648,27 @@ class TestGetLlmCommand:
 # =============================================================================
 
 class TestClaudeDeployerInstallCommands:
-    """Tests for ClaudeDeployer.get_install_commands."""
+    """Tests for ClaudeInstaller.get_install_commands."""
 
-    def test_build_time_single_curl_command(self):
-        """BUILD_TIME returns single curl installer command."""
-        from IgnoreScope.llm.claude import ClaudeDeployer
-        from IgnoreScope.llm.deployer import DeployMethod
+    def test_minimal_single_curl_command(self):
+        """MINIMAL returns single curl installer command."""
+        from IgnoreScope.container_ext.claude_extension import ClaudeInstaller
+        from IgnoreScope.container_ext.install_extension import DeployMethod
 
-        deployer = ClaudeDeployer()
-        commands = deployer.get_install_commands(DeployMethod.BUILD_TIME)
+        deployer = ClaudeInstaller()
+        commands = deployer.get_install_commands(DeployMethod.MINIMAL)
 
         assert len(commands) == 1
         assert 'curl' in commands[0][2]
         assert deployer.NATIVE_INSTALL_URL in commands[0][2]
 
-    def test_runtime_includes_prereqs_and_curl(self):
-        """RUNTIME returns apt-get prereqs step + curl installer (2 commands)."""
-        from IgnoreScope.llm.claude import ClaudeDeployer
-        from IgnoreScope.llm.deployer import DeployMethod
+    def test_full_includes_prereqs_and_curl(self):
+        """FULL returns apt-get prereqs step + curl installer (2 commands)."""
+        from IgnoreScope.container_ext.claude_extension import ClaudeInstaller
+        from IgnoreScope.container_ext.install_extension import DeployMethod
 
-        deployer = ClaudeDeployer()
-        commands = deployer.get_install_commands(DeployMethod.RUNTIME)
+        deployer = ClaudeInstaller()
+        commands = deployer.get_install_commands(DeployMethod.FULL)
 
         assert len(commands) == 2
 
@@ -678,27 +678,27 @@ class TestClaudeDeployerInstallCommands:
         assert 'curl' in prereq_cmd
         assert 'ca-certificates' in prereq_cmd
 
-        # Second command: curl installer (same as BUILD_TIME)
+        # Second command: curl installer (same as MINIMAL)
         install_cmd = commands[1][2]
         assert 'curl' in install_cmd
         assert deployer.NATIVE_INSTALL_URL in install_cmd
 
-    def test_runtime_does_not_use_npm(self):
-        """RUNTIME commands must not depend on npm/nodejs."""
-        from IgnoreScope.llm.claude import ClaudeDeployer
-        from IgnoreScope.llm.deployer import DeployMethod
+    def test_full_does_not_use_npm(self):
+        """FULL commands must not depend on npm/nodejs."""
+        from IgnoreScope.container_ext.claude_extension import ClaudeInstaller
+        from IgnoreScope.container_ext.install_extension import DeployMethod
 
-        deployer = ClaudeDeployer()
-        commands = deployer.get_install_commands(DeployMethod.RUNTIME)
+        deployer = ClaudeInstaller()
+        commands = deployer.get_install_commands(DeployMethod.FULL)
 
         all_text = ' '.join(str(arg) for cmd in commands for arg in cmd)
         assert 'npm' not in all_text
 
     def test_version_command_uses_absolute_path(self):
         """get_version_command() must use BINARY_PATH, not bare binary name."""
-        from IgnoreScope.llm.claude import ClaudeDeployer
+        from IgnoreScope.container_ext.claude_extension import ClaudeInstaller
 
-        deployer = ClaudeDeployer()
+        deployer = ClaudeInstaller()
         cmd = deployer.get_version_command()
 
         assert cmd[0] == deployer.BINARY_PATH
@@ -707,9 +707,9 @@ class TestClaudeDeployerInstallCommands:
 
     def test_is_installed_uses_absolute_path(self):
         """is_installed() must use 'test -x BINARY_PATH', not 'which'."""
-        from IgnoreScope.llm.claude import ClaudeDeployer
+        from IgnoreScope.container_ext.claude_extension import ClaudeInstaller
 
-        deployer = ClaudeDeployer()
+        deployer = ClaudeInstaller()
 
         mock_result = MagicMock()
         mock_result.returncode = 0

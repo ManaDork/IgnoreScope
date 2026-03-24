@@ -70,7 +70,6 @@ class MenuManager:
 
         self.shut_down_action = QAction("Shut Down", self._app)
         self.shut_down_action.setShortcut("Ctrl+Q")
-        self.shut_down_action.triggered.connect(self._app._quit_app)
         file_menu.addAction(self.shut_down_action)
 
         # ── Edit ──────────────────────────────────────────────
@@ -140,11 +139,17 @@ class MenuManager:
         self.remove_container_action.setEnabled(False)
         docker_menu.addAction(self.remove_container_action)
 
-        docker_menu.addSeparator()
+        # ── Container Extensions ───────────────────────────────
+
+        extensions_menu = menu_bar.addMenu("Container Extensions")
 
         self.deploy_llm_action = QAction("Install Claude CLI", self._app)
         self.deploy_llm_action.setEnabled(False)
-        docker_menu.addAction(self.deploy_llm_action)
+        extensions_menu.addAction(self.deploy_llm_action)
+
+        self.deploy_git_action = QAction("Install Git", self._app)
+        self.deploy_git_action.setEnabled(False)
+        extensions_menu.addAction(self.deploy_git_action)
 
         # ── View ──────────────────────────────────────────────
 
@@ -362,8 +367,9 @@ class MenuManager:
         self.recreate_container_action.setEnabled(has_docker_container)
         self.remove_container_action.setEnabled(has_docker_container)
 
-        # Deploy/Terminal/LLM: need a Docker container
+        # Deploy/Terminal/LLM/Extensions: need a Docker container
         self.deploy_llm_action.setEnabled(has_docker_container)
+        self.deploy_git_action.setEnabled(has_docker_container)
         self.launch_terminal_action.setEnabled(has_docker_container)
         self.launch_llm_action.setEnabled(has_docker_container)
         self.copy_llm_command_action.setEnabled(has_docker_container)

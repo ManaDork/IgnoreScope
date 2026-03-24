@@ -8,7 +8,7 @@ Data layer (L2): Creates MountDataTree, injects LocalHostView and ScopeView
 into dock placeholders.
 
 Signal wiring (L6): Instantiates ConfigManager, FileOperationsHandler,
-ContainerOperations. Connects all menu actions and view signals.
+ContainerOperations, SystemTrayManager. Connects all menu actions and view signals.
 """
 
 from __future__ import annotations
@@ -27,8 +27,6 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QSplitterHandle,
     QStatusBar,
-    QSystemTrayIcon,
-    QMenu,
 )
 
 from .style_engine import StyleGui
@@ -37,6 +35,7 @@ from .menus import MenuManager
 from .mount_data_tree import MountDataTree
 from .local_host_view import LocalHostView
 from .scope_view import ScopeView
+from .system_tray import SystemTrayManager
 
 PLACEHOLDER_SCOPE = "temp"
 
@@ -179,8 +178,8 @@ class IgnoreScopeApp(QMainWindow):
         self.file_ops_handler = FileOperationsHandler(self)
         self.container_ops = ContainerOperations(self)
 
+        self._system_tray = SystemTrayManager(self)
         self._connect_signals()
-        self._setup_tray()
         self._restore_layout()
 
         # Auto-open project if passed via CLI
@@ -301,6 +300,7 @@ class IgnoreScopeApp(QMainWindow):
         # File menu
         mm.open_project_action.triggered.connect(cm.open_project_dialog)
         mm.save_config_action.triggered.connect(cm.save_config)
+        mm.shut_down_action.triggered.connect(self._system_tray.quit_app)
 
         # Edit menu — Undo/Redo deferred (actions stay disabled)
         # Click-to-Toggle: single action controls both tree delegates
@@ -323,6 +323,7 @@ class IgnoreScopeApp(QMainWindow):
         mm.recreate_container_action.triggered.connect(co.recreate_container)
         mm.remove_container_action.triggered.connect(co.remove_container)
         mm.deploy_llm_action.triggered.connect(co.deploy_llm_to_container)
+        mm.deploy_git_action.triggered.connect(co.deploy_git_to_container)
 
         # Tools menu
         mm.add_sibling_action.triggered.connect(cm.add_sibling_dialog)
@@ -464,64 +465,12 @@ class IgnoreScopeApp(QMainWindow):
             self._settings.remove("windowState")
             self._settings.remove("layoutVersion")
 
-    # ── System Tray ────────────────────────────────────────────
-
-    def _setup_tray(self):
-        """Create system tray icon with context menu."""
-        from PyQt6.QtWidgets import QApplication
-
-        self._tray_icon = QSystemTrayIcon(
-            QApplication.instance().windowIcon(), self
-        )
-
-        tray_menu = QMenu(self)
-        self._tray_toggle_action = QAction("Hide", self)
-        self._tray_toggle_action.triggered.connect(self._toggle_visibility)
-        tray_menu.addAction(self._tray_toggle_action)
-        tray_menu.addSeparator()
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self._quit_app)
-        tray_menu.addAction(exit_action)
-
-        # Update toggle text when menu is about to show
-        tray_menu.aboutToShow.connect(self._update_tray_toggle_text)
-
-        self._tray_icon.setContextMenu(tray_menu)
-        self._tray_icon.activated.connect(self._on_tray_activated)
-        self._tray_icon.show()
-
-    def _update_tray_toggle_text(self):
-        """Set Show/Hide text based on current window visibility."""
-        self._tray_toggle_action.setText(
-            "Hide" if self.isVisible() else "Show"
-        )
-
-    def _toggle_visibility(self):
-        """Toggle window visibility from tray."""
-        if self.isVisible():
-            self.hide()
-        else:
-            self.show()
-            self.activateWindow()
-
-    def _on_tray_activated(self, reason):
-        """Handle tray icon double-click to toggle visibility."""
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            self._toggle_visibility()
-
-    def _quit_app(self):
-        """Full exit: cleanup, save, quit."""
-        self._save_layout()
-        if self.host_project_root:
-            self.config_manager._cleanup_placeholder()
-        self._tray_icon.hide()
-        from PyQt6.QtWidgets import QApplication
-        QApplication.instance().quit()
+    # ── Window Close ─────────────────────────────────────────
 
     def closeEvent(self, event: QCloseEvent):
         """Minimize to tray on close; fall back to full exit if no tray."""
         self._save_layout()
-        if self._tray_icon.isVisible():
+        if self._system_tray.is_tray_visible():
             self.hide()
             event.ignore()
         else:

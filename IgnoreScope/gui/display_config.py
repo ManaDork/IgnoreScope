@@ -88,6 +88,11 @@ _FOLDER_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
         GradientClass("background", "background", "background", "pushed"),
         "default",
     ),
+    # F9
+    "FOLDER_CONTAINER_ONLY": (
+        GradientClass("container_only", "container_only", "background", "background"),
+        "italic",
+    ),
 }
 
 # 7 File states (GUI_STATE_STYLES Section 3.1)
@@ -127,6 +132,11 @@ _FILE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
         GradientClass("warning", "warning", "hidden", "hidden"),
         "italic",
     ),
+    # FI8
+    "FILE_CONTAINER_ONLY": (
+        GradientClass("container_only", "container_only", "background", "background"),
+        "italic",
+    ),
 }
 
 _TREE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
@@ -150,6 +160,8 @@ FOLDER_STATE_TABLE: dict[tuple, str] = {
     ("mirrored", None,  True):  "FOLDER_MASKED_REVEALED",
     ("mirrored", None,  False): "FOLDER_MASKED_MIRRORED",
     ("revealed", None,  None):  "FOLDER_REVEALED",
+    ("container_only", False, None): "FOLDER_CONTAINER_ONLY",
+    ("container_only", True,  None): "FOLDER_CONTAINER_ONLY",
 }
 
 # File: (visibility, pushed, host_orphaned) -> state
@@ -162,6 +174,7 @@ FILE_STATE_TABLE: dict[tuple, str] = {
     ("masked",   True,  False): "FILE_PUSHED",
     ("masked",   True,  True):  "FILE_HOST_ORPHAN",
     ("orphaned", None,  None):  "FILE_CONTAINER_ORPHAN",
+    ("container_only", False, False): "FILE_CONTAINER_ONLY",
 }
 
 

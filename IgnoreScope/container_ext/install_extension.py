@@ -1,6 +1,6 @@
-"""Base LLM deployer interface.
+"""Base extension installer interface.
 
-Defines the protocol for LLM deployment into containers.
+Defines the protocol for extension deployment into containers.
 Implementations provide specific installation and verification logic.
 """
 
@@ -13,24 +13,24 @@ from typing import Tuple
 
 
 class DeployMethod(Enum):
-    """LLM deployment method."""
+    """Extension deployment method.
 
-    # Install during Docker image build (baked into image)
-    # SHELVED — not used in production. Kept for potential future use.
-    BUILD_TIME = auto()
+    MINIMAL: Single command, assumes deps (curl, ca-certificates) present.
+    FULL: Provisions deps first, then installs.
+    """
 
-    # Install at container runtime via docker exec
-    RUNTIME = auto()
+    MINIMAL = auto()
+    FULL = auto()
 
 
 @dataclass
 class DeployResult:
-    """Result of an LLM deployment operation.
+    """Result of an extension deployment operation.
 
     Attributes:
         success: Whether deployment succeeded
         message: Human-readable status message
-        version: LLM version string if available
+        version: Extension version string if available
         method: Deployment method used
         details: Additional deployment details
     """
@@ -42,8 +42,8 @@ class DeployResult:
     details: dict = field(default_factory=dict)
 
 
-class LLMDeployer(ABC):
-    """Abstract base class for LLM deployment.
+class ExtensionInstaller(ABC):
+    """Abstract base class for container extension deployment.
 
     Implementations provide:
     - Dockerfile snippets for build-time installation
@@ -55,7 +55,7 @@ class LLMDeployer(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Human-readable name of the LLM (e.g., 'Claude Code')."""
+        """Human-readable name of the extension (e.g., 'Claude Code')."""
         ...
 
     @property
@@ -74,34 +74,36 @@ class LLMDeployer(ABC):
     # Build-time deployment (Dockerfile generation)
     # =========================================================================
 
-    @abstractmethod
     def get_dockerfile_snippets(self) -> dict[str, str]:
         """Get Dockerfile snippets for build-time installation.
 
         Returns:
             Dict with keys:
             - 'packages': System packages to install (apt-get)
-            - 'install': RUN commands for LLM installation
+            - 'install': RUN commands for installation
             - 'env': ENV declarations
-        """
-        ...
 
-    @abstractmethod
+        Default: empty dict. Override in subclasses that need build-time support.
+        """
+        return {}
+
     def get_entrypoint_script(self, workspace_dir: str = "/workspace") -> str:
         """Generate entrypoint script content.
 
         The entrypoint handles:
         - Environment setup
-        - Optional auto-launch of LLM
-        - Fallback to shell if LLM not installed
+        - Optional auto-launch
+        - Fallback to shell if not installed
 
         Args:
             workspace_dir: Container workspace directory
 
         Returns:
             Shell script content for entrypoint.sh
+
+        Default: empty string. Override in subclasses that need entrypoint support.
         """
-        ...
+        return ""
 
     # =========================================================================
     # Runtime deployment (docker exec)
@@ -126,7 +128,7 @@ class LLMDeployer(ABC):
 
     @abstractmethod
     def get_version_command(self) -> list[str]:
-        """Get command to check LLM version.
+        """Get command to check extension version.
 
         Returns:
             Command array to execute via docker exec.
@@ -147,7 +149,7 @@ class LLMDeployer(ABC):
         ...
 
     def get_verify_command(self) -> list[str]:
-        """Get command to verify LLM is functional.
+        """Get command to verify extension is functional.
 
         Default implementation uses version command.
 
@@ -163,10 +165,10 @@ class LLMDeployer(ABC):
     def deploy_runtime(
         self,
         container_name: str,
-        method: DeployMethod = DeployMethod.RUNTIME,
+        method: DeployMethod = DeployMethod.FULL,
         timeout: int = 300,
     ) -> DeployResult:
-        """Deploy LLM to running container.
+        """Deploy extension to running container.
 
         Args:
             container_name: Name of target container
@@ -224,7 +226,7 @@ class LLMDeployer(ABC):
         )
 
     def verify(self, container_name: str, timeout: int = 30) -> DeployResult:
-        """Verify LLM is installed and functional.
+        """Verify extension is installed and functional.
 
         Args:
             container_name: Name of target container

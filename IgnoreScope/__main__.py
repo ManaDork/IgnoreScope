@@ -3,8 +3,11 @@
 Usage:
     python -m IgnoreScope gui [--project PATH]
     python -m IgnoreScope create [--project PATH]
+    python -m IgnoreScope list [--project PATH]
+    python -m IgnoreScope status [--container NAME]
     python -m IgnoreScope push [FILES...]
     python -m IgnoreScope pull [FILES...]
+    python -m IgnoreScope cp <source> [<dest>]
     python -m IgnoreScope remove [--yes]
 """
 
@@ -19,6 +22,11 @@ from .cli.interactive import (
     cmd_push_wrapper,
     cmd_pull_wrapper,
     cmd_remove_wrapper,
+    cmd_install_git_wrapper,
+    cmd_install_p4_mcp_wrapper,
+    cmd_list_wrapper,
+    cmd_status_wrapper,
+    cmd_cp_wrapper,
     print_usage,
 )
 
@@ -61,12 +69,22 @@ def main() -> None:
 
         if command == 'create':
             cmd_create_wrapper(host_project_root)
+        elif command == 'list':
+            cmd_list_wrapper(host_project_root, sys.argv)
+        elif command == 'status':
+            cmd_status_wrapper(host_project_root, sys.argv)
         elif command == 'push':
             cmd_push_wrapper(host_project_root, sys.argv)
         elif command == 'pull':
             cmd_pull_wrapper(host_project_root, sys.argv)
+        elif command == 'cp':
+            cmd_cp_wrapper(host_project_root, sys.argv)
         elif command == 'remove':
             cmd_remove_wrapper(host_project_root, sys.argv)
+        elif command == 'install-git':
+            cmd_install_git_wrapper(host_project_root, sys.argv)
+        elif command == 'install-p4-mcp':
+            cmd_install_p4_mcp_wrapper(host_project_root, sys.argv)
         else:
             print(f"Unknown command: {command}\n")
             print_usage()

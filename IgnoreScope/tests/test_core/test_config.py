@@ -414,7 +414,7 @@ class TestHierarchy:
 
         When src/ is in BOTH mounts and masked, the volume entries should
         produce two entries targeting the SAME container path:
-          1. Bind mount:  host/src → /workspace/src:ro   (Layer 1)
+          1. Bind mount:  host/src → /workspace/src       (Layer 1)
           2. Named volume: mask_src → /workspace/src      (Layer 2)
 
         Docker processes volumes in order, so the named volume overlays
@@ -453,7 +453,7 @@ class TestHierarchy:
         # Both mount and mask target the SAME container path
         assert ":/workspace/src" in bind_mount, f"Bind mount missing target: {bind_mount}"
         assert ":/workspace/src" in mask_volume, f"Mask volume missing target: {mask_volume}"
-        assert ":ro" in bind_mount, "Bind mount should be read-only"
+        assert ":ro" not in bind_mount, "Bind mount should be writable"
         assert ":ro" not in mask_volume, "Mask volume should NOT be read-only"
 
         # Mask uses a named volume (no host path with slashes before the colon)
@@ -462,7 +462,7 @@ class TestHierarchy:
 
         # Reveal punches through to the specific subdir
         assert ":/workspace/src/api/public" in reveal_mount
-        assert ":ro" in reveal_mount
+        assert ":ro" not in reveal_mount
 
         # Visibility: src is in both visible (mounted) and masked
         assert "/workspace/src" in hierarchy.visible_paths

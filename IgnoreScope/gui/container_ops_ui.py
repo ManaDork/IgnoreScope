@@ -56,7 +56,7 @@ class ContainerWorker(QThread):
 
 
 class DeployWorker(QThread):
-    """Worker thread for LLM deployment into a running container."""
+    """Worker thread for Claude CLI deployment into a running container."""
 
     finished = pyqtSignal(bool, str, str)  # success, message, version
 
@@ -65,16 +65,36 @@ class DeployWorker(QThread):
         self._container_name = container_name
 
     def run(self):
-        """Run LLM deployment in background."""
+        """Run Claude CLI deployment in background."""
         try:
-            from ..llm import ClaudeDeployer, DeployMethod
+            from ..container_ext import ClaudeInstaller, DeployMethod
 
-            deployer = ClaudeDeployer(auto_launch=False)
+            deployer = ClaudeInstaller(auto_launch=False)
             result = deployer.deploy_runtime(
                 self._container_name,
-                method=DeployMethod.RUNTIME,
+                method=DeployMethod.FULL,
                 timeout=300,
             )
+            self.finished.emit(result.success, result.message, result.version)
+        except Exception as e:
+            self.finished.emit(False, f"Installation error: {e}", "")
+
+
+class GitDeployWorker(QThread):
+    """Worker thread for Git deployment into a running container."""
+
+    finished = pyqtSignal(bool, str, str)  # success, message, version
+
+    def __init__(self, container_name: str, parent=None):
+        super().__init__(parent)
+        self._container_name = container_name
+
+    def run(self):
+        """Run Git deployment in background."""
+        try:
+            from ..container_ext import GitInstaller
+            deployer = GitInstaller()
+            result = deployer.deploy(self._container_name, distro="auto")
             self.finished.emit(result.success, result.message, result.version)
         except Exception as e:
             self.finished.emit(False, f"Installation error: {e}", "")
@@ -95,6 +115,7 @@ class ContainerOperations:
         self._app = app
         self._container_worker: Optional[ContainerWorker] = None
         self._deploy_worker: Optional[DeployWorker] = None
+        self._git_deploy_worker: Optional[GitDeployWorker] = None
 
     def _create_progress_dialog(self, title: str, message: str) -> QProgressDialog:
         """Create and show an indeterminate progress dialog.
@@ -551,9 +572,9 @@ class ContainerOperations:
             return
 
         # Pre-flight: verify LLM binary exists in container
-        from ..llm import ClaudeDeployer
+        from ..container_ext import ClaudeInstaller
 
-        deployer = ClaudeDeployer()
+        deployer = ClaudeInstaller()
         if not deployer.is_installed(container_name):
             reply = QMessageBox.question(
                 self._app,
@@ -587,8 +608,8 @@ class ContainerOperations:
         project_name = self._app.host_project_root.name
         work_dir = f"{container_root}/{project_name}"
 
-        from ..llm import ClaudeDeployer
-        deployer = ClaudeDeployer(auto_launch=False)
+        from ..container_ext import ClaudeInstaller
+        deployer = ClaudeInstaller(auto_launch=False)
 
         docker_cmd = get_llm_command(
             container_name, work_dir, deployer.BINARY_PATH
@@ -639,6 +660,61 @@ class ContainerOperations:
             )
         )
         self._deploy_worker.start()
+
+    def deploy_git_to_container(self) -> None:
+        """Deploy Git into the running container."""
+        if not self._app.host_project_root:
+            QMessageBox.warning(
+                self._app, "No Project", "Please open a project first."
+            )
+            return
+
+        from ..docker.names import build_docker_name
+        container_name = build_docker_name(
+            self._app.host_project_root, self._app._current_scope
+        )
+
+        success, msg = ensure_container_running(container_name)
+        if not success:
+            QMessageBox.warning(self._app, "Container Error", msg)
+            return
+
+        # Pre-flight: check if already installed
+        from ..container_ext import GitInstaller
+        installer = GitInstaller()
+        if installer.is_installed(container_name):
+            reply = QMessageBox.question(
+                self._app,
+                "Git Already Installed",
+                f"Git is already installed in container '{container_name}'.\n\n"
+                "Would you like to reinstall?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        reply = QMessageBox.question(
+            self._app,
+            "Install Git",
+            f"Install Git into container '{container_name}'?\n\n"
+            "This will install via the container's package manager.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        progress = self._create_progress_dialog(
+            "Installing Git",
+            "Installing Git...\n\nThis may take a minute.",
+        )
+
+        self._git_deploy_worker = GitDeployWorker(container_name, self._app)
+        self._git_deploy_worker.finished.connect(
+            lambda ok, message, version: self._on_deploy_finished(
+                ok, message, version, progress
+            )
+        )
+        self._git_deploy_worker.start()
 
     def _on_deploy_finished(
         self, success: bool, message: str, version: str,

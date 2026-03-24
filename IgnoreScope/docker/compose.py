@@ -3,8 +3,8 @@
 Provides functions for generating docker-compose.yml with proper
 mount, masked, and revealed (punch-through) volume configuration.
 
-Also provides LLM-enabled Dockerfile generation for containers
-that include Claude Code or other LLMs.
+Also provides extension-enabled Dockerfile generation for containers
+that include Claude Code or other extensions.
 """
 
 from datetime import datetime
@@ -16,7 +16,7 @@ from ..core.config import DEFAULT_CONTAINER_ROOT
 from .names import sanitize_volume_name
 
 if TYPE_CHECKING:
-    from ..llm.deployer import LLMDeployer
+    from ..container_ext.install_extension import ExtensionInstaller
 
 
 def generate_dockerfile(
@@ -54,6 +54,8 @@ FROM python:3.11-slim
 LABEL maintainer="IgnoreScope"
 LABEL description="Container for selective file visibility via docker cp"
 
+ENV PATH="/root/.local/bin:$PATH"
+
 WORKDIR {workdir}
 
 # Keep container running indefinitely
@@ -62,7 +64,7 @@ CMD ["sleep", "infinity"]
 
 
 def generate_dockerfile_with_llm(
-    deployer: 'LLMDeployer',
+    deployer: 'ExtensionInstaller',
     project_name: str = "",
     container_root: str = DEFAULT_CONTAINER_ROOT,
     use_entrypoint: bool = True,
@@ -80,7 +82,7 @@ def generate_dockerfile_with_llm(
     - Optional entrypoint for auto-launch
 
     Args:
-        deployer: LLMDeployer instance for the target LLM
+        deployer: ExtensionInstaller instance for the target extension
         project_name: Optional project name (used in comments and workdir)
         container_root: Container root path (default: /workspace)
         use_entrypoint: If True, also generate entrypoint script
@@ -204,7 +206,7 @@ def generate_compose_with_masks(
         "    build: .",
         "    volumes:",
         "      # === Auth volume (named - persists across rebuilds) ===",
-        f"      - \"{volume_name}:/root/.claude\"",
+        f"      - \"{volume_name}:{CONTAINER_CLAUDE_AUTH}\"",
     ]
 
     # Extra mounts (e.g. .llm → .claude, .igs → .ignore_scope)
