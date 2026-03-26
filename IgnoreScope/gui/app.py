@@ -310,6 +310,15 @@ class IgnoreScopeApp(QMainWindow):
                 setattr(self._scope_view._delegate, 'click_toggle_enabled', checked),
             ),
         )
+        mm.show_hidden_action.triggered.connect(
+            lambda checked: setattr(self._mount_data_tree, 'show_hidden', checked)
+        )
+        # Tree structure changed → refresh both views + sync hidden checkbox
+        self._mount_data_tree.structureChanged.connect(self._local_host.refresh)
+        self._mount_data_tree.structureChanged.connect(self._scope_view.refresh)
+        self._mount_data_tree.structureChanged.connect(
+            lambda: mm.show_hidden_action.setChecked(self._mount_data_tree.show_hidden)
+        )
 
         # Scopes menu
         mm.scope_direct_action.triggered.connect(cm.new_scope)

@@ -133,6 +133,7 @@ class ScopeDockerConfig(LocalMountConfig):
     container_root: str = ""
     siblings: list[SiblingMount] = field(default_factory=list)
     extensions: list[ExtensionConfig] = field(default_factory=list)
+    show_hidden: bool = False
 
     def __post_init__(self):
         """Derive defaults for host_container_root and container_root."""
@@ -168,6 +169,7 @@ class ScopeDockerConfig(LocalMountConfig):
             'scope_name': self.scope_name,
             'dev_mode': self.dev_mode,
             'mirrored': self.mirrored,
+            'show_hidden': self.show_hidden,
             'local': base_dict,
         }
 
@@ -255,6 +257,7 @@ class ScopeDockerConfig(LocalMountConfig):
             container_root=container_root,
             siblings=siblings,
             extensions=extensions,
+            show_hidden=data.get('show_hidden', False),
         )
 
     def track_extension(

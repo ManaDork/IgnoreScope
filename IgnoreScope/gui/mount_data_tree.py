@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import ClassVar, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ class MountDataNode:
 
     Covers project files, sibling files, and virtual entries.
     """
+    # Class-level filter flag — set by MountDataTree before triggering loads
+    show_hidden: ClassVar[bool] = False
+
     path: Path
     parent: Optional[MountDataNode] = None
     children: list[MountDataNode] = field(default_factory=list)
@@ -95,7 +98,7 @@ class MountDataNode:
             # Filter BEFORE sort — is_file() can crash on Windows device names
             filtered: list[tuple[Path, bool]] = []
             for entry in entries:
-                if entry.name.startswith('.'):
+                if not MountDataNode.show_hidden and entry.name.startswith('.'):
                     continue
                 if _is_windows_reserved_name(entry.name):
                     continue
@@ -170,9 +173,33 @@ class MountDataTree(QObject):
         # Extension configs (not GUI widgets — carried forward through build_config)
         self._extensions: list = []
 
+        # Display filter
+        self._show_hidden: bool = False
+
         # Batch mode (defers stateChanged)
         self._batch_mode: bool = False
         self._batch_changed: bool = False
+
+    # ── Display Filters ──────────────────────────────────────────
+
+    @property
+    def show_hidden(self) -> bool:
+        return self._show_hidden
+
+    @show_hidden.setter
+    def show_hidden(self, value: bool) -> None:
+        if self._show_hidden != value:
+            self._show_hidden = value
+            MountDataNode.show_hidden = value
+            self._rebuild_tree()
+
+    def _rebuild_tree(self) -> None:
+        """Rebuild tree with current filter settings."""
+        if self._root_node:
+            self._root_node.children_loaded = False
+            self._root_node.children = []
+            self._root_node.load_children()  # Reload now — Qt won't re-fetch expanded nodes
+            self.structureChanged.emit()
 
     # ── Batch Mode ────────────────────────────────────────────────
 
@@ -573,6 +600,7 @@ class MountDataTree(QObject):
         self._mirrored = getattr(config, 'mirrored', True)
         self._container_root = getattr(config, 'container_root', '') or ''
         self._extensions = list(config.extensions) if getattr(config, 'extensions', None) else []
+        self.show_hidden = getattr(config, 'show_hidden', False)
 
         # Sibling subtrees — append to root_node, merge sets
         for sibling in getattr(config, 'siblings', []):
@@ -623,6 +651,7 @@ class MountDataTree(QObject):
             container_root=self._container_root,
             siblings=siblings,
             extensions=list(self._extensions),
+            show_hidden=self._show_hidden,
         )
 
     # ── Clear ─────────────────────────────────────────────────────
@@ -639,6 +668,9 @@ class MountDataTree(QObject):
         self._pushed_files.clear()
         self._container_files.clear()
         self._extensions.clear()
+        self._show_hidden = False
+        MountDataNode.show_hidden = False
         self._states.clear()
         self._sibling_nodes.clear()
         self._virtual_nodes.clear()
+        self.structureChanged.emit()  # Sync menu checkbox on project switch

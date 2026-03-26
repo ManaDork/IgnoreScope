@@ -93,6 +93,11 @@ class MenuManager:
         self.click_toggle_action.setChecked(False)
         edit_menu.addAction(self.click_toggle_action)
 
+        self.show_hidden_action = QAction("Display Hidden Items", self._app)
+        self.show_hidden_action.setCheckable(True)
+        self.show_hidden_action.setChecked(False)
+        edit_menu.addAction(self.show_hidden_action)
+
         # ── Scopes ────────────────────────────────────────────
 
         self.scopes_menu = menu_bar.addMenu("+ New Scope")
