@@ -167,6 +167,9 @@ class MountDataTree(QObject):
         self._sibling_nodes: list[MountDataNode] = []
         self._virtual_nodes: list[MountDataNode] = []
 
+        # Extension configs (not GUI widgets — carried forward through build_config)
+        self._extensions: list = []
+
         # Batch mode (defers stateChanged)
         self._batch_mode: bool = False
         self._batch_changed: bool = False
@@ -569,6 +572,7 @@ class MountDataTree(QObject):
         )
         self._mirrored = getattr(config, 'mirrored', True)
         self._container_root = getattr(config, 'container_root', '') or ''
+        self._extensions = list(config.extensions) if getattr(config, 'extensions', None) else []
 
         # Sibling subtrees — append to root_node, merge sets
         for sibling in getattr(config, 'siblings', []):
@@ -618,6 +622,7 @@ class MountDataTree(QObject):
             mirrored=self._mirrored,
             container_root=self._container_root,
             siblings=siblings,
+            extensions=list(self._extensions),
         )
 
     # ── Clear ─────────────────────────────────────────────────────
@@ -633,6 +638,7 @@ class MountDataTree(QObject):
         self._revealed.clear()
         self._pushed_files.clear()
         self._container_files.clear()
+        self._extensions.clear()
         self._states.clear()
         self._sibling_nodes.clear()
         self._virtual_nodes.clear()

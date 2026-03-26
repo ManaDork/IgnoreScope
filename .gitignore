@@ -23,6 +23,9 @@ ENV/
 .claude/*
 !.claude/commands/
 
+# MCP config (contains local machine paths)
+.mcp.json
+
 # Environment / secrets
 .env
 .env.local

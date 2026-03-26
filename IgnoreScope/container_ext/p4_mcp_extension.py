@@ -45,7 +45,7 @@ P4CLIENT={p4client}
         """Initialize P4 MCP installer.
 
         Args:
-            devenv_mount: Container path where C:\\_dev_env is mounted.
+            devenv_mount: Container path where the dev environment is mounted.
         """
         self._devenv_mount = devenv_mount
 
@@ -69,6 +69,10 @@ P4CLIENT={p4client}
     # =========================================================================
     # Runtime deployment (docker exec)
     # =========================================================================
+
+    def get_isolation_paths(self) -> list[str]:
+        """P4 MCP installs to /usr/local/lib/p4-mcp-server/ with symlink in /usr/local/bin/."""
+        return [self.LIB_DIR]
 
     def get_install_commands(self, method: DeployMethod = DeployMethod.FULL) -> list[list[str]]:
         """Get installation commands to copy and symlink P4 MCP binary.
@@ -159,7 +163,7 @@ P4CLIENT={p4client}
             return True, ""
         return False, (
             f"The {self._devenv_mount} mount is not present. "
-            f"Configure C:\\_dev_env sibling in IgnoreScope GUI."
+            f"Configure the dev environment sibling mount in IgnoreScope GUI."
         )
 
     # =========================================================================

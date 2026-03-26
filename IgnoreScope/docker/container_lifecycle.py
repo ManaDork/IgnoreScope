@@ -1,7 +1,8 @@
 """CORE container lifecycle orchestrators.
 
 IS:  Create/update/remove container orchestration as CORE functions.
-     Phases 1→6 pipeline: preflight → hierarchy → compose → build → deploy → save.
+     Pipeline: preflight → hierarchy → compose → build → deploy → reconcile → save.
+     Extension reconciliation (verify/re-deploy) after container start.
      Both GUI and CLI consume these — neither owns the orchestration.
 
 IS NOT: Subprocess calls (→ container_ops.py)
@@ -37,7 +38,112 @@ from .container_ops import (
     remove_volume,
 )
 from .compose import generate_compose_with_masks, generate_dockerfile
-from .names import DockerNames, build_docker_name, sanitize_volume_name
+from .names import DockerNames, build_docker_name
+from ..utils.strings import sanitize_volume_name
+
+
+def _collect_isolation_paths(config: ScopeDockerConfig) -> list[tuple[str, str]] | None:
+    """Extract isolation paths from tracked extensions.
+
+    Converts config.extensions into the tuple format that
+    compute_container_hierarchy() expects for Layer 4 volumes.
+
+    Returns:
+        List of (extension_name, container_path) tuples, or None if empty.
+    """
+    if not config.extensions:
+        return None
+    paths = [
+        (ext.name, path)
+        for ext in config.extensions
+        for path in ext.isolation_paths
+    ]
+    return paths or None
+
+
+def reconcile_extensions(
+    container_name: str,
+    config: ScopeDockerConfig,
+) -> OpResult:
+    """Reconcile extension state after container start.
+
+    Compares desired state (config.extensions) against actual state
+    (binary present in container) and takes corrective action.
+
+    State matrix:
+        deploy    + missing → deploy_runtime() → installed
+        deploy    + present → installed (already done)
+        installed + missing → deploy_runtime() → installed (recreate recovery)
+        installed + present → no-op
+        remove    + any     → no-op (deferred to Phase 5)
+        ""        + any     → no-op (not extension-managed)
+
+    Non-fatal: individual extension failure doesn't block others.
+    Caller is responsible for saving config after reconciliation.
+
+    Args:
+        container_name: Running Docker container name
+        config: ScopeDockerConfig with extensions to reconcile (mutated in-place)
+
+    Returns:
+        OpResult with per-extension details
+    """
+    if not config.extensions:
+        return OpResult(success=True, message="No extensions to reconcile")
+
+    from ..container_ext import get_installer, DeployMethod
+
+    details: list[str] = []
+
+    for ext in config.extensions:
+        # Skip non-managed and removal-pending entries
+        if ext.state not in ("deploy", "installed"):
+            continue
+
+        installer = get_installer(ext.installer_class)
+        if installer is None:
+            details.append(f"{ext.name}: unknown installer '{ext.installer_class}', skipped")
+            continue
+
+        # Check if binary is present
+        try:
+            verify_result = installer.verify(container_name)
+            binary_present = verify_result.success
+        except Exception as e:
+            details.append(f"{ext.name}: verify failed ({e}), skipped")
+            continue
+
+        if binary_present:
+            # Binary present — ensure state is 'installed'
+            if ext.state != "installed":
+                ext.state = "installed"
+                details.append(f"{ext.name}: present, state → installed")
+            else:
+                details.append(f"{ext.name}: present, no action")
+            continue
+
+        # Binary missing — need to deploy
+        action = "deploy" if ext.state == "deploy" else "re-deploy (recreate recovery)"
+        try:
+            deploy_result = installer.deploy_runtime(
+                container_name, method=DeployMethod.FULL,
+            )
+        except Exception as e:
+            details.append(f"{ext.name}: {action} failed ({e})")
+            continue
+
+        if deploy_result.success:
+            ext.state = "installed"
+            version_info = f" v{deploy_result.version}" if deploy_result.version else ""
+            details.append(f"{ext.name}: {action} succeeded{version_info}")
+        else:
+            details.append(f"{ext.name}: {action} failed — {deploy_result.message}")
+
+    return OpResult(
+        success=True,
+        message=f"Reconciled {len(details)} extension(s)",
+        details=details,
+    )
 
 
 def _compute_resource_names(host_project_root: Path, scope_name: str) -> tuple[str, str, str]:
@@ -99,6 +205,7 @@ def preflight_create(
         host_project_root=host_project_root,
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
+        isolation_paths=_collect_isolation_paths(config),
     )
 
     if hierarchy.validation_errors:
@@ -165,6 +272,7 @@ def execute_create(
         host_project_root=host_project_root,
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
+        isolation_paths=_collect_isolation_paths(config),
     )
 
     # Scope name for config dirs; docker name for Docker resources
@@ -184,6 +292,7 @@ def execute_create(
             docker_volume_name=volume_name,
             container_root=config.container_root,
             project_name=host_project_root.name,
+            isolation_volume_names=hierarchy.isolation_volume_names,
         )
     except Exception as e:
         return OpResult(success=False, message=f"Failed to generate docker-compose.yml: {e}")
@@ -237,6 +346,13 @@ def execute_create(
             )
             # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
+    # Reconcile extensions (non-fatal — deploy/verify after container is up)
+    reconcile_result = None
+    if config.extensions:
+        running_ok, _ = ensure_container_running(docker_name)
+        if running_ok:
+            reconcile_result = reconcile_extensions(docker_name, config)
+
     # Save config
     config.host_project_root = host_project_root
     try:
@@ -244,9 +360,13 @@ def execute_create(
     except Exception as e:
         return OpResult(success=False, message=f"Failed to save config: {e}")
 
+    result_msg = f"Container created: {docker_name}\nConfig saved to {output_dir / CONFIG_FILENAME}"
+    if reconcile_result and reconcile_result.details:
+        result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
+
     return OpResult(
         success=True,
-        message=f"Container created: {docker_name}\nConfig saved to {output_dir / CONFIG_FILENAME}",
+        message=result_msg,
     )
 
 
@@ -288,18 +408,19 @@ def execute_update(
 ) -> OpResult:
     """Update existing container, retaining configured volumes and pruning orphans.
 
-    11-phase orchestration:
-      1. Load old config → compute old hierarchy → old mask_volume_names
+    12-phase orchestration:
+      1. Load old config → compute old hierarchy → old volume names
       2. Preflight new config
-      3. Compute new hierarchy → new mask_volume_names
-      4. orphan_volumes = set(old_mask_names) - set(new_mask_names)
+      3. Compute new hierarchy → new volume names
+      4. orphan_volumes = (old_masks - new_masks) | (old_iso - new_iso)
       5. docker compose down (remove_volumes=False, remove_images=False)
       6. Generate new compose + Dockerfile → write to disk
       7. Build image
       8. docker compose up --no-start (reuses existing named volumes)
       9. Prune orphan volumes (non-fatal)
      10. Pre-create dirs in mask volumes
-     11. Save config
+     11. Reconcile extensions (non-fatal)
+     12. Save config
 
     Args:
         host_project_root: Project root directory
@@ -330,8 +451,10 @@ def execute_update(
         host_project_root=host_project_root,
         host_container_root=old_config.host_container_root,
         siblings=old_config.siblings or None,
+        isolation_paths=_collect_isolation_paths(old_config),
     )
     old_mask_names = set(old_hierarchy.mask_volume_names)
+    old_iso_names = set(old_hierarchy.isolation_volume_names)
 
     # ── Phase 2: Preflight new config ──
     preflight = preflight_update(host_project_root, config)
@@ -348,11 +471,13 @@ def execute_update(
         host_project_root=host_project_root,
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
+        isolation_paths=_collect_isolation_paths(config),
     )
     new_mask_names = set(new_hierarchy.mask_volume_names)
+    new_iso_names = set(new_hierarchy.isolation_volume_names)
 
-    # ── Phase 4: Detect orphan volumes ──
-    orphan_volumes = old_mask_names - new_mask_names
+    # ── Phase 4: Detect orphan volumes (masks + isolation) ──
+    orphan_volumes = (old_mask_names - new_mask_names) | (old_iso_names - new_iso_names)
 
     docker_name, image_name, volume_name = _compute_resource_names(host_project_root, scope_name)
     output_dir = get_container_dir(host_project_root, scope_name)
@@ -378,6 +503,7 @@ def execute_update(
             docker_volume_name=volume_name,
             container_root=config.container_root,
             project_name=host_project_root.name,
+            isolation_volume_names=new_hierarchy.isolation_volume_names,
         )
     except Exception as e:
         return OpResult(success=False, message=f"Failed to generate docker-compose.yml: {e}")
@@ -435,7 +561,14 @@ def execute_update(
             )
             # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
-    # ── Phase 11: Save config ──
+    # ── Phase 11: Reconcile extensions (non-fatal) ──
+    reconcile_result = None
+    if config.extensions:
+        running_ok, _ = ensure_container_running(docker_name)
+        if running_ok:
+            reconcile_result = reconcile_extensions(docker_name, config)
+
+    # ── Phase 12: Save config ──
     config.host_project_root = host_project_root
     try:
         save_config(config)
@@ -445,10 +578,12 @@ def execute_update(
     result_msg = f"Container updated: {docker_name}"
     if orphan_volumes:
         result_msg += f"\nPruned {len(orphan_volumes)} orphan volume(s)"
+    if reconcile_result and reconcile_result.details:
+        result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
     return OpResult(
         success=True,
         message=result_msg,
-        details=prune_details,
+        details=prune_details + (reconcile_result.details if reconcile_result else []),
     )
 
 

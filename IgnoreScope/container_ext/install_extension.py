@@ -122,6 +122,15 @@ class ExtensionInstaller(ABC):
         """
         ...
 
+    def get_isolation_paths(self) -> list[str]:
+        """Get container paths that need persistent isolation volumes.
+
+        Returns:
+            List of container-absolute paths requiring Layer 4 volumes.
+            Override in subclasses. Default: empty (no isolation needed).
+        """
+        return []
+
     # =========================================================================
     # Verification
     # =========================================================================

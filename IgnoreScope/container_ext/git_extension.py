@@ -103,6 +103,10 @@ class GitInstaller(ExtensionInstaller):
     # Runtime deployment (docker exec)
     # =========================================================================
 
+    def get_isolation_paths(self) -> list[str]:
+        """Git is a system package (apt-get/apk). No isolation — survives in image layer."""
+        return []
+
     def get_install_commands(self, method: DeployMethod) -> list[list[str]]:
         """Get installation commands for the resolved distro.
 

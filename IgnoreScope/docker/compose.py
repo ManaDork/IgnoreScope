@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from ..core.constants import CONTAINER_CLAUDE_AUTH
 from ..core.config import DEFAULT_CONTAINER_ROOT
-from .names import sanitize_volume_name
+from ..utils.strings import sanitize_volume_name
 
 if TYPE_CHECKING:
     from ..container_ext.install_extension import ExtensionInstaller
@@ -152,6 +152,7 @@ def generate_compose_with_masks(
     docker_image_name: str = "",
     docker_volume_name: str = "",
     container_root: str = DEFAULT_CONTAINER_ROOT,
+    isolation_volume_names: list[str] | None = None,
 ) -> str:
     """Generate docker-compose.yml from pre-computed hierarchy data.
 
@@ -170,6 +171,7 @@ def generate_compose_with_masks(
         docker_image_name: Explicit image name (overrides auto-derived)
         docker_volume_name: Explicit volume name (overrides auto-derived)
         container_root: Container root path (default: /workspace)
+        isolation_volume_names: Named isolation volumes (Layer 4) for the volumes section
 
     Returns:
         docker-compose.yml content as string
@@ -221,10 +223,10 @@ def generate_compose_with_masks(
                 volume = str(mount)
             lines.append(f"      - \"{volume}\"{comment}")
 
-    # Volume layers (pre-computed by hierarchy.py: Layer 1 mounts → Layer 2 masks → Layer 3 reveals → siblings)
+    # Volume layers (pre-computed by hierarchy.py: L1 mounts → L2 masks → L3 reveals → siblings → L4 isolation)
     if ordered_volumes:
         lines.append("")
-        lines.append("      # === Volume layers (bind mounts, masks, reveals) ===")
+        lines.append("      # === Volume layers (bind mounts, masks, reveals, isolation) ===")
         for entry in ordered_volumes:
             lines.append(f"      - \"{entry}\"")
 
@@ -241,6 +243,10 @@ def generate_compose_with_masks(
 
     # Declare mask volumes (nocopy — populated by docker cp at runtime)
     for vol_name in mask_volume_names:
+        lines.append(f"  {vol_name}:")
+
+    # Declare isolation volumes (Layer 4 — persistent, container-owned)
+    for vol_name in (isolation_volume_names or []):
         lines.append(f"  {vol_name}:")
 
     lines.append("")

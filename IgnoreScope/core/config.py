@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .local_mount_config import LocalMountConfig
+from .local_mount_config import LocalMountConfig, ExtensionConfig
 from ..utils.paths import to_absolute_paths, to_relative_posix
 from .._version import __version__, check_version_mismatch
 
@@ -122,6 +122,7 @@ class ScopeDockerConfig(LocalMountConfig):
                  If False, pull overwrites original files (production)
         container_root: Container root path (default: /workspace)
         siblings: List of external directories mounted as container siblings
+        extensions: List of installed extension configs with isolation volume tracking
     """
 
     container_files: set[Path] = field(default_factory=set)
@@ -131,6 +132,7 @@ class ScopeDockerConfig(LocalMountConfig):
     dev_mode: bool = True
     container_root: str = ""
     siblings: list[SiblingMount] = field(default_factory=list)
+    extensions: list[ExtensionConfig] = field(default_factory=list)
 
     def __post_init__(self):
         """Derive defaults for host_container_root and container_root."""
@@ -184,6 +186,10 @@ class ScopeDockerConfig(LocalMountConfig):
         if self.siblings:
             result['siblings'] = [s.to_dict() for s in self.siblings]
 
+        # Only include extensions if configured
+        if self.extensions:
+            result['extensions'] = [e.to_dict(root) for e in self.extensions]
+
         # container_files at top level (discovery artifact, not visibility config)
         if self.container_files:
             def to_relative(paths: set[Path]) -> list[str]:
@@ -216,6 +222,12 @@ class ScopeDockerConfig(LocalMountConfig):
         # Parse siblings
         siblings = [SiblingMount.from_dict(sd) for sd in data.get('siblings', [])]
 
+        # Parse extensions
+        extensions = [
+            ExtensionConfig.from_dict(ed, host_project_root)
+            for ed in data.get('extensions', [])
+        ]
+
         # Parse container_root — relative ../traversal/mount_name syntax (written by to_dict)
         cr_raw = data.get('container_root', '')
         if cr_raw.startswith('..'):
@@ -242,7 +254,48 @@ class ScopeDockerConfig(LocalMountConfig):
             dev_mode=data.get('dev_mode', True),
             container_root=container_root,
             siblings=siblings,
+            extensions=extensions,
         )
+
+    def track_extension(
+        self,
+        name: str,
+        installer_class: str,
+        isolation_paths: list[str],
+        state: str = "installed",
+    ) -> None:
+        """Track an extension after successful deployment.
+
+        Updates existing entry or creates new one. Single place for
+        extension state management (DRY — called by CLI and GUI).
+
+        Args:
+            name: Extension name (e.g., "Claude Code")
+            installer_class: Class name (e.g., "ClaudeInstaller")
+            isolation_paths: Container paths needing isolation volumes
+            state: Lifecycle state (default: "installed")
+        """
+        # Update existing entry if found
+        for ext in self.extensions:
+            if ext.installer_class == installer_class:
+                ext.state = state
+                ext.isolation_paths = isolation_paths
+                return
+
+        # Create new entry
+        self.extensions.append(ExtensionConfig(
+            name=name,
+            installer_class=installer_class,
+            isolation_paths=isolation_paths,
+            state=state,
+        ))
+
+    def get_extension(self, installer_class: str) -> ExtensionConfig | None:
+        """Find extension config by installer class name."""
+        for ext in self.extensions:
+            if ext.installer_class == installer_class:
+                return ext
+        return None
 
     def validate(self) -> list[str]:
         """Validate configuration consistency.

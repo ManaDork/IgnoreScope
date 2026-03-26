@@ -7,7 +7,7 @@ from .config import (
     save_config,
     DEFAULT_CONTAINER_ROOT,
 )
-from .local_mount_config import LocalMountConfig
+from .local_mount_config import LocalMountConfig, ExtensionConfig
 from .constants import (
     CONTAINER_WORKSPACE,
     CONTAINER_CLAUDE_AUTH,
@@ -28,6 +28,7 @@ __all__ = [
     "ScopeDockerConfig",
     "SiblingMount",
     "LocalMountConfig",
+    "ExtensionConfig",
     "ContainerHierarchy",
     "load_config",
     "save_config",

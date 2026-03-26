@@ -656,7 +656,10 @@ class ContainerOperations:
         self._deploy_worker = DeployWorker(container_name, self._app)
         self._deploy_worker.finished.connect(
             lambda ok, message, version: self._on_deploy_finished(
-                ok, message, version, progress
+                ok, message, version, progress,
+                installer_name="Claude Code",
+                installer_class="ClaudeInstaller",
+                isolation_paths=["/root/.local"],
             )
         )
         self._deploy_worker.start()
@@ -711,16 +714,42 @@ class ContainerOperations:
         self._git_deploy_worker = GitDeployWorker(container_name, self._app)
         self._git_deploy_worker.finished.connect(
             lambda ok, message, version: self._on_deploy_finished(
-                ok, message, version, progress
+                ok, message, version, progress,
+                installer_name="Git",
+                installer_class="GitInstaller",
+                isolation_paths=[],
             )
         )
         self._git_deploy_worker.start()
 
+    def _track_extension(
+        self, installer_name: str, installer_class: str, isolation_paths: list[str],
+    ) -> None:
+        """Track installed extension in config. Non-fatal on error."""
+        try:
+            from ..core.config import load_config, save_config
+            config = load_config(
+                self._app.host_project_root, self._app._current_scope,
+            )
+            config.track_extension(
+                name=installer_name,
+                installer_class=installer_class,
+                isolation_paths=isolation_paths,
+            )
+            save_config(config)
+            # Update in-memory tree so GUI reflects the change immediately
+            self._app._mount_data_tree._extensions = list(config.extensions)
+        except Exception:
+            pass  # Tracking failure is non-fatal
+
     def _on_deploy_finished(
         self, success: bool, message: str, version: str,
         progress: QProgressDialog,
+        installer_name: str = "",
+        installer_class: str = "",
+        isolation_paths: list[str] | None = None,
     ) -> None:
-        """Handle LLM deployment completion."""
+        """Handle extension deployment completion."""
         progress.close()
 
         if success:
@@ -730,6 +759,12 @@ class ContainerOperations:
                 "Installation Complete",
                 f"{message}{version_info}",
             )
+            # Track in config + refresh viewer
+            if installer_class:
+                self._track_extension(
+                    installer_name, installer_class, isolation_paths or [],
+                )
+                self._app._update_config_viewer()
         else:
             QMessageBox.critical(
                 self._app,

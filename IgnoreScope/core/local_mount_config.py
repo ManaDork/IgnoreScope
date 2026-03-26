@@ -3,10 +3,11 @@
 This module defines the LocalMountConfig dataclass for managing what
 the container can see at the Docker volume level.
 
-Three-layer system:
+Four-layer system:
   1. Mounts: Bind mounts that make host folders visible
   2. Masked: Named volumes that hide host folders from the container
   3. Revealed: Punch-through mounts that re-expose within masked areas
+  4. Isolated: Named volumes that overlay everything with persistent container-owned content
 """
 
 from __future__ import annotations
@@ -46,6 +47,10 @@ class LocalMountConfig:
 
     # Enable mirrored intermediate directory creation in masked areas
     mirrored: bool = True
+
+    # Lifecycle state for extension-managed configs
+    # Values: "" (not managed), "deploy", "installed", "remove"
+    state: str = ""
 
     def _is_descendant(self, path: Path, ancestor: Path) -> bool:
         """Check if path is a descendant of ancestor."""
@@ -194,6 +199,8 @@ class LocalMountConfig:
         }
         if self.pushed_files:
             result['pushed_files'] = to_relative(self.pushed_files)
+        if self.state:
+            result['state'] = self.state
         return result
 
     @classmethod
@@ -212,6 +219,7 @@ class LocalMountConfig:
             masked=to_absolute_paths(data.get('masked', []), host_project_root),
             revealed=to_absolute_paths(data.get('revealed', []), host_project_root),
             pushed_files=to_absolute_paths(data.get('pushed_files', []), host_project_root),
+            state=data.get('state', ''),
         )
 
     def __bool__(self) -> bool:
@@ -224,3 +232,58 @@ class LocalMountConfig:
         self.masked.clear()
         self.revealed.clear()
         self.pushed_files.clear()
+
+
+@dataclass
+class ExtensionConfig(LocalMountConfig):
+    """Extension-managed mount configuration with isolation volume tracking.
+
+    Extends LocalMountConfig with extension identity and isolation paths.
+    Each installed extension creates one ExtensionConfig entry in
+    ScopeDockerConfig.extensions.
+
+    Isolation volumes are Layer 4 — named Docker volumes that overlay
+    all other mounts with persistent, container-owned content.
+
+    Lifecycle state (inherited from LocalMountConfig.state):
+      "deploy"    — user requested install, pending execution
+      "installed" — successfully deployed, binary verified
+      "remove"    — user requested uninstall, pending execution
+    """
+
+    # Extension identity
+    name: str = ""                  # Human-readable: "Claude Code", "Git", "P4 MCP Server"
+    installer_class: str = ""       # Class name: "ClaudeInstaller", "GitInstaller", "P4McpInstaller"
+
+    # Container paths needing persistent isolation volumes (Layer 4)
+    isolation_paths: list[str] = field(default_factory=list)
+
+    # How isolation volumes are initialized: "empty" or "clone" (from host)
+    seed_method: str = "empty"
+
+    def to_dict(self, host_project_root: Path) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        result = super().to_dict(host_project_root)
+        result['name'] = self.name
+        result['installer_class'] = self.installer_class
+        if self.isolation_paths:
+            result['isolation_paths'] = self.isolation_paths
+        if self.seed_method != "empty":
+            result['seed_method'] = self.seed_method
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict, host_project_root: Path) -> 'ExtensionConfig':
+        """Create from dictionary with relative paths."""
+        base = LocalMountConfig.from_dict(data, host_project_root)
+        return cls(
+            mounts=base.mounts,
+            masked=base.masked,
+            revealed=base.revealed,
+            pushed_files=base.pushed_files,
+            state=base.state,
+            name=data.get('name', ''),
+            installer_class=data.get('installer_class', ''),
+            isolation_paths=data.get('isolation_paths', []),
+            seed_method=data.get('seed_method', 'empty'),
+        )

@@ -153,6 +153,10 @@ fi
     # Runtime deployment (docker exec)
     # =========================================================================
 
+    def get_isolation_paths(self) -> list[str]:
+        """Claude CLI installs to /root/.local/bin/ and /root/.local/lib/."""
+        return ["/root/.local"]
+
     def get_install_commands(self, method: DeployMethod) -> list[list[str]]:
         """Get installation commands for runtime deployment.
 

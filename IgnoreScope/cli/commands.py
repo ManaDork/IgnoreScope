@@ -294,6 +294,19 @@ def cmd_install_git(
     if not result.success:
         return False, result.message
     msg = f"Git installed (v{result.version})" if result.version else result.message
+
+    # Track extension in config
+    try:
+        config = load_config(host_project_root, scope_name)
+        config.track_extension(
+            name=installer.name,
+            installer_class=type(installer).__name__,
+            isolation_paths=installer.get_isolation_paths(),
+        )
+        save_config(config)
+    except Exception:
+        pass  # Tracking failure is non-fatal
+
     if configure and name and email:
         ok, cfg_msg = installer.configure_identity(docker_name, name, email)
         msg += f"\nConfigured: {name} <{email}>" if ok else f"\nWarning: {cfg_msg}"
@@ -344,6 +357,18 @@ def cmd_install_p4_mcp(
     if not result.success:
         return False, result.message
     msg = f"P4 MCP Server installed (v{result.version})" if result.version else result.message
+
+    # Track extension in config
+    try:
+        config = load_config(host_project_root, scope_name)
+        config.track_extension(
+            name=installer.name,
+            installer_class=type(installer).__name__,
+            isolation_paths=installer.get_isolation_paths(),
+        )
+        save_config(config)
+    except Exception:
+        pass  # Tracking failure is non-fatal
 
     # Optional config deploy
     if project_dir and p4port and p4user and p4client:

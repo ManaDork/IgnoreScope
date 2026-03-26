@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..docker.names import sanitize_volume_name
 from ..utils.paths import is_descendant, to_relative_posix_or_name
+from ..utils.strings import sanitize_volume_name
 from .config import get_container_path
 
 if TYPE_CHECKING:
@@ -45,6 +45,8 @@ class ContainerHierarchy:
 
     Attributes:
         ordered_volumes: Volume entries in correct layering order for docker-compose.yml
+        mask_volume_names: Named mask volumes for compose volumes section
+        isolation_volume_names: Named isolation volumes for compose volumes section (Layer 4)
         revealed_parents: Container paths needing mkdir -p before docker cp (pushed files)
         validation_errors: Configuration problems found during computation
         visible_paths: All visible container paths (for UI/debugging)
@@ -56,6 +58,9 @@ class ContainerHierarchy:
 
     # Named mask volumes declared in docker-compose.yml volumes section
     mask_volume_names: list[str] = field(default_factory=list)
+
+    # Named isolation volumes declared in docker-compose.yml volumes section (Layer 4)
+    isolation_volume_names: list[str] = field(default_factory=list)
 
     # For mkdir -p before pushing revealed/pushed files
     revealed_parents: set[str] = field(default_factory=set)
@@ -364,11 +369,12 @@ def compute_container_hierarchy(
     host_container_root: Path | None = None,
     siblings: list[SiblingMount] | None = None,
     mirrored: bool = True,
+    isolation_paths: list[tuple[str, str]] | None = None,
 ) -> ContainerHierarchy:
     """Compute complete container hierarchy from configuration.
 
     Single function computing ALL hierarchy logic. Used by:
-    - compose.py: uses ordered_volumes
+    - compose.py: uses ordered_volumes, mask_volume_names, isolation_volume_names
     - validation: checks validation_errors
     - file_ops.py: uses revealed_parents
     - Future UI: uses visible_paths, masked_paths
@@ -382,6 +388,8 @@ def compute_container_hierarchy(
         host_project_root: Host project root path
         host_container_root: Host container root (relative_to base). Defaults to host_project_root.parent
         siblings: Optional list of sibling mounts for external directories
+        mirrored: Enable intermediate directory creation in masked areas
+        isolation_paths: Optional list of (extension_name, container_path) tuples for Layer 4 volumes
 
     Returns:
         ContainerHierarchy with all computed values
@@ -418,5 +426,12 @@ def compute_container_hierarchy(
             # Prefix sibling errors with sibling path
             for err in s_errs:
                 hierarchy.validation_errors.append(f"[{sibling.container_path}] {err}")
+
+    # Layer 4: Isolation volumes (persistent, container-owned, final overlay)
+    if isolation_paths:
+        for ext_name, container_path in isolation_paths:
+            vol_name = f"iso_{sanitize_volume_name(ext_name)}_{sanitize_volume_name(container_path.strip('/').replace('/', '_'))}"
+            hierarchy.ordered_volumes.append(f"{vol_name}:{container_path}")
+            hierarchy.isolation_volume_names.append(vol_name)
 
     return hierarchy
