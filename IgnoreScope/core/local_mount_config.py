@@ -1,0 +1,282 @@
+"""Local mount configuration for container filesystem visibility.
+
+This module defines the LocalMountConfig dataclass for managing what
+the container can see at the Docker volume level.
+
+Mount-centric architecture:
+  Each MountSpecPath represents a bind mount root with ordered gitignore-style
+  patterns controlling which subdirectories are masked or unmasked.
+
+  Pattern syntax (gitignore native):
+    "vendor/"            - mask (deny) the vendor directory
+    "!vendor/public/"    - unmask (exception) vendor/public
+    "vendor/public/tmp/" - re-mask vendor/public/tmp
+
+  Docker volume mapping:
+    Non-negated pattern -> named mask volume (Layer 2)
+    Negated (!) pattern -> bind mount punch-through (Layer 3)
+    Pattern order = volume declaration order (last-writer-wins)
+
+  Layer 4 (Isolation) is handled by ExtensionConfig.isolation_paths.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from ..utils.paths import is_descendant, to_absolute_paths, to_relative_posix
+from .mount_spec_path import MountSpecPath
+
+
+@dataclass
+class LocalMountConfig:
+    """Container filesystem configuration.
+
+    Manages mount specifications and visibility:
+      - mount_specs: List of MountSpecPath, each a bind mount with mask/unmask patterns
+      - pushed_files: Files pushed to container via docker cp
+      - mirrored: Enable intermediate directory creation in masked areas
+
+    Backward-compatible properties (mounts, masked, revealed) are computed
+    from mount_specs for downstream consumers during transition.
+    """
+
+    # Mount specifications — each is a bind mount root with patterns
+    mount_specs: list[MountSpecPath] = field(default_factory=list)
+
+    # Files pushed to container via docker cp
+    pushed_files: set[Path] = field(default_factory=set)
+
+    # Enable mirrored intermediate directory creation in masked areas
+    mirrored: bool = True
+
+    # Lifecycle state for extension-managed configs
+    # Values: "" (not managed), "deploy", "installed", "remove"
+    state: str = ""
+
+    # --- Backward-compatible computed properties ---
+
+    @property
+    def mounts(self) -> set[Path]:
+        """Set of all mount roots (backward compat)."""
+        return {ms.mount_root for ms in self.mount_specs}
+
+    @property
+    def masked(self) -> set[Path]:
+        """Union of all masked paths across all mount specs (backward compat)."""
+        result: set[Path] = set()
+        for ms in self.mount_specs:
+            result.update(ms.get_masked_paths())
+        return result
+
+    @property
+    def revealed(self) -> set[Path]:
+        """Union of all revealed paths across all mount specs (backward compat)."""
+        result: set[Path] = set()
+        for ms in self.mount_specs:
+            result.update(ms.get_revealed_paths())
+        return result
+
+    # --- Mount spec lookup ---
+
+    def _find_spec_for_path(self, path: Path) -> MountSpecPath | None:
+        """Find the mount spec whose root contains this path."""
+        for ms in self.mount_specs:
+            if path == ms.mount_root or is_descendant(path, ms.mount_root):
+                return ms
+        return None
+
+    # --- Descendant queries ---
+
+    def has_pushed_descendant(self, path: Path) -> bool:
+        """Check if any pushed file exists under this path.
+
+        Scans pushed_files set by path containment — no tree walk.
+
+        Args:
+            path: Absolute path to check.
+
+        Returns:
+            True if any pushed file is a strict descendant of this path.
+        """
+        for pf in self.pushed_files:
+            if pf != path and is_descendant(pf, path):
+                return True
+        return False
+
+    # --- Mount operations ---
+
+    def add_mount(self, path: Path) -> bool:
+        """Add a mount point (creates new MountSpecPath with empty patterns).
+
+        Hard-blocks if path overlaps with existing mount roots.
+
+        Returns:
+            True if added, False if already mounted or overlap detected.
+        """
+        if any(ms.mount_root == path for ms in self.mount_specs):
+            return False
+        # Overlap check
+        for ms in self.mount_specs:
+            if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
+                return False
+        self.mount_specs.append(MountSpecPath(mount_root=path))
+        return True
+
+    # --- Mask operations (delegate to mount spec) ---
+
+    def add_mask(self, path: Path) -> bool:
+        """Add a masked directory (appends deny pattern to owning mount spec).
+
+        Returns:
+            True if added, False if already masked or no owning mount found.
+        """
+        ms = self._find_spec_for_path(path)
+        if ms is None:
+            return False
+        rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
+        pattern = f"{rel}/"
+        return ms.add_pattern(pattern)
+
+    # --- Reveal operations (delegate to mount spec) ---
+
+    def add_reveal(self, path: Path) -> bool:
+        """Add a revealed directory (appends exception pattern to owning mount spec).
+
+        Returns:
+            True if added, False if already revealed or no owning mount found.
+        """
+        ms = self._find_spec_for_path(path)
+        if ms is None:
+            return False
+        rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
+        pattern = f"!{rel}/"
+        return ms.add_pattern(pattern)
+
+    # --- Validation ---
+
+    def validate(self) -> list[str]:
+        """Validate configuration consistency.
+
+        Returns:
+            List of error messages (empty if valid)
+        """
+        errors = []
+
+        # Check mount overlap
+        errors.extend(MountSpecPath.validate_no_overlap(self.mount_specs))
+
+        # Validate each mount spec's patterns
+        for ms in self.mount_specs:
+            spec_errors = ms.validate()
+            for err in spec_errors:
+                errors.append(f"Mount '{ms.mount_root.name}': {err}")
+
+        return errors
+
+    # --- Serialization ---
+
+    def to_dict(self, host_project_root: Path) -> dict:
+        """Convert to dictionary with relative paths.
+
+        Args:
+            host_project_root: Base path for relative conversion
+
+        Returns:
+            Dict suitable for JSON serialization
+        """
+        def to_relative(paths: set[Path]) -> list[str]:
+            return [to_relative_posix(p, host_project_root) for p in sorted(paths)]
+
+        result: dict = {
+            'mount_specs': [ms.to_dict(host_project_root) for ms in self.mount_specs],
+        }
+        if self.pushed_files:
+            result['pushed_files'] = to_relative(self.pushed_files)
+        if self.state:
+            result['state'] = self.state
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict, host_project_root: Path) -> 'LocalMountConfig':
+        """Create from dictionary with relative paths.
+
+        Args:
+            data: Dict from JSON deserialization
+            host_project_root: Base path for absolute conversion
+
+        Returns:
+            LocalMountConfig instance
+        """
+        mount_specs = [
+            MountSpecPath.from_dict(ms_data, host_project_root)
+            for ms_data in data.get('mount_specs', [])
+        ]
+        return cls(
+            mount_specs=mount_specs,
+            pushed_files=to_absolute_paths(data.get('pushed_files', []), host_project_root),
+            state=data.get('state', ''),
+        )
+
+    def __bool__(self) -> bool:
+        """Config is truthy if any mount specs or pushed files are configured."""
+        return bool(self.mount_specs or self.pushed_files)
+
+    def clear(self) -> None:
+        """Clear all configuration."""
+        self.mount_specs.clear()
+        self.pushed_files.clear()
+
+
+@dataclass
+class ExtensionConfig(LocalMountConfig):
+    """Extension-managed mount configuration with isolation volume tracking.
+
+    Extends LocalMountConfig with extension identity and isolation paths.
+    Each installed extension creates one ExtensionConfig entry in
+    ScopeDockerConfig.extensions.
+
+    Isolation volumes are Layer 4 — named Docker volumes that overlay
+    all other mounts with persistent, container-owned content.
+
+    Lifecycle state (inherited from LocalMountConfig.state):
+      "deploy"    — user requested install, pending execution
+      "installed" — successfully deployed, binary verified
+      "remove"    — user requested uninstall, pending execution
+    """
+
+    # Extension identity
+    name: str = ""                  # Human-readable: "Claude Code", "Git", "P4 MCP Server"
+    installer_class: str = ""       # Class name: "ClaudeInstaller", "GitInstaller", "P4McpInstaller"
+
+    # Container paths needing persistent isolation volumes (Layer 4)
+    isolation_paths: list[str] = field(default_factory=list)
+
+    # How isolation volumes are initialized: "empty" or "clone" (from host)
+    seed_method: str = "empty"
+
+    def to_dict(self, host_project_root: Path) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        result = super().to_dict(host_project_root)
+        result['name'] = self.name
+        result['installer_class'] = self.installer_class
+        if self.isolation_paths:
+            result['isolation_paths'] = self.isolation_paths
+        if self.seed_method != "empty":
+            result['seed_method'] = self.seed_method
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict, host_project_root: Path) -> 'ExtensionConfig':
+        """Create from dictionary with relative paths."""
+        base = LocalMountConfig.from_dict(data, host_project_root)
+        return cls(
+            mount_specs=base.mount_specs,
+            pushed_files=base.pushed_files,
+            state=base.state,
+            name=data.get('name', ''),
+            installer_class=data.get('installer_class', ''),
+            isolation_paths=data.get('isolation_paths', []),
+            seed_method=data.get('seed_method', 'empty'),
+        )

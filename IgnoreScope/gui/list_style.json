@@ -1,0 +1,6 @@
+{
+    "background":  "#3B4252",
+    "selected":    "#5E81AC",
+    "warning":     "#EBCB8B",
+    "destructive": "#BF616A"
+}

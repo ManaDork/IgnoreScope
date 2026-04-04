@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "scope_name": "dev",
+  "dev_mode": true,
+  "mirrored": true,
+  "show_hidden": false,
+  "local": {
+    "mount_specs": [
+      {
+        "mount_root": ".",
+        "patterns": []
+      }
+    ]
+  }
+}

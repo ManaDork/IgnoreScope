@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "perforce-p4-mcp": {
+      "command": "{p4_mcp_dest}",
+      "env": {
+        "P4CONFIG": "{scope_dir}/.p4config"
+      },
+      "args": ["--readonly"]
+    },
+    "context-mode": {
+      "command": "npx",
+      "args": ["-y", "context-mode"]
+    }
+  }
+}

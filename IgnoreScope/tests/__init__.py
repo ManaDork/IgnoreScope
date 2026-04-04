@@ -1,0 +1,1 @@
+"""IgnoreScope test suite."""

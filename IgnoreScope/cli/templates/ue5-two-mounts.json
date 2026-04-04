@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "scope_name": "dev",
+  "dev_mode": true,
+  "mirrored": true,
+  "show_hidden": false,
+  "local": {
+    "mount_specs": [
+      {
+        "mount_root": "Source",
+        "patterns": [
+          "ThirdParty/",
+          "!ThirdParty/Public/"
+        ]
+      },
+      {
+        "mount_root": "Content",
+        "patterns": [
+          "Developers/",
+          "Collections/",
+          "__ExternalActors__/",
+          "__ExternalObjects__/"
+        ]
+      }
+    ]
+  }
+}
