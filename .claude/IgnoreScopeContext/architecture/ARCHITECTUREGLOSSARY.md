@@ -39,8 +39,8 @@ User-configured flag marking a host directory as hidden from the container. Impl
 **Nesting:** A masked folder can contain revealed subfolders, which can contain re-masked subfolders, to arbitrary depth. Pathspec last-match-wins evaluation resolves nesting.
 
 **Display state distinction:**
-- **FOLDER_MOUNTED_MASKED** — mount root whose spec has deny patterns (`is_mount_root=T, has_mount_masks=T`). The mount itself is visible; its content is hidden. Gradient: `vis.visible → config.masked + config.mount`.
-- **FOLDER_MASKED** — non-mount-root folder denied by a pattern. Gradient: `vis.hidden → inherited.masked`.
+- **FOLDER_MOUNTED** — mount root declaration (`is_mount_root=T`). Gradient: `vis.visible → config.mount`.
+- **FOLDER_MASKED** — folder denied by a pattern. Gradient: `vis.hidden → inherited.masked`.
 
 **Domains:** Config, Computation (interleaved volumes, revealed_parents), Generation (named volume entry), Container Ops (docker cp target, volume_exists check), Presentation (checkbox)
 
@@ -224,7 +224,6 @@ Per-node state model containing all flags that define a filesystem node's identi
 | `pushed` | bool | Config | Files only | File was docker cp'd into container |
 | `container_orphaned` | bool | MatrixState (TTFF) | Files only | pushed + masked + not mounted + not revealed |
 | `is_mount_root` | bool | Path == mount_spec.mount_root | Folders only | Node IS a mount root declaration |
-| `has_mount_masks` | bool | is_mount_root AND spec has deny patterns | Folders only | Mount root whose content is masked |
 | `visibility` | str | MatrixState + config queries | All nodes | orphaned / revealed / virtual / masked / visible / hidden |
 | `has_pushed_descendant` | bool | Config query (Phase 3 Stage 3) | Folders only | Any descendant has pushed=True |
 | `has_direct_visible_child` | bool | States pass (Phase 3 Stage 3) | Folders only | Immediate child has revealed=True or pushed=True |
@@ -242,7 +241,8 @@ Config `mount_specs` are evaluated via pathspec to produce per-node NodeState bo
 |---|---|---|
 | FOLDER_HIDDEN | Not under any mount | vis.background throughout |
 | FOLDER_VISIBLE | Mounted, no mask, no mount masks | vis.visible throughout |
-| FOLDER_MOUNTED_MASKED | is_mount_root AND has_mount_masks | vis.visible → config.masked + config.mount |
+| FOLDER_MOUNTED | is_mount_root | vis.visible → config.mount |
+| FOLDER_MOUNTED_REVEALED | is_mount_root + has_visible_descendant | vis.visible → ancestor.visible + config.mount |
 | FOLDER_MASKED | Under mount, denied by pattern, NOT mount root | vis.hidden → inherited.masked |
 | FOLDER_VIRTUAL_MIRRORED | Structural path, deeper descendant | vis.hidden throughout, visible text |
 | FOLDER_VIRTUAL_MIRRORED_REVEALED | Structural path, direct revealed child | vis.hidden → ancestor.revealed, visible text |
@@ -252,7 +252,7 @@ Config `mount_specs` are evaluated via pathspec to produce per-node NodeState bo
 | FOLDER_PUSHED_ANCESTOR | Has pushed descendant | vis.background → ancestor.pushed |
 | FOLDER_CONTAINER_ONLY | Container scan diff | vis.container_only throughout |
 
-MOUNTED_MASKED = mount root whose spec has deny patterns. The mount root directory is visible (bind mount) but its content is masked by named volumes. Distinguished from MASKED which is any non-mount-root folder denied by a pattern.
+Folder gradients are derived formulaically via `derive_gradient()` — no hand-built gradient definitions. Formula: P1=visibility, P2=context, P3=ancestor, P4=config||inherited. See `GUI_STATE_STYLES.md` for the full formula documentation.
 
 **File states** (8 — unchanged): FILE_HIDDEN, FILE_VISIBLE, FILE_MASKED, FILE_REVEALED, FILE_PUSHED, FILE_HOST_ORPHAN (deferred), FILE_CONTAINER_ORPHAN, FILE_CONTAINER_ONLY.
 

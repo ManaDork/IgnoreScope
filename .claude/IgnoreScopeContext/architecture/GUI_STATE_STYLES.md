@@ -92,45 +92,60 @@ These are not independent states — they modify the node's current StateStyleCl
 
 20 tree states (12 folder + 8 file) + 2 selected overrides.
 
-GUI reads CORE-computed NodeState fields via flat truth tables — no tree walking in the GUI.
-Folder states read: `visibility` + `has_pushed_descendant` + `has_direct_visible_child` + `has_mount_masks`.
-File states read: `visibility` + `pushed` + `host_orphaned`.
+Folder states derived via `derive_gradient()` formula — no hand-built gradients or lookup tables.
+File states use slim hand-built layout (deferred for formula conversion).
+
+### Gradient Formula
+
+```
+P1 = visibility     what the container sees     (visible, hidden, mirrored, background, co)
+P2 = context         parent/inherited visibility (visible, hidden, background, co)
+P3 = ancestor        descendant tracking         (ancestor.visible, or falls to P4)
+P4 = config          direct/inherited action     (config.mount, config.revealed, inherited.masked, virtual.*)
+
+Fallback chain: P3 → P4 → P1 (when no ancestor/config, position uses visibility color)
+```
+
+**P1-P2 relationship:** P2 mirrors P1 except REVEALED (P1=visible, P2=hidden — visible in hidden context).
 
 ### Color Variable System (categorical)
 
-Variables in `tree_state_style.json` use categorical naming:
-
 | Category | Variables | Position | Purpose |
 |----------|----------|----------|---------|
-| `visibility.*` | `.visible`, `.hidden`, `.virtual`, `.background`, `.container_only` | P1, P2 (left) | What the container sees |
-| `config.*` | `.mount`, `.masked`, `.revealed`, `.pushed` | P3, P4 (right) | User's direct config action |
-| `inherited.*` | `.masked`, `.revealed`, `.virtual_auth`, `.virtual_volume` | P3, P4 (right) | State from ancestor (dimmer, less saturated) |
-| `ancestor.*` | `.pushed`, `.revealed` | P3 | Descendant tracking |
-| `virtual.*` | `.volume`, `.auth` | P3, P4 (right) | Virtual subtype accent |
+| `visibility.*` | `.visible`, `.hidden`, `.virtual`, `.background`, `.container_only` | P1, P2 | What the container sees |
+| `config.*` | `.mount`, `.revealed`, `.pushed` | P4 | User's direct config action |
+| `inherited.*` | `.masked` | P4 | Ancestor pattern covers this node |
+| `ancestor.*` | `.visible` | P3 | Has visible descendant (pushed or revealed) |
+| `virtual.*` | `.volume`, `.auth` | P4 | Non-filesystem accent |
 | `status.*` | `.warning` | P4 | Status indicators |
 | `ui.*` | `.selected` | P2, P3 | Selection override |
 
 ### 3.1 Folder States (12)
 
-| ID | State Name | Condition | GradientClass | Font |
-|----|-----------|-----------|---------------|------|
-| F1 | `FOLDER_HIDDEN` | vis=hidden | `(vis.bg, vis.bg, vis.bg, vis.bg)` | `muted` |
-| F2 | `FOLDER_VISIBLE` | vis=visible, has_mount_masks=F | `(vis.visible, vis.visible, vis.visible, vis.visible)` | `default` |
-| F3 | `FOLDER_MOUNTED_MASKED` | vis=visible, has_mount_masks=T | `(vis.visible, vis.visible, cfg.masked, cfg.mount)` | `default` |
-| F4 | `FOLDER_MASKED` | vis=masked | `(vis.hidden, vis.hidden, inh.masked, inh.masked)` | `muted` |
-| F5 | `FOLDER_VIRTUAL_MIRRORED_REVEALED` | vis=virtual, has_direct_vis=T | `(vis.hidden, vis.hidden, anc.revealed, anc.revealed)` | `virtual_mirrored` |
-| F6 | `FOLDER_VIRTUAL_MIRRORED` | vis=virtual, has_direct_vis=F | `(vis.hidden, vis.hidden, vis.hidden, vis.hidden)` | `virtual_mirrored` |
-| F7 | `FOLDER_VIRTUAL_VOLUME` | vis=virtual, virtual_type=volume | `(vis.virtual, vis.virtual, virt.volume, virt.volume)` | `virtual_volume` |
-| F8 | `FOLDER_VIRTUAL_AUTH` | vis=virtual, virtual_type=auth | `(vis.virtual, vis.virtual, virt.auth, virt.auth)` | `virtual_auth` |
-| F9 | `FOLDER_REVEALED` | vis=revealed | `(vis.visible, vis.visible, cfg.revealed, cfg.revealed)` | `default` |
-| F10 | `FOLDER_PUSHED_ANCESTOR` | vis=hidden, has_pushed_desc=T | `(vis.bg, vis.bg, anc.pushed, anc.pushed)` | `default` |
-| F11 | `FOLDER_CONTAINER_ONLY` | vis=container_only | `(vis.co, vis.co, vis.co, vis.co)` | `italic` |
+Derived via `derive_gradient()` from node properties:
+
+| State | P1 | P2 | P3 | P4 | Font |
+|---|---|---|---|---|---|
+| FOLDER_HIDDEN | background | background | — | — | muted |
+| FOLDER_VISIBLE | visible | visible | — | — | default |
+| FOLDER_MOUNTED | visible | visible | — | config.mount | default |
+| FOLDER_MOUNTED_REVEALED | visible | visible | ancestor.visible | config.mount | default |
+| FOLDER_MASKED | hidden | hidden | — | inherited.masked | muted |
+| FOLDER_REVEALED | visible | hidden | — | config.revealed | default |
+| FOLDER_MIRRORED | mirrored(hidden) | hidden | — | — | virtual_mirrored |
+| FOLDER_MIRRORED_REVEALED | mirrored(hidden) | hidden | ancestor.visible | — | virtual_mirrored |
+| FOLDER_VIRTUAL_VOLUME | mirrored(virtual) | virtual | — | virtual.volume | virtual_volume |
+| FOLDER_VIRTUAL_AUTH | mirrored(virtual) | virtual | — | virtual.auth | virtual_auth |
+| FOLDER_PUSHED_ANCESTOR | background | background | ancestor.visible | — | default |
+| FOLDER_CONTAINER_ONLY | co | co | — | — | italic |
+
+"—" = falls to next in chain (P3→P4→P1).
 
 **Key distinctions:**
 
-- **MOUNTED_MASKED vs MASKED:** MOUNTED_MASKED is a mount root whose spec has deny patterns — the mount is visible but content is hidden. MASKED is any non-mount-root folder denied by a pattern. Gradient left side differs: `vis.visible` (mount exists) vs `vis.hidden` (content hidden). Right side: `config.*` (direct action) vs `inherited.*` (dimmer).
-- **VIRTUAL_MIRRORED vs VIRTUAL_VOLUME/AUTH:** Mirrored = structural host directory (mkdir'd in container, hidden background). Volume/Auth = non-filesystem entry for named Docker volume (virtual accent + purple text).
-- **VIRTUAL_MIRRORED_REVEALED vs VIRTUAL_MIRRORED:** Direct revealed child distinguishes "parent of visible content" from "structural intermediate."
+- **MOUNTED vs VISIBLE:** Mount root gets config.mount accent (greenish). Non-mount visible folders are neutral.
+- **MIRRORED vs VIRTUAL_VOLUME/AUTH:** Mirrored = structural host directory (hidden background, white text). Volume/Auth = non-filesystem entry (virtual accent + purple text).
+- **REVEALED P2=hidden:** Visible in hidden context — punch-through shows as visible left fading into hidden context.
 
 ### 3.2 File States (8)
 
