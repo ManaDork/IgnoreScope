@@ -272,45 +272,38 @@ def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrore
 
 
 def _resolve_folder_state(node_state, virtual_type: str = "mirrored") -> str:
-    """Derive folder state name from NodeState properties via formula.
+    """Derive folder state name directly from NodeState properties.
 
-    Builds the same kwargs that _FOLDER_STATE_INPUTS declares, then
-    matches against the input table to find the state name.
+    Uses the same logic as derive_gradient() to determine the state name
+    without gradient comparison — O(1) per node.
     """
+    vis = node_state.visibility
     has_vis_desc = (node_state.has_pushed_descendant or
                     node_state.has_direct_visible_child)
 
-    # Build derivation inputs from NodeState
-    inputs = {
-        "visibility": node_state.visibility,
-        "is_mount_root": node_state.is_mount_root,
-        "is_masked": node_state.masked,
-        "is_revealed": node_state.revealed,
-        "has_visible_descendant": has_vis_desc,
-        "virtual_type": virtual_type,
-        "container_only": node_state.container_only,
-    }
-
-    # Derive gradient to get the actual visual output
-    gradient, font = derive_gradient(**inputs)
-
-    # Match against known states by comparing gradient output
-    for name, state_inputs in _FOLDER_STATE_INPUTS.items():
-        expected_gradient, expected_font = derive_gradient(**state_inputs)
-        if (gradient.pos1 == expected_gradient.pos1 and
-                gradient.pos2 == expected_gradient.pos2 and
-                gradient.pos3 == expected_gradient.pos3 and
-                gradient.pos4 == expected_gradient.pos4 and
-                font == expected_font):
-            return name
-
-    import logging
-    logging.getLogger(__name__).warning(
-        "Unmatched folder state for vis=%s mount_root=%s masked=%s revealed=%s "
-        "vis_desc=%s vtype=%s co=%s — falling back to FOLDER_HIDDEN",
-        node_state.visibility, node_state.is_mount_root, node_state.masked,
-        node_state.revealed, has_vis_desc, virtual_type, node_state.container_only,
-    )
+    if node_state.container_only:
+        return "FOLDER_CONTAINER_ONLY"
+    if vis == "virtual":
+        if virtual_type == "volume":
+            return "FOLDER_VIRTUAL_VOLUME"
+        if virtual_type == "auth":
+            return "FOLDER_VIRTUAL_AUTH"
+        if has_vis_desc:
+            return "FOLDER_MIRRORED_REVEALED"
+        return "FOLDER_MIRRORED"
+    if vis in ("visible", "revealed"):
+        if node_state.revealed:
+            return "FOLDER_REVEALED"
+        if node_state.is_mount_root:
+            if has_vis_desc:
+                return "FOLDER_MOUNTED_REVEALED"
+            return "FOLDER_MOUNTED"
+        return "FOLDER_VISIBLE"
+    if vis == "masked":
+        return "FOLDER_MASKED"
+    # hidden or unknown
+    if has_vis_desc:
+        return "FOLDER_PUSHED_ANCESTOR"
     return "FOLDER_HIDDEN"
 
 
