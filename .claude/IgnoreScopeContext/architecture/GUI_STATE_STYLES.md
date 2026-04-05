@@ -90,100 +90,73 @@ These are not independent states — they modify the node's current StateStyleCl
 
 ## 3. State Enumeration — Tree Panels
 
-15 tree states (8 folder + 7 file) + 2 selected overrides.
+20 tree states (12 folder + 8 file) + 2 selected overrides.
 
 GUI reads CORE-computed NodeState fields via flat truth tables — no tree walking in the GUI.
-Folder states read: `visibility` + `has_pushed_descendant` + `has_direct_visible_child`.
+Folder states read: `visibility` + `has_pushed_descendant` + `has_direct_visible_child` + `has_mount_masks`.
 File states read: `visibility` + `pushed` + `host_orphaned`.
 
-### 3.1 Folder States (8)
+### Color Variable System (categorical)
 
-8 states derived from CORE visibility + tree-context fields.
+Variables in `tree_state_style.json` use categorical naming:
 
-| ID | State Name | Truth Table | GradientClass(pos1, pos2, pos3, pos4) | FontStyleClass |
-|----|-----------|-------------|---------------------------------------|---------------|
-| F1 | `FOLDER_HIDDEN` | vis=hidden | `(background, background, background, background)` | `muted` |
-| F2 | `FOLDER_VISIBLE` | vis=visible | `(background, background, visible, visible)` | `default` |
-| F3 | `FOLDER_MOUNTED_MASKED` | vis=masked, has_pushed_desc=F | `(mounted, mounted, masked, masked)` | `muted` |
-| F4 | `FOLDER_MOUNTED_MASKED_PUSHED` | vis=masked, has_pushed_desc=T | `(mounted, mounted, masked, pushed)` | `default` |
-| F5 | `FOLDER_MASKED_REVEALED` | vis=virtual, has_direct_vis=T | `(masked, masked, hidden, revealed)` | `default` |
-| F6 | `FOLDER_MASKED_MIRRORED` | vis=virtual, has_direct_vis=F | `(masked, masked, virtual, virtual)` | `default` |
-| F7 | `FOLDER_REVEALED` | vis=revealed | `(revealed, revealed, visible, visible)` | `default` |
-| F8 | `FOLDER_PUSHED_ANCESTOR` | vis=hidden, has_pushed_desc=T | `(background, background, background, pushed)` | `default` |
+| Category | Variables | Position | Purpose |
+|----------|----------|----------|---------|
+| `visibility.*` | `.visible`, `.hidden`, `.virtual`, `.background`, `.container_only` | P1, P2 (left) | What the container sees |
+| `config.*` | `.mount`, `.masked`, `.revealed`, `.pushed` | P3, P4 (right) | User's direct config action |
+| `inherited.*` | `.masked`, `.revealed`, `.virtual_auth`, `.virtual_volume` | P3, P4 (right) | State from ancestor (dimmer, less saturated) |
+| `ancestor.*` | `.pushed`, `.revealed` | P3 | Descendant tracking |
+| `virtual.*` | `.volume`, `.auth` | P3, P4 (right) | Virtual subtype accent |
+| `status.*` | `.warning` | P4 | Status indicators |
+| `ui.*` | `.selected` | P2, P3 | Selection override |
 
-**Folder truth table** (GUI reads NodeState fields, no tree walking):
+### 3.1 Folder States (12)
 
-```
-visibility | has_pushed_desc | has_direct_vis | -> State Name                  | Font
----------- | --------------- | -------------- | ------------------------------ | -------
-hidden     | T               | -              | FOLDER_PUSHED_ANCESTOR         | default
-hidden     | -               | -              | FOLDER_HIDDEN                  | muted
-visible    | -               | -              | FOLDER_VISIBLE                 | default
-masked     | F               | -              | FOLDER_MOUNTED_MASKED          | muted
-masked     | T               | -              | FOLDER_MOUNTED_MASKED_PUSHED   | default
-virtual   | -               | T              | FOLDER_MASKED_REVEALED         | default
-virtual   | -               | F              | FOLDER_MASKED_MIRRORED         | default
-revealed   | -               | -              | FOLDER_REVEALED                | default
-```
+| ID | State Name | Condition | GradientClass | Font |
+|----|-----------|-----------|---------------|------|
+| F1 | `FOLDER_HIDDEN` | vis=hidden | `(vis.bg, vis.bg, vis.bg, vis.bg)` | `muted` |
+| F2 | `FOLDER_VISIBLE` | vis=visible, has_mount_masks=F | `(vis.visible, vis.visible, vis.visible, vis.visible)` | `default` |
+| F3 | `FOLDER_MOUNTED_MASKED` | vis=visible, has_mount_masks=T | `(vis.visible, vis.visible, cfg.masked, cfg.mount)` | `default` |
+| F4 | `FOLDER_MASKED` | vis=masked | `(vis.hidden, vis.hidden, inh.masked, inh.masked)` | `muted` |
+| F5 | `FOLDER_VIRTUAL_MIRRORED_REVEALED` | vis=virtual, has_direct_vis=T | `(vis.hidden, vis.hidden, anc.revealed, anc.revealed)` | `virtual_mirrored` |
+| F6 | `FOLDER_VIRTUAL_MIRRORED` | vis=virtual, has_direct_vis=F | `(vis.hidden, vis.hidden, vis.hidden, vis.hidden)` | `virtual_mirrored` |
+| F7 | `FOLDER_VIRTUAL_VOLUME` | vis=virtual, virtual_type=volume | `(vis.virtual, vis.virtual, virt.volume, virt.volume)` | `virtual_volume` |
+| F8 | `FOLDER_VIRTUAL_AUTH` | vis=virtual, virtual_type=auth | `(vis.virtual, vis.virtual, virt.auth, virt.auth)` | `virtual_auth` |
+| F9 | `FOLDER_REVEALED` | vis=revealed | `(vis.visible, vis.visible, cfg.revealed, cfg.revealed)` | `default` |
+| F10 | `FOLDER_PUSHED_ANCESTOR` | vis=hidden, has_pushed_desc=T | `(vis.bg, vis.bg, anc.pushed, anc.pushed)` | `default` |
+| F11 | `FOLDER_CONTAINER_ONLY` | vis=container_only | `(vis.co, vis.co, vis.co, vis.co)` | `italic` |
 
-"-" = field not checked for this state (any value matches).
+**Key distinctions:**
 
-**Notes:**
+- **MOUNTED_MASKED vs MASKED:** MOUNTED_MASKED is a mount root whose spec has deny patterns — the mount is visible but content is hidden. MASKED is any non-mount-root folder denied by a pattern. Gradient left side differs: `vis.visible` (mount exists) vs `vis.hidden` (content hidden). Right side: `config.*` (direct action) vs `inherited.*` (dimmer).
+- **VIRTUAL_MIRRORED vs VIRTUAL_VOLUME/AUTH:** Mirrored = structural host directory (mkdir'd in container, hidden background). Volume/Auth = non-filesystem entry for named Docker volume (virtual accent + purple text).
+- **VIRTUAL_MIRRORED_REVEALED vs VIRTUAL_MIRRORED:** Direct revealed child distinguishes "parent of visible content" from "structural intermediate."
 
-- **FOLDER_VISIBLE** = "mounted" in CORE. vis=visible is produced ONLY when mounted=T. The checkbox column provides "is this node a mount root?" distinction separately.
-- **FOLDER_PUSHED_ANCESTOR** = hidden folder (not under any mount) with a pushed descendant. Distinct from F4 (FOLDER_MOUNTED_MASKED_PUSHED) which is a masked folder inside a mount. F8 uses background base with pushed accent; F4 uses mounted+masked base.
-- **FOLDER_MOUNTED_MASKED** vs **FOLDER_MOUNTED_MASKED_PUSHED**: Both vis=masked. Pushed descendant presence distinguishes empty masked zone from one containing docker cp content.
-- **FOLDER_MASKED_REVEALED** vs **FOLDER_MASKED_MIRRORED**: Both vis=virtual. Direct visible child distinguishes "parent of visible content" from "structural mkdir-p intermediate."
-- F5 gradient is **user-confirmed**: `(masked, masked, hidden, revealed)` — masked identity left, revealed children indicated right.
-- Old states F2 (`FOLDER_VISIBLE` with mounted=F), F3 (`FOLDER_VISIBLE_MIRRORED`), F5 (`FOLDER_MASKED` with mounted=F), F6 (`FOLDER_MASKED_REVEALED_CHILDREN` with mounted=F) eliminated — impossible or invalid under CORE's ancestor-derived flags.
+### 3.2 File States (8)
 
-### 3.2 File States (7)
+Slim layout: P1=visibility, P2=background, P3=sync(deferred), P4=pushed/status.
 
-7 states derived from CORE visibility + `pushed` + `host_orphaned` flags.
+| ID | State Name | Condition | GradientClass | Font |
+|----|-----------|-----------|---------------|------|
+| FI1 | `FILE_HIDDEN` | vis=hidden, pushed=F | `(vis.hidden, vis.bg, vis.bg, vis.bg)` | `muted` |
+| FI2 | `FILE_VISIBLE` | vis=visible | `(vis.visible, vis.bg, vis.bg, vis.bg)` | `default` |
+| FI3 | `FILE_MASKED` | vis=masked, pushed=F | `(vis.hidden, vis.bg, vis.bg, vis.bg)` | `muted` |
+| FI4 | `FILE_REVEALED` | vis=revealed | `(vis.visible, vis.bg, vis.bg, vis.bg)` | `default` |
+| FI5 | `FILE_PUSHED` | pushed=T | `(vis.hidden, vis.bg, vis.bg, cfg.pushed)` | `default` |
+| FI6 | `FILE_HOST_ORPHAN` | pushed=T, host_orphaned=T | *(DEFERRED)* | `italic` |
+| FI7 | `FILE_CONTAINER_ORPHAN` | vis=orphaned | `(vis.hidden, vis.bg, vis.bg, status.warning)` | `italic` |
+| FI8 | `FILE_CONTAINER_ONLY` | vis=container_only | `(vis.co, vis.bg, vis.bg, vis.bg)` | `italic` |
 
-| ID | State Name | Truth Table | GradientClass(pos1, pos2, pos3, pos4) | FontStyleClass |
-|----|-----------|-------------|---------------------------------------|---------------|
-| FI1 | `FILE_HIDDEN` | vis=hidden, pushed=F | `(background, background, background, background)` | `muted` |
-| FI2 | `FILE_VISIBLE` | vis=visible, pushed=F | `(background, background, visible, visible)` | `default` |
-| FI3 | `FILE_MASKED` | vis=masked, pushed=F | `(background, background, hidden, hidden)` | `muted` |
-| FI4 | `FILE_REVEALED` | vis=revealed, pushed=F | `(background, background, visible, revealed)` | `default` |
-| FI5 | `FILE_PUSHED` | vis=masked, pushed=T, host_orphaned=F | `(pushed, pushed, hidden, hidden)` | `default` |
-| FI6 | `FILE_HOST_ORPHAN` | vis=masked, pushed=T, host_orphaned=T | *(DEFERRED — `warn_soft` TBD)* | `italic` |
-| FI7 | `FILE_CONTAINER_ORPHAN` | vis=orphaned | `(warning, warning, hidden, hidden)` | `italic` |
-
-**File truth table** (GUI reads NodeState fields, no tree walking):
-
-```
-visibility | pushed | host_orph | -> State Name            | Font
----------- | ------ | --------- | ------------------------ | ------
-hidden     | F      | -         | FILE_HIDDEN              | muted
-visible    | F      | -         | FILE_VISIBLE             | default
-masked     | F      | -         | FILE_MASKED              | muted
-revealed   | F      | -         | FILE_REVEALED            | default
-masked     | T      | F         | FILE_PUSHED              | default
-masked     | T      | T         | FILE_HOST_ORPHAN         | italic  (DEFERRED)
-orphaned   | (T)    | -         | FILE_CONTAINER_ORPHAN    | italic
-```
-
-"-" = field not checked (any value). `host_orphaned` only discriminates within pushed files.
-`container_orphaned` is already encoded in vis=orphaned (TTFF matrix), so no separate column needed.
-
-**Notes:**
-
-- **FILE_MASKED** and **FILE_REVEALED** are new states — the old spec had no states for unpushed files in masked or revealed zones.
-- **FILE_HOST_ORPHAN** is DEFERRED. The state exists in the design model but requires scoping decisions about scan coverage before implementation. Gradient uses `warn_soft` (amber, visually distinct from orange `warning`).
-- **FILE_CONTAINER_ORPHAN** renamed from old `FILE_ORPHANED`. vis=orphaned implies pushed=T and container_orphaned=T (TTFF matrix).
-- **Pushed redundancy rule:** When pushed=T AND visibility in {visible, revealed}, the push is redundant. GUI treats these as their base state (FILE_VISIBLE or FILE_REVEALED).
-- Old FI4 (`FILE_PUSHED_VISIBLE`) and FI6 (`FILE_ORPHANED_VISIBLE`) eliminated — impossible or collapsed into base states.
+FILE_MASKED and FILE_HIDDEN share the same gradient — font color may be the primary differentiator (TBD). FILE_REVEALED and FILE_VISIBLE similarly share gradients. Both kept as separate states for future font color distinction. Pushed file special treatment deferred.
 
 ### 3.3 Selected State Overrides
 
 | Override | Applies To | Mechanism |
 |----------|-----------|-----------|
-| FOLDER_SELECTED | Any F1–F8 state | pos2 -> `selected`, pos3 -> `selected` |
-| FILE_SELECTED | Any FI1–FI7 state | pos2 -> `selected`, pos3 -> `selected` |
+| FOLDER_SELECTED | Any folder state | pos2 -> `ui.selected`, pos3 -> `ui.selected` |
+| FILE_SELECTED | Any file state | pos2 -> `ui.selected`, pos3 -> `ui.selected` |
 
-Selected overrides are applied at paint time. They do not create new StateStyleClass entries — they modify the base state's GradientClass positions. See Section 2 for the override mechanism.
+Selected overrides modify the base state at paint time — not separate StateStyleClass entries.
 
 ---
 

@@ -38,6 +38,10 @@ User-configured flag marking a host directory as hidden from the container. Impl
 **Persistence:** Mask volumes survive container stop/start. Destroyed by `docker compose down -v`.
 **Nesting:** A masked folder can contain revealed subfolders, which can contain re-masked subfolders, to arbitrary depth. Pathspec last-match-wins evaluation resolves nesting.
 
+**Display state distinction:**
+- **FOLDER_MOUNTED_MASKED** — mount root whose spec has deny patterns (`is_mount_root=T, has_mount_masks=T`). The mount itself is visible; its content is hidden. Gradient: `vis.visible → config.masked + config.mount`.
+- **FOLDER_MASKED** — non-mount-root folder denied by a pattern. Gradient: `vis.hidden → inherited.masked`.
+
 **Domains:** Config, Computation (interleaved volumes, revealed_parents), Generation (named volume entry), Container Ops (docker cp target, volume_exists check), Presentation (checkbox)
 
 ---
@@ -215,10 +219,12 @@ Per-node state model containing all flags that define a filesystem node's identi
 | Field | Type | Source | Scope | Description |
 |-------|------|--------|-------|-------------|
 | `mounted` | bool | Config (folders) / Ancestor walk (files) | All nodes | Node is under a bind mount |
-| `masked` | bool | Config (folders) / Ancestor walk (files) | All nodes | Path is under a mask volume |
+| `masked` | bool | Config (folders) / Ancestor walk (files) | All nodes | Path matched by deny pattern |
 | `revealed` | bool | Config (folders) / Ancestor walk (files) | All nodes | User punched through a mask |
 | `pushed` | bool | Config | Files only | File was docker cp'd into container |
 | `container_orphaned` | bool | MatrixState (TTFF) | Files only | pushed + masked + not mounted + not revealed |
+| `is_mount_root` | bool | Path == mount_spec.mount_root | Folders only | Node IS a mount root declaration |
+| `has_mount_masks` | bool | is_mount_root AND spec has deny patterns | Folders only | Mount root whose content is masked |
 | `visibility` | str | MatrixState + config queries | All nodes | orphaned / revealed / virtual / masked / visible / hidden |
 | `has_pushed_descendant` | bool | Config query (Phase 3 Stage 3) | Folders only | Any descendant has pushed=True |
 | `has_direct_visible_child` | bool | States pass (Phase 3 Stage 3) | Folders only | Immediate child has revealed=True or pushed=True |
@@ -227,7 +233,30 @@ Per-node state model containing all flags that define a filesystem node's identi
 `virtual` derived via config-native queries — CORE (`core/node_state.py`), controlled by `config.mirrored` toggle. No tree walks. GUI uses CORE results only.
 
 Config `mount_specs` are evaluated via pathspec to produce per-node NodeState boolean flags. The mapping is `mount_specs → pathspec eval → (mounted, masked, revealed)`, not a direct 1:1 JSON field mapping.
-Full state model: 14 states (7 folder + 7 file) + 2 selected overrides — see `GUI_STATE_STYLES.md` Section 3.
+
+### Display State Classification
+
+**Folder states** (12 — was 9):
+
+| Display State | Condition | Gradient |
+|---|---|---|
+| FOLDER_HIDDEN | Not under any mount | vis.background throughout |
+| FOLDER_VISIBLE | Mounted, no mask, no mount masks | vis.visible throughout |
+| FOLDER_MOUNTED_MASKED | is_mount_root AND has_mount_masks | vis.visible → config.masked + config.mount |
+| FOLDER_MASKED | Under mount, denied by pattern, NOT mount root | vis.hidden → inherited.masked |
+| FOLDER_VIRTUAL_MIRRORED | Structural path, deeper descendant | vis.hidden throughout, visible text |
+| FOLDER_VIRTUAL_MIRRORED_REVEALED | Structural path, direct revealed child | vis.hidden → ancestor.revealed, visible text |
+| FOLDER_VIRTUAL_VOLUME | Non-filesystem named volume entry | vis.virtual → virtual.volume, purple text |
+| FOLDER_VIRTUAL_AUTH | Non-filesystem auth volume entry | vis.virtual → virtual.auth, purple text |
+| FOLDER_REVEALED | Exception pattern punch-through | vis.visible → config.revealed |
+| FOLDER_PUSHED_ANCESTOR | Has pushed descendant | vis.background → ancestor.pushed |
+| FOLDER_CONTAINER_ONLY | Container scan diff | vis.container_only throughout |
+
+MOUNTED_MASKED = mount root whose spec has deny patterns. The mount root directory is visible (bind mount) but its content is masked by named volumes. Distinguished from MASKED which is any non-mount-root folder denied by a pattern.
+
+**File states** (8 — unchanged): FILE_HIDDEN, FILE_VISIBLE, FILE_MASKED, FILE_REVEALED, FILE_PUSHED, FILE_HOST_ORPHAN (deferred), FILE_CONTAINER_ORPHAN, FILE_CONTAINER_ONLY.
+
+See `GUI_STATE_STYLES.md` for gradient variable tables and color values.
 
 **Domains:** Config (1:1 field mapping), Computation (Phase 3 state application), Presentation (Phase 5 cosmetic rendering)
 

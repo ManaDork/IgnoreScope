@@ -166,10 +166,16 @@ PHASE 3: APPLY NODE STATE
         │       CORE-owned in core/node_state.py. GUI uses CORE results only.
         │
         ├── Stage 3 descendant folder fields (config-native — no tree walks):
+        │       is_mount_root = (path == mount_spec.mount_root)
+        │       has_mount_masks = is_mount_root AND spec has deny patterns
         │       has_pushed_descendant = config.has_pushed_descendant(path)
         │       has_direct_visible_child = parents of revealed/pushed nodes (single pass)
         │
         └── Returns: HostFileTree with all NodeState populated
+        │
+        │   GUI further classifies virtual nodes by MountDataNode.virtual_type
+        │   (mirrored/volume/auth) for display state resolution. CORE produces
+        │   a single "virtual" visibility; subtypes are a presentation concern.
 
 
 PHASE 4: VALIDATION
