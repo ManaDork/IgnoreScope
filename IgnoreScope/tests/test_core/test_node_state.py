@@ -300,7 +300,75 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.mounted is True
+        assert ns.is_mount_root is True
         assert ns.visibility == "visible"
+
+    def test_child_of_mount_is_not_mount_root(self, tmp_path: Path):
+        src = tmp_path / "src"
+        child = src / "main.py"
+
+        ns = compute_node_state(
+            path=child,
+            mount_specs=_make_mount_specs({src}),
+            pushed_files=set(),
+        )
+        assert ns.mounted is True
+        assert ns.is_mount_root is False
+
+    def test_mount_root_with_deny_patterns_has_mount_masks(self, tmp_path: Path):
+        """Mount root whose spec has deny patterns → has_mount_masks=True.
+        This is MOUNTED_MASKED: mount root is visible but content is masked."""
+        src = tmp_path / "src"
+
+        ms = MountSpecPath(mount_root=src, patterns=["vendor/", "!vendor/public/"])
+        ns = compute_node_state(
+            path=src,
+            mount_specs=[ms],
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is True
+        assert ns.has_mount_masks is True
+        assert ns.visibility == "visible"  # root itself is visible
+
+    def test_mount_root_without_patterns_no_mount_masks(self, tmp_path: Path):
+        """Mount root with no patterns → has_mount_masks=False. Just VISIBLE."""
+        src = tmp_path / "src"
+
+        ms = MountSpecPath(mount_root=src, patterns=[])
+        ns = compute_node_state(
+            path=src,
+            mount_specs=[ms],
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is True
+        assert ns.has_mount_masks is False
+
+    def test_mount_root_with_only_exceptions_no_mount_masks(self, tmp_path: Path):
+        """Mount root with only exception patterns (no deny) → has_mount_masks=False."""
+        src = tmp_path / "src"
+
+        ms = MountSpecPath(mount_root=src, patterns=["!vendor/public/"])
+        ns = compute_node_state(
+            path=src,
+            mount_specs=[ms],
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is True
+        assert ns.has_mount_masks is False
+
+    def test_non_mount_root_never_has_mount_masks(self, tmp_path: Path):
+        """Non-mount-root path always has has_mount_masks=False."""
+        src = tmp_path / "src"
+        child = src / "vendor"
+
+        ms = MountSpecPath(mount_root=src, patterns=["vendor/"])
+        ns = compute_node_state(
+            path=child,
+            mount_specs=[ms],
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is False
+        assert ns.has_mount_masks is False
 
     def test_mask_point_itself_is_masked(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -312,7 +380,19 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.masked is True
+        assert ns.is_mount_root is False
         assert ns.visibility == "masked"
+
+    def test_path_outside_mount_not_mount_root(self, tmp_path: Path):
+        outside = tmp_path / "other"
+
+        ns = compute_node_state(
+            path=outside,
+            mount_specs=_make_mount_specs({tmp_path / "src"}),
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is False
+        assert ns.mounted is False
 
     def test_reveal_point_itself_is_revealed(self, tmp_path: Path):
         src = tmp_path / "src"
