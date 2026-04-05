@@ -238,9 +238,7 @@ def compute_node_state(
         if path == ms.mount_root or is_descendant(path, ms.mount_root):
             is_mounted = True
             is_mount_root = (path == ms.mount_root)
-            has_mount_masks = is_mount_root and any(
-                not p.startswith("!") for p in ms.patterns
-            )
+            has_mount_masks = is_mount_root and ms.mount_root_masked
             is_masked = ms.is_masked(path)
             is_revealed = ms.is_unmasked(path)
             break  # path belongs to first matching mount

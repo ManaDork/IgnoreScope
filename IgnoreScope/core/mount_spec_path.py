@@ -31,10 +31,13 @@ class MountSpecPath:
     Attributes:
         mount_root: Absolute path to the bind mount root on the host.
         patterns: Ordered list of gitignore-style patterns, relative to mount_root.
+        mount_root_masked: When True, the mount root's content is masked.
+            GUI toggle — bypasses pathspec (mount root can't self-mask via patterns).
     """
 
     mount_root: Path = field(default_factory=Path)
     patterns: list[str] = field(default_factory=list)
+    mount_root_masked: bool = False
 
     # --- Pattern CRUD ---
 
@@ -247,10 +250,13 @@ class MountSpecPath:
             host_project_root: Base path for relative conversion.
         """
         rel_root = to_relative_posix(self.mount_root, host_project_root)
-        return {
+        result = {
             "mount_root": rel_root,
             "patterns": list(self.patterns),
         }
+        if self.mount_root_masked:
+            result["mount_root_masked"] = True
+        return result
 
     @classmethod
     def from_dict(cls, data: dict, host_project_root: Path) -> MountSpecPath:
@@ -263,7 +269,8 @@ class MountSpecPath:
         raw_root = data.get("mount_root", ".")
         mount_root = (host_project_root / raw_root).resolve()
         patterns = list(data.get("patterns", []))
-        return cls(mount_root=mount_root, patterns=patterns)
+        mount_root_masked = data.get("mount_root_masked", False)
+        return cls(mount_root=mount_root, patterns=patterns, mount_root_masked=mount_root_masked)
 
     # --- Internal ---
 
