@@ -18,7 +18,7 @@ from IgnoreScope.gui.display_config import (
     LocalHostDisplayConfig,
     ScopeDisplayConfig,
     resolve_tree_state,
-    FOLDER_STATE_TABLE,
+    derive_gradient,
     FILE_STATE_TABLE,
 )
 from IgnoreScope.gui.list_display_config import ListDisplayConfig
@@ -58,7 +58,7 @@ class TestFolderTruthTable:
 
     def test_folder_masked(self):
         """Under mount, denied by pattern → FOLDER_MASKED."""
-        ns = NodeState(visibility="masked")
+        ns = NodeState(visibility="masked", masked=True, mounted=True)
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MASKED"
 
     def test_folder_mirrored_revealed(self):
@@ -86,7 +86,7 @@ class TestFolderTruthTable:
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_PUSHED_ANCESTOR"
 
     def test_folder_revealed(self):
-        ns = NodeState(visibility="revealed")
+        ns = NodeState(visibility="revealed", revealed=True, masked=True, mounted=True)
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_REVEALED"
 
     def test_folder_container_only(self):
