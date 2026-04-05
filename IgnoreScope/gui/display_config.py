@@ -55,7 +55,7 @@ class ColumnDef:
 # ------------------------------------------------------------------
 
 _P2_MAP = {"visible": "visible", "hidden": "hidden", "background": "background",
-           "mirrored": "hidden", "co": "co"}
+           "virtual": "virtual", "container_only": "container_only"}
 
 
 def derive_gradient(
@@ -72,17 +72,20 @@ def derive_gradient(
     Returns:
         (GradientClass, font_var_name) tuple for StateStyleClass construction.
     """
-    # P1: what the container sees
+    # P1: what the container sees (must match JSON key suffix in visibility.*)
+    is_virtual = (visibility == "virtual")
     if container_only:
-        p1 = "co"
-    elif visibility == "virtual":
-        p1 = "mirrored"
+        p1 = "container_only"
+    elif is_virtual and virtual_type in ("volume", "auth"):
+        p1 = "virtual"         # non-filesystem accent color
+    elif is_virtual:
+        p1 = "hidden"          # mirrored content IS hidden
     elif visibility in ("visible", "revealed"):
         p1 = "visible"
     elif visibility == "masked":
         p1 = "hidden"
     else:
-        p1 = "background"  # not under any mount
+        p1 = "background"      # not under any mount
 
     # P2: parent context
     if p1 == "visible" and is_revealed:
@@ -91,14 +94,14 @@ def derive_gradient(
         p2 = _P2_MAP.get(p1, "hidden")
 
     # P4: config/inherited action — full color variable name
-    # When p1=mirrored, masking is already captured in visibility — skip is_masked
+    # When virtual, masking is already captured in visibility — skip is_masked
     if is_mount_root:
         p4_var = "config.mount"
     elif is_revealed:
         p4_var = "config.revealed"
-    elif is_masked and p1 != "mirrored":
+    elif is_masked and not is_virtual:
         p4_var = "inherited.masked"
-    elif p1 == "mirrored" and virtual_type in ("volume", "auth"):
+    elif is_virtual and virtual_type in ("volume", "auth"):
         p4_var = f"virtual.{virtual_type}"
     else:
         p4_var = None
@@ -118,11 +121,11 @@ def derive_gradient(
     # Font derivation
     if container_only:
         font = "italic"
-    elif p1 == "mirrored" and virtual_type in ("volume", "auth"):
+    elif is_virtual and virtual_type in ("volume", "auth"):
         font = f"virtual_{virtual_type}"
-    elif p1 == "mirrored":
+    elif is_virtual:
         font = "virtual_mirrored"
-    elif p1 == "hidden" and not has_visible_descendant:
+    elif p1 in ("hidden", "background") and not has_visible_descendant:
         font = "muted"
     else:
         font = "default"
