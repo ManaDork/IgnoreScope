@@ -91,11 +91,12 @@ def derive_gradient(
         p2 = _P2_MAP.get(p1, "hidden")
 
     # P4: config/inherited action — full color variable name
+    # When p1=mirrored, masking is already captured in visibility — skip is_masked
     if is_mount_root:
         p4_var = "config.mount"
     elif is_revealed:
         p4_var = "config.revealed"
-    elif is_masked:
+    elif is_masked and p1 != "mirrored":
         p4_var = "inherited.masked"
     elif p1 == "mirrored" and virtual_type in ("volume", "auth"):
         p4_var = f"virtual.{virtual_type}"
