@@ -473,14 +473,6 @@ class MountDataTree(QObject):
         self._recompute_states()
         return True
 
-    def toggle_mount_root_masked(self, path: Path, masked: bool) -> None:
-        """Toggle mount_root_masked flag on the owning spec and recompute."""
-        self.aboutToMutate.emit()
-        ms = self._find_owning_spec(path)
-        if ms is not None and path == ms.mount_root:
-            ms.mount_root_masked = masked
-            self._recompute_states()
-
     def add_reveal(self, path: Path) -> bool:
         """Add reveal pattern (!vendor/) via RMB and recompute."""
         self.aboutToMutate.emit()

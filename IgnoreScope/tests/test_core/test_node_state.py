@@ -315,50 +315,6 @@ class TestComputeNodeState:
         assert ns.mounted is True
         assert ns.is_mount_root is False
 
-    def test_mount_root_masked_flag_true(self, tmp_path: Path):
-        """mount_root_masked=True on spec → has_mount_masks=True on NodeState.
-        This is MOUNTED_MASKED: mount root is visible but content is masked."""
-        src = tmp_path / "src"
-
-        ms = MountSpecPath(mount_root=src, patterns=["vendor/"], mount_root_masked=True)
-        ns = compute_node_state(
-            path=src,
-            mount_specs=[ms],
-            pushed_files=set(),
-        )
-        assert ns.is_mount_root is True
-        assert ns.has_mount_masks is True
-        assert ns.visibility == "visible"
-
-    def test_mount_root_masked_flag_false(self, tmp_path: Path):
-        """mount_root_masked=False (default) → has_mount_masks=False.
-        Mount root with patterns but not flagged = just VISIBLE."""
-        src = tmp_path / "src"
-
-        ms = MountSpecPath(mount_root=src, patterns=["vendor/"], mount_root_masked=False)
-        ns = compute_node_state(
-            path=src,
-            mount_specs=[ms],
-            pushed_files=set(),
-        )
-        assert ns.is_mount_root is True
-        assert ns.has_mount_masks is False
-
-    def test_non_mount_root_ignores_flag(self, tmp_path: Path):
-        """Non-mount-root path always has has_mount_masks=False,
-        even if spec has mount_root_masked=True."""
-        src = tmp_path / "src"
-        child = src / "vendor"
-
-        ms = MountSpecPath(mount_root=src, patterns=["vendor/"], mount_root_masked=True)
-        ns = compute_node_state(
-            path=child,
-            mount_specs=[ms],
-            pushed_files=set(),
-        )
-        assert ns.is_mount_root is False
-        assert ns.has_mount_masks is False
-
     def test_mask_point_itself_is_masked(self, tmp_path: Path):
         src = tmp_path / "src"
         api = src / "api"

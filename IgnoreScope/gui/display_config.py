@@ -50,59 +50,65 @@ class ColumnDef:
 #   P1 = visibility        P2 = visibility
 #   P3 = config/inherited   P4 = config/inherited
 #
+# Folder Gradient Formula: P1=visibility, P2=context, P3=ancestor, P4=config||inherited
 # 12 Folder states
 _FOLDER_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
-    # F1 — not under any mount
+    # P1=hidden, no config
     "FOLDER_HIDDEN": (
         GradientClass("visibility.background", "visibility.background", "visibility.background", "visibility.background"),
         "muted",
     ),
-    # F2 — mounted, no mask
+    # P1=visible, no config (not mount root)
     "FOLDER_VISIBLE": (
         GradientClass("visibility.visible", "visibility.visible", "visibility.visible", "visibility.visible"),
         "default",
     ),
-    # F3 — mount root with deny patterns (content masked)
-    "FOLDER_MOUNTED_MASKED": (
-        GradientClass("visibility.visible", "visibility.visible", "config.masked", "config.mount"),
+    # P1=visible, P4=mount (mount root)
+    "FOLDER_MOUNTED": (
+        GradientClass("visibility.visible", "visibility.visible", "config.mount", "config.mount"),
         "default",
     ),
-    # F4 — under mount, denied by pattern, NOT mount root
+    # P1=visible, P3=ancestor.visible, P4=mount (mount root with revealed/pushed descendants)
+    "FOLDER_MOUNTED_REVEALED": (
+        GradientClass("visibility.visible", "visibility.visible", "ancestor.visible", "config.mount"),
+        "default",
+    ),
+    # P1=hidden, P4=masked (inherited deny pattern)
     "FOLDER_MASKED": (
         GradientClass("visibility.hidden", "visibility.hidden", "inherited.masked", "inherited.masked"),
         "muted",
     ),
-    # F5 — structural path, direct revealed child
-    "FOLDER_VIRTUAL_MIRRORED_REVEALED": (
-        GradientClass("visibility.hidden", "visibility.hidden", "ancestor.revealed", "ancestor.revealed"),
-        "virtual_mirrored",
+    # P1=visible, P2=hidden (punch-through in masked context), P4=reveal
+    "FOLDER_REVEALED": (
+        GradientClass("visibility.visible", "visibility.hidden", "config.revealed", "config.revealed"),
+        "default",
     ),
-    # F6 — structural path, deeper revealed descendant
-    "FOLDER_VIRTUAL_MIRRORED": (
+    # P1=mirrored, no config (structural path, deeper descendant)
+    "FOLDER_MIRRORED": (
         GradientClass("visibility.hidden", "visibility.hidden", "visibility.hidden", "visibility.hidden"),
         "virtual_mirrored",
     ),
-    # F7 — non-filesystem named volume entry
+    # P1=mirrored, P3=ancestor.visible (structural path, direct revealed child)
+    "FOLDER_MIRRORED_REVEALED": (
+        GradientClass("visibility.hidden", "visibility.hidden", "ancestor.visible", "ancestor.visible"),
+        "virtual_mirrored",
+    ),
+    # P1=mirrored, P4=virtual_volume
     "FOLDER_VIRTUAL_VOLUME": (
         GradientClass("visibility.virtual", "visibility.virtual", "virtual.volume", "virtual.volume"),
         "virtual_volume",
     ),
-    # F8 — non-filesystem auth volume entry
+    # P1=mirrored, P4=virtual_auth
     "FOLDER_VIRTUAL_AUTH": (
         GradientClass("visibility.virtual", "visibility.virtual", "virtual.auth", "virtual.auth"),
         "virtual_auth",
     ),
-    # F9 — revealed punch-through
-    "FOLDER_REVEALED": (
-        GradientClass("visibility.visible", "visibility.visible", "config.revealed", "config.revealed"),
-        "default",
-    ),
-    # F10 — has pushed descendant (outside mount or hidden)
+    # P1=hidden, P3=ancestor.visible (has pushed/revealed descendant)
     "FOLDER_PUSHED_ANCESTOR": (
-        GradientClass("visibility.background", "visibility.background", "ancestor.pushed", "ancestor.pushed"),
+        GradientClass("visibility.background", "visibility.background", "ancestor.visible", "ancestor.visible"),
         "default",
     ),
-    # F11 — container-only
+    # P1=co
     "FOLDER_CONTAINER_ONLY": (
         GradientClass("visibility.container_only", "visibility.container_only", "visibility.container_only", "visibility.container_only"),
         "italic",
@@ -168,20 +174,21 @@ _TREE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
 # Values are state name strings (keys into _TREE_STATE_DEFS)
 # ------------------------------------------------------------------
 
-# Folder: (visibility, has_pushed_descendant, has_direct_visible_child, has_mount_masks) -> state
-# Note: virtual_type is checked separately in resolve_tree_state for virtual subtypes
+# Folder: (visibility, has_visible_descendant, is_mount_root) -> state
+# has_visible_descendant = has_pushed_descendant OR has_direct_visible_child (unified)
+# Note: virtual_type checked separately in resolve_tree_state for volume/auth subtypes
 FOLDER_STATE_TABLE: dict[tuple, str] = {
-    ("hidden",   True,  None,  None):   "FOLDER_PUSHED_ANCESTOR",
-    ("hidden",   None,  None,  None):   "FOLDER_HIDDEN",
-    ("visible",  None,  None,  True):   "FOLDER_MOUNTED_MASKED",  # mount root with deny patterns
-    ("visible",  None,  None,  False):  "FOLDER_VISIBLE",
-    ("visible",  None,  None,  None):   "FOLDER_VISIBLE",         # fallback for non-mount-root
-    ("masked",   None,  None,  None):   "FOLDER_MASKED",          # under mount, denied by pattern
-    ("virtual",  None,  True,  None):   "FOLDER_VIRTUAL_MIRRORED_REVEALED",
-    ("virtual",  None,  False, None):   "FOLDER_VIRTUAL_MIRRORED",
-    ("revealed", None,  None,  None):   "FOLDER_REVEALED",
-    ("container_only", False, None, None): "FOLDER_CONTAINER_ONLY",
-    ("container_only", True,  None, None): "FOLDER_CONTAINER_ONLY",
+    ("hidden",   True,  None):  "FOLDER_PUSHED_ANCESTOR",
+    ("hidden",   None,  None):  "FOLDER_HIDDEN",
+    ("visible",  True,  True):  "FOLDER_MOUNTED_REVEALED",
+    ("visible",  None,  True):  "FOLDER_MOUNTED",
+    ("visible",  None,  False): "FOLDER_VISIBLE",
+    ("visible",  None,  None):  "FOLDER_VISIBLE",
+    ("masked",   None,  None):  "FOLDER_MASKED",
+    ("virtual",  True,  None):  "FOLDER_MIRRORED_REVEALED",
+    ("virtual",  None,  None):  "FOLDER_MIRRORED",
+    ("revealed", None,  None):  "FOLDER_REVEALED",
+    ("container_only", None, None): "FOLDER_CONTAINER_ONLY",
 }
 
 # File: (visibility, pushed, host_orphaned) -> state
@@ -223,11 +230,13 @@ def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrore
         Falls back to "FOLDER_HIDDEN" or "FILE_HIDDEN" if no match.
     """
     if is_folder:
+        # Unified visible descendant: pushed OR revealed child
+        has_vis_desc = (node_state.has_pushed_descendant or
+                        node_state.has_direct_visible_child)
         condition = (
             node_state.visibility,
-            node_state.has_pushed_descendant,
-            node_state.has_direct_visible_child,
-            node_state.has_mount_masks,
+            has_vis_desc,
+            node_state.is_mount_root,
         )
         table = FOLDER_STATE_TABLE
         fallback = "FOLDER_HIDDEN"
@@ -245,7 +254,7 @@ def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrore
 
     for key, state_name in table.items():
         if _match_key(condition, key):
-            # Virtual subtype override — truth table returns VIRTUAL_MIRRORED*
+            # Virtual subtype override — truth table returns MIRRORED*
             # but volume/auth nodes get their own states
             if is_folder and node_state.visibility == "virtual" and virtual_type != "mirrored":
                 if virtual_type == "volume":

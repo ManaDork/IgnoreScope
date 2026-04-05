@@ -128,38 +128,19 @@ class LocalHostView(QWidget):
     # ── Header Context Menu ──────────────────────────────────────
 
     def _show_header_context_menu(self, pos: QPoint) -> None:
-        """Header RMB: mount/unmount and mask/unmask for host_project_root."""
+        """Header RMB: toggle mount for host_project_root."""
         root = self._tree.host_project_root
         if root is None:
             return
 
         menu = QMenu(self)
         is_mounted = self._tree.is_in_raw_set("mounted", root)
-
-        # Mount / Unmount
         label = f"Unmount {root.name}" if is_mounted else f"Mount {root.name}"
         mount_action = QAction(label, menu)
         mount_action.triggered.connect(
             lambda: self._tree.toggle_mounted(root, not is_mounted),
         )
         menu.addAction(mount_action)
-
-        # Mask / Unmask — only when mounted
-        if is_mounted:
-            ms = self._tree._find_owning_spec(root)
-            if ms is not None:
-                if ms.mount_root_masked:
-                    mask_action = QAction(f"Unmask {root.name}", menu)
-                    mask_action.triggered.connect(
-                        lambda: self._tree.toggle_mount_root_masked(root, False),
-                    )
-                else:
-                    mask_action = QAction(f"Mask {root.name}", menu)
-                    mask_action.triggered.connect(
-                        lambda: self._tree.toggle_mount_root_masked(root, True),
-                    )
-                menu.addAction(mask_action)
-
         menu.exec(self._tree_view.header().mapToGlobal(pos))
 
     # ── Context Menu ──────────────────────────────────────────────

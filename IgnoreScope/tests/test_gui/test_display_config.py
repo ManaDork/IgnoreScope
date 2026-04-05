@@ -39,25 +39,37 @@ class TestFolderTruthTable:
         ns = NodeState(visibility="visible")
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_VISIBLE"
 
-    def test_folder_mounted_masked(self):
-        """Mount root with deny patterns → FOLDER_MOUNTED_MASKED."""
-        ns = NodeState(visibility="visible", is_mount_root=True, has_mount_masks=True)
-        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MOUNTED_MASKED"
+    def test_folder_mounted(self):
+        """Mount root → FOLDER_MOUNTED (config.mount accent)."""
+        ns = NodeState(visibility="visible", is_mount_root=True)
+        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MOUNTED"
+
+    def test_folder_mounted_revealed(self):
+        """Mount root with visible descendants → FOLDER_MOUNTED_REVEALED."""
+        ns = NodeState(visibility="visible", is_mount_root=True,
+                       has_direct_visible_child=True)
+        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MOUNTED_REVEALED"
+
+    def test_folder_mounted_with_pushed_descendant(self):
+        """Mount root with pushed descendant → FOLDER_MOUNTED_REVEALED (unified)."""
+        ns = NodeState(visibility="visible", is_mount_root=True,
+                       has_pushed_descendant=True)
+        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MOUNTED_REVEALED"
 
     def test_folder_masked(self):
-        """Under mount, denied by pattern, not mount root → FOLDER_MASKED."""
+        """Under mount, denied by pattern → FOLDER_MASKED."""
         ns = NodeState(visibility="masked")
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MASKED"
 
-    def test_folder_virtual_mirrored_revealed(self):
-        """Structural path with direct revealed child."""
+    def test_folder_mirrored_revealed(self):
+        """Structural path with visible descendant."""
         ns = NodeState(visibility="virtual", has_direct_visible_child=True)
-        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_VIRTUAL_MIRRORED_REVEALED"
+        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MIRRORED_REVEALED"
 
-    def test_folder_virtual_mirrored(self):
-        """Structural path, deeper revealed descendant."""
+    def test_folder_mirrored(self):
+        """Structural path, no direct visible child."""
         ns = NodeState(visibility="virtual", has_direct_visible_child=False)
-        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_VIRTUAL_MIRRORED"
+        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MIRRORED"
 
     def test_folder_virtual_volume(self):
         """Non-filesystem volume entry."""
@@ -85,11 +97,6 @@ class TestFolderTruthTable:
         """Unknown visibility falls back to FOLDER_HIDDEN."""
         ns = NodeState(visibility="bogus")
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_HIDDEN"
-
-    def test_visible_mount_root_no_masks_is_visible(self):
-        """Mount root without deny patterns → FOLDER_VISIBLE, not MOUNTED_MASKED."""
-        ns = NodeState(visibility="visible", is_mount_root=True, has_mount_masks=False)
-        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_VISIBLE"
 
 
 # ===========================================================================
@@ -149,8 +156,9 @@ class TestStateStylesDict:
     def test_all_states_present(self, config):
         expected = {
             "FOLDER_HIDDEN", "FOLDER_VISIBLE",
-            "FOLDER_MOUNTED_MASKED", "FOLDER_MASKED",
-            "FOLDER_VIRTUAL_MIRRORED_REVEALED", "FOLDER_VIRTUAL_MIRRORED",
+            "FOLDER_MOUNTED", "FOLDER_MOUNTED_REVEALED",
+            "FOLDER_MASKED",
+            "FOLDER_MIRRORED_REVEALED", "FOLDER_MIRRORED",
             "FOLDER_VIRTUAL_VOLUME", "FOLDER_VIRTUAL_AUTH",
             "FOLDER_REVEALED", "FOLDER_PUSHED_ANCESTOR",
             "FOLDER_CONTAINER_ONLY",
@@ -168,12 +176,20 @@ class TestStateStylesDict:
         assert g.pos1 == "visibility.background"
         assert g.pos4 == "visibility.background"
 
-    def test_folder_mounted_masked_gradient(self, config):
-        """FOLDER_MOUNTED_MASKED: vis.visible left, config.masked + config.mount right."""
-        style = config.state_styles["FOLDER_MOUNTED_MASKED"]
+    def test_folder_mounted_gradient(self, config):
+        """FOLDER_MOUNTED: vis.visible left, config.mount right."""
+        style = config.state_styles["FOLDER_MOUNTED"]
         g = style.gradient
         assert g.pos1 == "visibility.visible"
-        assert g.pos3 == "config.masked"
+        assert g.pos3 == "config.mount"
+        assert g.pos4 == "config.mount"
+
+    def test_folder_mounted_revealed_gradient(self, config):
+        """FOLDER_MOUNTED_REVEALED: vis.visible left, ancestor.visible + config.mount right."""
+        style = config.state_styles["FOLDER_MOUNTED_REVEALED"]
+        g = style.gradient
+        assert g.pos1 == "visibility.visible"
+        assert g.pos3 == "ancestor.visible"
         assert g.pos4 == "config.mount"
 
     def test_folder_masked_gradient(self, config):
@@ -183,9 +199,17 @@ class TestStateStylesDict:
         assert g.pos1 == "visibility.hidden"
         assert g.pos3 == "inherited.masked"
 
-    def test_folder_virtual_mirrored_font(self, config):
-        """FOLDER_VIRTUAL_MIRRORED: virtual_mirrored font (text_primary)."""
-        style = config.state_styles["FOLDER_VIRTUAL_MIRRORED"]
+    def test_folder_revealed_gradient(self, config):
+        """FOLDER_REVEALED: P2=hidden (visible in hidden context)."""
+        style = config.state_styles["FOLDER_REVEALED"]
+        g = style.gradient
+        assert g.pos1 == "visibility.visible"
+        assert g.pos2 == "visibility.hidden"
+        assert g.pos3 == "config.revealed"
+
+    def test_folder_mirrored_font(self, config):
+        """FOLDER_MIRRORED: virtual_mirrored font (text_primary)."""
+        style = config.state_styles["FOLDER_MIRRORED"]
         assert style.font.text_color_var == "text_primary"
 
     def test_folder_virtual_volume_font(self, config):
@@ -198,7 +222,7 @@ class TestStateStylesDict:
         """FOLDER_PUSHED_ANCESTOR: ancestor.pushed on right."""
         style = config.state_styles["FOLDER_PUSHED_ANCESTOR"]
         g = style.gradient
-        assert g.pos3 == "ancestor.pushed"
+        assert g.pos3 == "ancestor.visible"
 
     def test_file_pushed_gradient(self, config):
         """FILE_PUSHED: config.pushed in P4."""
@@ -235,7 +259,7 @@ class TestJsonLoading:
         assert "visibility.visible" in keys
         assert "config.masked" in keys
         assert "inherited.masked" in keys
-        assert "ancestor.pushed" in keys
+        assert "ancestor.visible" in keys
 
     def test_color_vars_no_old_flat_keys(self, config):
         """Old flat names are gone."""

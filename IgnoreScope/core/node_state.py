@@ -84,7 +84,6 @@ class NodeState:
         container_orphaned: Pushed file stranded in mask volume, mount removed (TTFF matrix)
         container_only: Exists in container but not on host (scan diff discovered)
         is_mount_root: Node IS a mount root declaration
-        has_mount_masks: Mount root whose spec has deny patterns (content masked)
         visibility: Aggregate state — "visible"|"masked"|"virtual"|"revealed"|"hidden"|"orphaned"|"container_only"
         has_pushed_descendant: Any descendant has pushed=True (folders only)
         has_direct_visible_child: Immediate child has revealed=True or pushed=True (folders only)
@@ -97,7 +96,6 @@ class NodeState:
     container_orphaned: bool = False
     container_only: bool = False
     is_mount_root: bool = False
-    has_mount_masks: bool = False
     visibility: str = "hidden"
     has_pushed_descendant: bool = False
     has_direct_visible_child: bool = False
@@ -232,13 +230,11 @@ def compute_node_state(
     is_masked = False
     is_revealed = False
     is_mount_root = False
-    has_mount_masks = False
 
     for ms in mount_specs:
         if path == ms.mount_root or is_descendant(path, ms.mount_root):
             is_mounted = True
             is_mount_root = (path == ms.mount_root)
-            has_mount_masks = is_mount_root and ms.mount_root_masked
             is_masked = ms.is_masked(path)
             is_revealed = ms.is_unmasked(path)
             break  # path belongs to first matching mount
@@ -264,7 +260,6 @@ def compute_node_state(
         pushed=is_pushed,
         container_orphaned=is_container_orphaned,
         is_mount_root=is_mount_root,
-        has_mount_masks=has_mount_masks,
         visibility=vis,
     )
 

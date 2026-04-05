@@ -15,8 +15,7 @@
     "inherited.virtual_auth":   "#373050",
     "inherited.virtual_volume": "#373050",
 
-    "ancestor.pushed":          "#354035",
-    "ancestor.revealed":        "#3F3D34",
+    "ancestor.visible":         "#3F3D34",
 
     "virtual.volume":           "#3D3560",
     "virtual.auth":             "#3D3560",
