@@ -5,7 +5,8 @@ ScopeDisplayConfig subclasses. Loads color/font variables from JSON files
 (``tree_state_style.json``, ``tree_state_font.json``). Contains
 ``state_styles: dict[str, StateStyleClass]`` for display state name -> visual
 lookup, ``columns: list[ColumnDef]``, and content filter booleans.
-Folder states derived via ``derive_gradient()`` formula. File states hand-built.
+Folder states derived via ``derive_gradient()`` formula.
+File states derived via ``derive_file_style()`` formula.
 Each config CAN point to different JSON files. Does NOT store state,
 render UI, or interact with CORE.
 """
@@ -155,51 +156,79 @@ _FOLDER_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
     name: derive_gradient(**inputs) for name, inputs in _FOLDER_STATE_INPUTS.items()
 }
 
-# File Gradient Framework (slim layout):
-#   P1 = visibility   P2/P3 = background   P4 = config/status (pushed or warning)
-#
-# 8 File states
+# ------------------------------------------------------------------
+# File Style Formula
+#   P1 = visibility   P2/P3 = background (no ancestor tracking)
+#   P4 = config/status (pushed or warning)
+# ------------------------------------------------------------------
+
+
+def derive_file_style(
+    visibility: str,
+    is_pushed: bool = False,
+    container_orphaned: bool = False,
+    container_only: bool = False,
+) -> tuple[Optional[GradientClass], str]:
+    """Derive file gradient + font key from node properties.
+
+    Parallel to derive_gradient() for folders. Files use a simplified
+    gradient model: P1 = visibility, P2/P3 = background (no descendant
+    tracking), P4 = config overlay.
+
+    Returns:
+        (GradientClass | None, font_var_name) tuple for StateStyleClass
+        construction. FILE_HOST_ORPHAN returns (None, "italic") — gradient
+        deferred until core orphan detection lands.
+    """
+    # Host orphan: gradient deferred (None)
+    if visibility == "orphaned":
+        return None, "italic"
+
+    # P1: visibility state
+    if container_only:
+        p1_var = "visibility.container_only"
+    elif visibility in ("visible", "revealed"):
+        p1_var = "visibility.visible"
+    else:
+        p1_var = "visibility.hidden"
+
+    # P2/P3: always background (files have no ancestor tracking)
+    bg_var = "visibility.background"
+
+    # P4: config overlay — pushed accent or warning, else falls to background
+    if is_pushed:
+        p4_var = "config.pushed"
+    elif container_orphaned:
+        p4_var = "status.warning"
+    else:
+        p4_var = bg_var
+
+    # Font derivation
+    if container_only or container_orphaned:
+        font = "italic"
+    elif visibility in ("hidden", "masked") and not is_pushed:
+        font = "muted"
+    else:
+        font = "default"
+
+    return GradientClass(p1_var, bg_var, bg_var, p4_var), font
+
+
+# File state inputs — declarative dicts fed to derive_file_style() at init
+_FILE_STYLE_INPUTS: dict[str, dict] = {
+    "FILE_HIDDEN":           {"visibility": "hidden"},
+    "FILE_VISIBLE":          {"visibility": "visible"},
+    "FILE_MASKED":           {"visibility": "masked"},
+    "FILE_REVEALED":         {"visibility": "revealed"},
+    "FILE_PUSHED":           {"visibility": "hidden", "is_pushed": True},
+    "FILE_HOST_ORPHAN":      {"visibility": "orphaned"},
+    "FILE_CONTAINER_ORPHAN": {"visibility": "hidden", "container_orphaned": True},
+    "FILE_CONTAINER_ONLY":   {"visibility": "container_only", "container_only": True},
+}
+
+# Generate file state defs from formula
 _FILE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
-    # FI1 — hidden file, no push
-    "FILE_HIDDEN": (
-        GradientClass("visibility.hidden", "visibility.background", "visibility.background", "visibility.background"),
-        "muted",
-    ),
-    # FI2 — visible file, no push
-    "FILE_VISIBLE": (
-        GradientClass("visibility.visible", "visibility.background", "visibility.background", "visibility.background"),
-        "default",
-    ),
-    # FI3 — masked file (separate state, font color TBD)
-    "FILE_MASKED": (
-        GradientClass("visibility.hidden", "visibility.background", "visibility.background", "visibility.background"),
-        "muted",
-    ),
-    # FI4 — revealed file (separate state, font color TBD)
-    "FILE_REVEALED": (
-        GradientClass("visibility.visible", "visibility.background", "visibility.background", "visibility.background"),
-        "default",
-    ),
-    # FI5 — pushed file
-    "FILE_PUSHED": (
-        GradientClass("visibility.hidden", "visibility.background", "visibility.background", "config.pushed"),
-        "default",
-    ),
-    # FI6 — host orphan: DEFERRED (gradient=None)
-    "FILE_HOST_ORPHAN": (
-        None,
-        "italic",
-    ),
-    # FI7 — container orphan
-    "FILE_CONTAINER_ORPHAN": (
-        GradientClass("visibility.hidden", "visibility.background", "visibility.background", "status.warning"),
-        "italic",
-    ),
-    # FI8 — container-only file
-    "FILE_CONTAINER_ONLY": (
-        GradientClass("visibility.container_only", "visibility.background", "visibility.background", "visibility.background"),
-        "italic",
-    ),
+    name: derive_file_style(**inputs) for name, inputs in _FILE_STYLE_INPUTS.items()
 }
 
 _TREE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
@@ -382,6 +411,9 @@ class TreeDisplayConfig(BaseDisplayConfig):
     text_dim: str = "#BEB2D5"
     text_warning: str = "#FFB15D"
     text_virtual_purple: str = "#BDA4FF"
+    # Unused placeholders — pushed sync/nosync font colors (future wiring)
+    text_pushed_sync: str = "#BDA4FF"
+    text_pushed_nosync: str = "#8B7BBF"
     hover_color: str = "#50476F"
     hover_alpha: int = 60
     selection_alpha: int = 100
