@@ -67,3 +67,31 @@ Run `test_display_config.py` and `test_style_engine.py` between batches. Core/do
 2. Exact dimming formula for inherited.* colors
 3. style_engine.py — does JSON key lookup handle dotted names or need adaptation?
 4. FOLDER_STATE_TABLE — how to key on is_mount_root and virtual_type (extend condition tuple?)
+
+## Drift: Hardcoded Hex in Python Files
+
+Color hex values should be consolidated into JSON files. Currently scattered:
+
+**display_config.py** — 5 hardcoded hex values (class attributes):
+```
+line 322: text_primary       #ECEFF4   → move to tree_state_font.json or theme.json
+line 374: text_dim           #616E88   → move to tree_state_font.json or theme.json
+line 375: text_warning       #D08770   → move to tree_state_font.json or theme.json
+line 376: text_virtual_purple #B48EAD  → move to tree_state_font.json or theme.json
+line 377: hover_color        #4C566A   → move to theme.json
+```
+
+**style_engine.py** — 2 fallback defaults (not palette):
+```
+line 136: #FFFFFF fallback for palette lookup miss
+line 140: #FFFFFF fallback for ui lookup miss
+```
+
+**Goal:** All palette hex values live in JSON. Python class attributes resolve from JSON at init. Fallback defaults acceptable in style_engine.py (safety net, not palette choice).
+
+**JSON files that already own colors:**
+- `gui/tree_state_style.json` — gradient variables (20 entries)
+- `gui/theme.json` — app-wide palette, ui, sections
+- `gui/list_style.json` — history panel (4 entries)
+- `gui/tree_state_font.json` — no hex (var name references only)
+- `gui/list_font.json` — no hex (var name references only)
