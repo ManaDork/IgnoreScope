@@ -1,25 +1,25 @@
 {
-    "visibility.background":    "#3B4252",
-    "visibility.visible":       "#4C566A",
-    "visibility.hidden":        "#2E3440",
-    "visibility.virtual":       "#373E4D",
-    "visibility.container_only": "#3B4A52",
+    "visibility.background":    "#0D1117",
+    "visibility.visible":       "#1C2128",
+    "visibility.hidden":        "#161B22",
+    "visibility.virtual":       "#1A1830",
+    "visibility.container_only": "#0D1920",
 
-    "config.mount":             "#3D4A3E",
-    "config.masked":            "#4A3B42",
-    "config.revealed":          "#4A4838",
-    "config.pushed":            "#3D4A3E",
+    "config.mount":             "#0A2A2A",
+    "config.masked":            "#2A0D1E",
+    "config.revealed":          "#2A2000",
+    "config.pushed":            "#1A1040",
 
-    "inherited.masked":         "#3F3539",
-    "inherited.revealed":       "#3F3D34",
-    "inherited.virtual_auth":   "#373050",
-    "inherited.virtual_volume": "#373050",
+    "inherited.masked":         "#1E0E16",
+    "inherited.revealed":       "#1E1800",
+    "inherited.virtual_auth":   "#160E30",
+    "inherited.virtual_volume": "#160E30",
 
-    "ancestor.visible":         "#3F3D34",
+    "ancestor.visible":         "#1A1800",
 
-    "virtual.volume":           "#3D3560",
-    "virtual.auth":             "#3D3560",
+    "virtual.volume":           "#1E1245",
+    "virtual.auth":             "#1E1245",
 
-    "status.warning":           "#D08770",
-    "ui.selected":              "#5E81AC"
+    "status.warning":           "#F59E0B",
+    "ui.selected":              "#58A6FF"
 }

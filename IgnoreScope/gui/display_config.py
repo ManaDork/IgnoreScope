@@ -319,7 +319,7 @@ class BaseDisplayConfig:
     from a caller-provided state definitions dictionary.
     """
 
-    text_primary: str = "#ECEFF4"
+    text_primary: str = "#E6EDF3"
 
     def __init__(
         self,
@@ -334,6 +334,14 @@ class BaseDisplayConfig:
 
         with open(gui_dir / font_json, "r") as f:
             self._font_vars: dict[str, dict] = json.load(f)
+
+        # Load text colors from theme.json (consolidated — no hardcoded hex)
+        theme_path = gui_dir / "theme.json"
+        if theme_path.exists():
+            with open(theme_path, "r") as f:
+                theme = json.load(f)
+            for attr, value in theme.get("text", {}).items():
+                setattr(self, attr, value)
 
         self.state_styles: dict[str, StateStyleClass] = self._build_state_styles(state_defs)
 
@@ -370,11 +378,11 @@ class TreeDisplayConfig(BaseDisplayConfig):
     columns, display filters, and undo scope.
     """
 
-    # Additional one-off color variables (Section 6.3)
-    text_dim: str = "#616E88"
-    text_warning: str = "#D08770"
-    text_virtual_purple: str = "#B48EAD"
-    hover_color: str = "#4C566A"
+    # Fallback defaults — overridden by theme.json "text" section at init
+    text_dim: str = "#8B949E"
+    text_warning: str = "#F59E0B"
+    text_virtual_purple: str = "#A78BFA"
+    hover_color: str = "#1C2128"
     hover_alpha: int = 60
     selection_alpha: int = 100
 

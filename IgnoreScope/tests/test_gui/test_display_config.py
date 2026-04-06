@@ -280,20 +280,20 @@ class TestJsonLoading:
 
     def test_resolve_text_color_primary(self, config):
         font = FontStyleClass(text_color_var="text_primary")
-        assert config.resolve_text_color(font) == "#ECEFF4"
+        assert config.resolve_text_color(font) == "#E6EDF3"
 
     def test_resolve_text_color_dim(self, config):
         font = FontStyleClass(text_color_var="text_dim")
-        assert config.resolve_text_color(font) == "#616E88"
+        assert config.resolve_text_color(font) == "#8B949E"
 
     def test_resolve_text_color_purple(self, config):
         font = FontStyleClass(text_color_var="text_virtual_purple")
-        assert config.resolve_text_color(font) == "#B48EAD"
+        assert config.resolve_text_color(font) == "#A78BFA"
 
     def test_resolve_text_color_unknown_fallback(self, config):
         """Unknown var falls back to text_primary."""
         font = FontStyleClass(text_color_var="nonexistent_var")
-        assert config.resolve_text_color(font) == "#ECEFF4"
+        assert config.resolve_text_color(font) == "#E6EDF3"
 
 
 # ===========================================================================
@@ -404,4 +404,4 @@ class TestListDisplayConfig:
 
     def test_resolve_text_color(self, config):
         font = FontStyleClass(text_color_var="text_primary")
-        assert config.resolve_text_color(font) == "#ECEFF4"
+        assert config.resolve_text_color(font) == "#E6EDF3"
