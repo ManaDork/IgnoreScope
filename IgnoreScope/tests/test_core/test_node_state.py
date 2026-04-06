@@ -967,7 +967,7 @@ class TestTruthTableRegression:
         assert s.visibility == "visible"
 
     def test_folder_mounted_masked(self, tmp_path: Path):
-        """F3: masked, no pushed descendant → FOLDER_MOUNTED_MASKED."""
+        """Masked folder, no pushed descendant → FOLDER_MASKED."""
         src = tmp_path / "src"
         vendor = src / "vendor"
         ms = MountSpecPath(mount_root=src, patterns=["vendor/"])
@@ -980,9 +980,8 @@ class TestTruthTableRegression:
         assert s.has_pushed_descendant is False
 
     def test_folder_mounted_masked_pushed(self, tmp_path: Path):
-        """F4: masked, has pushed descendant → FOLDER_MOUNTED_MASKED_PUSHED.
-        Only reachable when mirrored=False — with mirrored=True, pushed
-        descendants trigger virtual upgrade via Check 2."""
+        """Masked folder with pushed descendant (mirrored=False).
+        With mirrored=True, pushed descendants trigger virtual upgrade."""
         src = tmp_path / "src"
         vendor = src / "vendor"
         pushed_file = vendor / "secret.py"

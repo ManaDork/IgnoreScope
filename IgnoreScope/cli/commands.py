@@ -170,7 +170,7 @@ def cmd_create(
 
     Args:
         host_project_root: Project root directory
-        config: ScopeDockerConfig with mounts, masked, revealed
+        config: ScopeDockerConfig with mount_specs and pushed_files
 
     Returns:
         Tuple of (success, message)

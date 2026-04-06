@@ -375,7 +375,7 @@ def apply_node_states_from_scope(
     Stage 3: Descendant folder fields (has_pushed_descendant, has_direct_visible_child)
 
     Args:
-        config: Full container configuration (mounts, masked, revealed, pushed_files)
+        config: Full container configuration (mount_specs, pushed_files)
         paths: Iterable of paths to evaluate
 
     Returns:

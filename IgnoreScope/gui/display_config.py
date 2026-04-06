@@ -50,7 +50,7 @@ class ColumnDef:
 # Folder Gradient Formula
 #   P1 = visibility (what container sees)
 #   P2 = context (parent/inherited visibility)
-#   P3 = ancestor (descendant tracking) — falls to P4 when absent
+#   P3 = ancestor (descendant tracking) — falls to P4, then to P1 when absent
 #   P4 = config||inherited (direct/inherited action) — falls to P1 when absent
 # ------------------------------------------------------------------
 

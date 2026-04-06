@@ -79,7 +79,7 @@ class DisplayFilterProxy(QSortFilterProxyModel):
         source_model: MountDataTreeModel = self.sourceModel()
         state = source_model.tree.get_node_state(node.path)
 
-        # ── Hidden filter ─────────────────────────────────────
+        # ── Hidden filter — show hidden nodes only if they have pushed content ──
         if not self._config.display_hidden and state.visibility == "hidden":
             if not state.pushed and not state.has_pushed_descendant:
                 return False
