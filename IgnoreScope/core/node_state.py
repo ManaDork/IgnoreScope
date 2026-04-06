@@ -3,7 +3,7 @@
 Defines the canonical NodeState dataclass and pure functions for
 computing per-node visibility from mount/mask/reveal/push configuration.
 
-This module is the CORE owner of per-node state (COREFLOWCHART Phase 3).
+This module is the CORE owner of per-node state (Phase 3 in architecture docs).
 All functions are pure — no GUI imports, no side effects.
 """
 
@@ -81,10 +81,10 @@ class NodeState:
         masked: Node is hidden by a mask volume
         revealed: Node is a punch-through within a masked area
         pushed: Node has been pushed via docker cp
-        container_orphaned: Pushed file stranded in mask volume, mount removed (TTFF matrix)
+        container_orphaned: Pushed file under mask volume with no active mount coverage (TTFF matrix)
         container_only: Exists in container but not on host (scan diff discovered)
         is_mount_root: Node IS a mount root declaration
-        visibility: Aggregate state — "visible"|"masked"|"virtual"|"revealed"|"hidden"|"orphaned"|"container_only"
+        visibility: Aggregate state — orphaned|revealed|masked|visible|container_only|hidden (priority order)
         has_pushed_descendant: Any descendant has pushed=True (folders only)
         has_direct_visible_child: Immediate child has revealed=True or pushed=True (folders only)
     """
@@ -142,12 +142,10 @@ def find_paths_with_direct_visible_children(
 ) -> set[Path]:
     """Identify paths whose immediate children include revealed or pushed nodes.
 
-    Used to distinguish FOLDER_VIRTUAL_REVEALED (direct parent of visible content)
-    from FOLDER_VIRTUAL (structural intermediate only).
-
-    Checks Stage 1 flags (revealed, pushed) — NOT visibility. Virtual children
-    are structural intermediates and should NOT propagate this flag, otherwise
-    the F5/F6 distinction collapses (all virtual ancestors become F5).
+    Used by GUI to distinguish has_direct_visible_child=True (direct parent of
+    visible content) from False (structural intermediate). Checks Stage 1
+    flags (revealed, pushed) — NOT visibility. Virtual children are structural
+    and should NOT propagate this flag.
 
     Algorithm: Single pass — collect parents of revealed/pushed nodes.
     Complexity: O(n).
@@ -213,10 +211,10 @@ def compute_node_state(
     mount_specs: list['MountSpecPath'],
     pushed_files: set[Path],
 ) -> NodeState:
-    """Compute per-node state using pathspec evaluation (last-match-wins).
+    """Compute per-node state by querying MountSpecPath patterns.
 
-    Evaluates gitignore-style patterns in order via MountSpecPath,
-    enabling nested mask/reveal layering (mask → reveal → re-mask).
+    Delegates to MountSpecPath.is_masked()/is_unmasked() which use
+    gitignore-style pathspec evaluation (last-match-wins).
 
     Args:
         path: The path to evaluate
@@ -370,10 +368,9 @@ def apply_node_states_from_scope(
 ) -> dict[Path, NodeState]:
     """Batch-compute NodeState for every path given a ScopeDockerConfig.
 
-    This is the COREFLOWCHART Phase 3 prescribed function:
-    ApplyNodeStateFromScope().
+    Phase 3 pipeline (architecture docs: COREFLOWCHART):
 
-    Stage 1: Per-node MatrixState (5 values)
+    Stage 1: Per-node flags + visibility (6 flags + 1 derived)
     Stage 2: Config-native virtual detection (when config.mirrored=True)
     Stage 3: Descendant folder fields (has_pushed_descendant, has_direct_visible_child)
 

@@ -244,8 +244,8 @@ Config `mount_specs` are evaluated via pathspec to produce per-node NodeState bo
 | FOLDER_MOUNTED | is_mount_root | vis.visible → config.mount |
 | FOLDER_MOUNTED_REVEALED | is_mount_root + has_visible_descendant | vis.visible → ancestor.visible + config.mount |
 | FOLDER_MASKED | Under mount, denied by pattern, NOT mount root | vis.hidden → inherited.masked |
-| FOLDER_VIRTUAL_MIRRORED | Structural path, deeper descendant | vis.hidden throughout, visible text |
-| FOLDER_VIRTUAL_MIRRORED_REVEALED | Structural path, direct revealed child | vis.hidden → ancestor.revealed, visible text |
+| FOLDER_MIRRORED | Structural path, deeper descendant | vis.hidden throughout, visible text |
+| FOLDER_MIRRORED_REVEALED | Structural path, direct revealed child | vis.hidden → ancestor.visible, visible text |
 | FOLDER_VIRTUAL_VOLUME | Non-filesystem named volume entry | vis.virtual → virtual.volume, purple text |
 | FOLDER_VIRTUAL_AUTH | Non-filesystem auth volume entry | vis.virtual → virtual.auth, purple text |
 | FOLDER_REVEALED | Exception pattern punch-through | vis.visible → config.revealed |

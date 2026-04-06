@@ -3,9 +3,9 @@
 TreeDisplayConfig base class with LocalHostDisplayConfig and
 ScopeDisplayConfig subclasses. Loads color/font variables from JSON files
 (``tree_state_style.json``, ``tree_state_font.json``). Contains
-``state_styles: dict[str, StateStyleClass]`` for MatrixState -> visual
-lookup, ``columns: list[ColumnDef]``, content filter booleans, and
-``undo_scope``. Subclasses override columns, filters, and undo_scope.
+``state_styles: dict[str, StateStyleClass]`` for display state name -> visual
+lookup, ``columns: list[ColumnDef]``, and content filter booleans.
+Folder states derived via ``derive_gradient()`` formula. File states hand-built.
 Each config CAN point to different JSON files. Does NOT store state,
 render UI, or interact with CORE.
 """
@@ -87,7 +87,7 @@ def derive_gradient(
     else:
         p1 = "background"      # not under any mount
 
-    # P2: parent context
+    # P2: parent context — REVEALED gets P2=hidden (visible in hidden context: punch-through)
     if p1 == "visible" and is_revealed:
         p2 = "hidden"
     else:
@@ -156,8 +156,7 @@ _FOLDER_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
 }
 
 # File Gradient Framework (slim layout):
-#   P1 = visibility   P2 = background
-#   P3 = sync (deferred → background)   P4 = pushed/status
+#   P1 = visibility   P2/P3 = background   P4 = config/status (pushed or warning)
 #
 # 8 File states
 _FILE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
@@ -246,8 +245,7 @@ def _match_key(condition: tuple, table_key: tuple) -> bool:
 def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrored") -> str:
     """Resolve a NodeState to a display state name.
 
-    Folders: derived via formula (derive_gradient), matched against
-    _FOLDER_STATE_INPUTS to find the state name.
+    Folders: resolved via _resolve_folder_state() if/elif chain.
     Files: lookup table (FILE_STATE_TABLE).
 
     Args:
@@ -261,7 +259,7 @@ def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrore
     if is_folder:
         return _resolve_folder_state(node_state, virtual_type)
 
-    # File path — table lookup (unchanged)
+    # File path — FILE_STATE_TABLE lookup (folders use formula)
     host_orphaned = getattr(node_state, "host_orphaned", False)
     condition = (
         node_state.visibility,

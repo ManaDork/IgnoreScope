@@ -4,7 +4,7 @@
 > All code changes must respect this flow. If reality diverges, update the code, not this chart.
 >
 > GUI flow reference: `DATAFLOWCHART.md` (Phases 7-8 are shared cross-domain concepts; Phases 1-6 are domain-specific pipelines)
-> State model: 14 states (7 folder + 7 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
+> State model: 20 states (12 folder + 8 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
 
 ---
 
@@ -85,7 +85,7 @@ Raw boolean flags computed via ancestor walk (is_descendant checks), then combin
 
 Dual computation: config queries (primary) + inverse pattern derivation (cross-reference with discrepancy logging).
 
-*(Full state model: 14 states — see GUI_STATE_STYLES.md Section 3)*
+*(Full state model: 20 states (12 folder + 8 file) — see GUI_STATE_STYLES.md Section 3)*
 
 ---
 

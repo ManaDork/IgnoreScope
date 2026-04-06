@@ -1,7 +1,7 @@
 """CLI command handlers for IgnoreScope.
 
 Implements:
-- cmd_create: Setup container with mounts, masked, revealed
+- cmd_create: Setup container with mount_specs configuration
 - cmd_push: Push files to container
 - cmd_pull: Pull files from container
 - cmd_remove: Remove container and volumes

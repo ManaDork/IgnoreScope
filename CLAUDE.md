@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Correctness and readability over premature optimization.**
 
 ## Key Concepts
-- **MatrixState**: Prefer truth table evaluation over gated conditional chains when deriving state from multiple boolean flags. Compute each flag independently, then match against explicit condition tuples. See `ARCHITECTUREGLOSSARY.md → MatrixState`. Applied in `core/node_state.py`.
+- **MatrixState**: Prefer truth table evaluation over gated conditional chains when deriving state from multiple boolean flags. Compute each flag independently, then match against explicit condition tuples. See `ARCHITECTUREGLOSSARY.md → MatrixState`. Applied in `core/node_state.py` (Stage 1 visibility) and `gui/display_config.py` (file states). Folder display states use formulaic derivation via `derive_gradient()`.
 - **DRY Audit**: Scan for duplicated logic across modules. Classify clones: Type 1 (exact copy-paste), Type 2 (renamed variables, same structure), Type 3 (similar pattern, extractable). Report file, lines, severity, extraction opportunity.
 - **Extract Method Refactor**: Consolidate duplicated code blocks into a shared function/base-class method. Preserves behavior — only changes structure.
 - **Review Drift**: Pair with DRY Audit, watch for variable and function name inconsistencies
