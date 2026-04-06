@@ -1,6 +1,6 @@
 {
-    "background":  "#161B22",
-    "selected":    "#58A6FF",
-    "warning":     "#E3B341",
-    "destructive": "#F85149"
+    "background":  "#463F61",
+    "selected":    "#9BA5FF",
+    "warning":     "#FFCE5D",
+    "destructive": "#FF7069"
 }

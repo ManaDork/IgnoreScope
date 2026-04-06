@@ -319,7 +319,7 @@ class BaseDisplayConfig:
     from a caller-provided state definitions dictionary.
     """
 
-    text_primary: str = "#E6EDF3"
+    text_primary: str = "#F0E5FF"
 
     def __init__(
         self,
@@ -379,10 +379,10 @@ class TreeDisplayConfig(BaseDisplayConfig):
     """
 
     # Fallback defaults — overridden by theme.json "text" section at init
-    text_dim: str = "#8B949E"
-    text_warning: str = "#F59E0B"
-    text_virtual_purple: str = "#A78BFA"
-    hover_color: str = "#1C2128"
+    text_dim: str = "#BEB2D5"
+    text_warning: str = "#FFB15D"
+    text_virtual_purple: str = "#BDA4FF"
+    hover_color: str = "#50476F"
     hover_alpha: int = 60
     selection_alpha: int = 100
 

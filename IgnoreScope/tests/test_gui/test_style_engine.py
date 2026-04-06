@@ -147,29 +147,29 @@ class TestStyleGuiAPI:
         assert a is b
 
     def test_palette_color(self, sg):
-        assert sg.palette_color("accent_blue") == "#58A6FF"
-        assert sg.palette_color("base_0") == "#0D1117"
+        assert sg.palette_color("accent_blue") == "#9BA5FF"
+        assert sg.palette_color("base_0") == "#383144"
 
     def test_ui_color(self, sg):
-        assert sg.ui_color("window_bg") == "#0D1117"
-        assert sg.ui_color("accent_primary") == "#58A6FF"
+        assert sg.ui_color("window_bg") == "#3F3A57"
+        assert sg.ui_color("accent_primary") == "#9BA5FF"
 
     def test_selection_color(self, sg):
         c = sg.selection_color()
-        assert hex_of(c) == "#58a6ff"
+        assert hex_of(c) == "#9ba5ff"
         assert c.alpha() == 100
 
     def test_hover_color(self, sg):
         c = sg.hover_color()
-        assert hex_of(c) == "#1c2128"
+        assert hex_of(c) == "#50476f"
         assert c.alpha() == 60
 
     def test_build_stylesheet(self, sg):
         """build_stylesheet returns a non-empty string with theme values."""
         css = sg.build_stylesheet()
         assert len(css) > 100
-        assert "#0D1117" in css  # window_bg
-        assert "#58A6FF" in css  # accent_primary
+        assert "#3F3A57" in css  # window_bg
+        assert "#9BA5FF" in css  # accent_primary
 
 
 class TestBuildGradient:
