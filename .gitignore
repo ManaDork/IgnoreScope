@@ -19,11 +19,13 @@ venv/
 .venv/
 ENV/
 
-# Claude Code local files
-.claude/*
-!.claude/commands/
-!.claude/IgnoreScopeContext/
-!.claude/TODOs/
+# Claude Code (local-only)
+.claude/
+CLAUDE.md
+
+# Perforce (local VCS config)
+.p4config
+.p4ignore
 
 # MCP config (contains local machine paths)
 .mcp.json
