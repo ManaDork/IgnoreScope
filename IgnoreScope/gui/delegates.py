@@ -92,6 +92,8 @@ class GradientDelegate(QStyledItemDelegate):
 
         Uses _get_row_width() hook for view-appropriate width.
         Subclasses must set self._config with a color_vars attribute.
+        Applies row_gradient_opacity from theme.json to allow widget
+        gradient bleed-through.
         """
         gradient_class = style.gradient
         total_width = self._get_row_width(option)
@@ -101,7 +103,12 @@ class GradientDelegate(QStyledItemDelegate):
             gradient_class, self._config.color_vars, total_width,
             x_offset=option.rect.x(),
         )
+        row_opacity = sg.row_gradient_opacity
+        if row_opacity < 255:
+            painter.setOpacity(row_opacity / 255.0)
         painter.fillRect(option.rect, QBrush(qt_gradient))
+        if row_opacity < 255:
+            painter.setOpacity(1.0)
 
 
 # ── TreeStyleDelegate ────────────────────────────────────────────

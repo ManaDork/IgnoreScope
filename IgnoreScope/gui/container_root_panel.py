@@ -25,8 +25,10 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
+from .style_engine import GradientBackgroundMixin
 
-class ContainerRootPanel(QWidget):
+
+class ContainerRootPanel(GradientBackgroundMixin, QWidget):
     """Header frame + pattern list + collapsible JSON config viewer panel.
 
     Layout:
@@ -43,6 +45,7 @@ class ContainerRootPanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None, tree=None):
         super().__init__(parent)
+        self._gradient_name = "config_panel"
         self._tree = tree
         self.setObjectName("configPanel")
         self._setup_ui()
