@@ -93,7 +93,7 @@ These are not independent states — they modify the node's current StateStyleCl
 20 tree states (12 folder + 8 file) + 2 selected overrides.
 
 Folder states derived via `derive_gradient()` formula — no hand-built gradients or lookup tables.
-File states use slim hand-built layout (deferred for formula conversion).
+File states derived via `derive_file_style()` formula — simplified 4-position model (no ancestor tracking).
 
 ### Gradient Formula
 
@@ -149,7 +149,17 @@ Derived via `derive_gradient()` from node properties:
 
 ### 3.2 File States (8)
 
-Slim layout: P1=visibility, P2=background, P3=sync(deferred), P4=pushed/status.
+Derived via `derive_file_style()` from node properties. Simplified model parallel to `derive_gradient()`:
+
+```
+P1 = visibility     what the container sees     (visible, hidden, container_only)
+P2 = background     always visibility.background (no parent context for files)
+P3 = background     always visibility.background (no ancestor tracking for files)
+P4 = config/status  pushed accent or warning     (config.pushed, status.warning, or falls to P2)
+
+Font: container_only/orphaned → "italic", hidden/masked (not pushed) → "muted", else → "default"
+Host orphan: gradient=None (DEFERRED — blocked on core orphan detection)
+```
 
 | ID | State Name | Condition | GradientClass | Font |
 |----|-----------|-----------|---------------|------|
@@ -270,9 +280,14 @@ Font variables for tree panel FontStyleClass resolution. All values use **variab
 |----------|--------|--------|----------------------|---------|
 | `default` | normal | false | `text_primary` | F2, F4–F8, FI2, FI4–FI5 |
 | `muted` | normal | false | `text_dim` | F1, F3, FI1, FI3 |
-| `italic` | normal | true | `text_warning` | FI6, FI7 |
+| `italic` | normal | true | `text_warning` | FI6, FI7, FI8 |
+| `virtual_mirrored` | normal | false | `text_primary` | F9, F10 |
+| `virtual_volume` | normal | true | `text_virtual_purple` | F11 |
+| `virtual_auth` | normal | true | `text_virtual_purple` | F12 |
+| `pushed_sync` | normal | false | `text_pushed_sync` | *(unused placeholder — future pushed sync wiring)* |
+| `pushed_nosync` | normal | false | `text_pushed_nosync` | *(unused placeholder — future pushed nosync wiring)* |
 
-**Note:** Text color is included in FontStyleClass to unify text rendering. The old TreeContext-based text color axis is absorbed: all tree contexts share the same font variables via their respective display configs.
+**Note:** Text color is included in FontStyleClass to unify text rendering. The old TreeContext-based text color axis is absorbed: all tree contexts share the same font variables via their respective display configs. `pushed_sync` and `pushed_nosync` are placeholder entries — font keys and theme colors exist but are not wired to any node state. They will be connected when pushed file sync-state tracking lands.
 
 ### 6.2 list_font.json
 
@@ -293,6 +308,8 @@ The following hex colors are used in rendering but don't correspond to any gradi
 | `text_primary` | `#ECEFF4` | Bright text for visible/active states | `palette.snow_storm_2` |
 | `text_dim` | `#616E88` | Muted text for hidden states | (custom, between snow_storm and polar_night) |
 | `text_warning` | `#D08770` | Orange text for orphaned files | `palette.orange` |
+| `text_pushed_sync` | `#BDA4FF` | Pushed sync text (placeholder) | matches `accent_purple` |
+| `text_pushed_nosync` | `#8B7BBF` | Pushed nosync text (placeholder) | dimmed variant of `accent_purple` |
 | `hover_color` | `#4C566A` | Delegate hover overlay | `delegate.hover_color` (same hex as gradient `visible`) |
 | `hover_alpha` | 60 | Delegate hover overlay alpha | `delegate.hover_alpha` |
 | `selection_alpha` | 100 | Delegate selection overlay alpha | `delegate.selection_alpha` |

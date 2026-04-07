@@ -35,7 +35,9 @@
         "text_primary": "#F0E5FF",
         "text_dim": "#BEB2D5",
         "text_warning": "#FFB15D",
-        "text_virtual_purple": "#BDA4FF"
+        "text_virtual_purple": "#BDA4FF",
+        "text_pushed_sync": "#BDA4FF",
+        "text_pushed_nosync": "#8B7BBF"
     },
     "delegate": {
         "selection_color": "#9BA5FF",

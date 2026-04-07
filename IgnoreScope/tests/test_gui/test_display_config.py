@@ -19,6 +19,8 @@ from IgnoreScope.gui.display_config import (
     ScopeDisplayConfig,
     resolve_tree_state,
     derive_gradient,
+    derive_file_style,
+    _FILE_STYLE_INPUTS,
     FILE_STATE_TABLE,
 )
 from IgnoreScope.gui.list_display_config import ListDisplayConfig
@@ -243,6 +245,82 @@ class TestStateStylesDict:
 
 
 # ===========================================================================
+# derive_file_style() — Formulaic File State Derivation
+# ===========================================================================
+
+class TestDeriveFileStyle:
+    """Verify derive_file_style() produces correct (GradientClass, font) tuples."""
+
+    @pytest.mark.parametrize("state_name,expected_grad,expected_font", [
+        ("FILE_HIDDEN",
+         ("visibility.hidden", "visibility.background", "visibility.background", "visibility.background"),
+         "muted"),
+        ("FILE_VISIBLE",
+         ("visibility.visible", "visibility.background", "visibility.background", "visibility.background"),
+         "default"),
+        ("FILE_MASKED",
+         ("visibility.hidden", "visibility.background", "visibility.background", "visibility.background"),
+         "muted"),
+        ("FILE_REVEALED",
+         ("visibility.visible", "visibility.background", "visibility.background", "visibility.background"),
+         "default"),
+        ("FILE_PUSHED",
+         ("visibility.hidden", "visibility.background", "visibility.background", "config.pushed"),
+         "default"),
+        ("FILE_HOST_ORPHAN", None, "italic"),
+        ("FILE_CONTAINER_ORPHAN",
+         ("visibility.hidden", "visibility.background", "visibility.background", "status.warning"),
+         "italic"),
+        ("FILE_CONTAINER_ONLY",
+         ("visibility.container_only", "visibility.background", "visibility.background", "visibility.background"),
+         "italic"),
+    ])
+    def test_derive_file_style_all_states(self, state_name, expected_grad, expected_font):
+        """Each file state input produces the expected gradient + font."""
+        inputs = _FILE_STYLE_INPUTS[state_name]
+        grad, font = derive_file_style(**inputs)
+        if expected_grad is None:
+            assert grad is None
+        else:
+            assert (grad.pos1, grad.pos2, grad.pos3, grad.pos4) == expected_grad
+        assert font == expected_font
+
+    def test_derive_file_style_host_orphan_deferred(self):
+        """FILE_HOST_ORPHAN returns (None, 'italic') — gradient deferred."""
+        grad, font = derive_file_style(visibility="orphaned")
+        assert grad is None
+        assert font == "italic"
+
+    def test_derive_file_style_pushed_overrides_muted(self):
+        """Pushed file gets 'default' font, not 'muted', even though hidden."""
+        grad, font = derive_file_style(visibility="hidden", is_pushed=True)
+        assert font == "default"
+        assert grad.pos4 == "config.pushed"
+
+    def test_derive_file_style_p2_p3_always_background(self):
+        """Files never use ancestor tracking — P2/P3 always background."""
+        for inputs in _FILE_STYLE_INPUTS.values():
+            grad, _ = derive_file_style(**inputs)
+            if grad is not None:
+                assert grad.pos2 == "visibility.background"
+                assert grad.pos3 == "visibility.background"
+
+    def test_pushed_font_keys_exist(self):
+        """pushed_sync and pushed_nosync exist in font vars (unused placeholders)."""
+        config = TreeDisplayConfig()
+        assert "pushed_sync" in config._font_vars
+        assert "pushed_nosync" in config._font_vars
+
+    def test_pushed_text_color_vars_resolve(self):
+        """Pushed text color placeholders resolve to hex strings."""
+        config = TreeDisplayConfig()
+        assert isinstance(config.text_pushed_sync, str)
+        assert config.text_pushed_sync.startswith("#")
+        assert isinstance(config.text_pushed_nosync, str)
+        assert config.text_pushed_nosync.startswith("#")
+
+
+# ===========================================================================
 # JSON Loading
 # ===========================================================================
 
@@ -269,13 +347,14 @@ class TestJsonLoading:
             assert old_key not in keys, f"Old key '{old_key}' still present"
 
     def test_font_vars_count(self, config):
-        """tree_state_font.json has 6 entries."""
-        assert len(config._font_vars) == 6
+        """tree_state_font.json has 8 entries (6 active + 2 pushed placeholders)."""
+        assert len(config._font_vars) == 8
 
     def test_font_vars_keys(self, config):
         assert set(config._font_vars.keys()) == {
             "default", "muted", "italic",
             "virtual_mirrored", "virtual_volume", "virtual_auth",
+            "pushed_sync", "pushed_nosync",
         }
 
     def test_resolve_text_color_primary(self, config):
