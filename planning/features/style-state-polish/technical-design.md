@@ -111,8 +111,8 @@ Stage 2 upgrades masked → "virtual" (structural mkdir path)
 - `core/node_state.py` — `compute_visibility()`, `find_mirrored_paths()`, Stage 2 in `apply_node_states_from_scope()`
 - `gui/display_config.py` — state defs, truth tables, resolve_tree_state()
 - `gui/style_engine.py` — build_gradient()
-- `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md`
-- `.claude/IgnoreScopeContext/architecture/ARCHITECTUREGLOSSARY.md`
+- `docs/architecture/GUI_STATE_STYLES.md`
+- `docs/architecture/ARCHITECTUREGLOSSARY.md`
 
 ### Ordering
 1. `compute_visibility()` — add "virtual" return value (or rename mirrored→virtual in Stage 2)
@@ -126,8 +126,8 @@ Stage 2 upgrades masked → "virtual" (structural mkdir path)
 - `core/node_state.py` — Stage 2: `"mirrored"` → `"virtual"` in `find_mirrored_paths()` / `apply_node_states_from_scope()`
 - `gui/display_config.py` — State defs, truth tables, state names (MASKED_REVEALED → VIRTUAL_REVEALED, MASKED_MIRRORED → VIRTUAL_MIRRORED)
 - `gui/tree_state_style.json` — Add `"virtual"` color variable (between hidden and visible)
-- `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md` — Full update
-- `.claude/IgnoreScopeContext/architecture/ARCHITECTUREGLOSSARY.md` — visibility entry
+- `docs/architecture/GUI_STATE_STYLES.md` — Full update
+- `docs/architecture/ARCHITECTUREGLOSSARY.md` — visibility entry
 
 ### Unchanged
 - `gui/style_engine.py` — build_gradient() stays (framework works)

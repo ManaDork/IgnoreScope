@@ -31,4 +31,4 @@ No phasing needed — all work is tightly coupled and low complexity.
 | `IgnoreScope/gui/tree_state_font.json` | 2 new entries |
 | `IgnoreScope/gui/theme.json` | 2 new entries in text section |
 | `IgnoreScope/tests/test_gui/test_display_config.py` | New tests + updated counts |
-| `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md` | Documentation update |
+| `docs/architecture/GUI_STATE_STYLES.md` | Documentation update |

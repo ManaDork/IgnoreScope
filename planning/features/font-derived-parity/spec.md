@@ -54,4 +54,4 @@ None — all design decisions resolved during discovery.
 | `planning/features/style-polish-round-2/` | Parent feature — this resolves deferred file font items |
 | `planning/features/formulaic-gradient-system/` | Reference implementation — folder derivation pattern to mirror |
 | `planning/backlog/gui-palette-shift.md` | Future — will change text color hex values |
-| `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md` | Blueprint — must update |
+| `docs/architecture/GUI_STATE_STYLES.md` | Blueprint — must update |

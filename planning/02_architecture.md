@@ -1,7 +1,7 @@
 # IgnoreScope — Architecture Principles
 
 ## Core Architecture
-Detailed architecture docs live in `.claude/IgnoreScopeContext/architecture/`:
+Detailed architecture docs live in `docs/architecture/`:
 - `ARCHITECTUREGLOSSARY.md` — Key concepts including MatrixState
 - `COREFLOWCHART.md` — Core logic flow
 - `DATAFLOWCHART.md` — Data flow through the system

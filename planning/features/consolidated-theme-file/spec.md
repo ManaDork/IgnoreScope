@@ -57,5 +57,5 @@ None — all design decisions resolved during discovery.
 | `planning/features/widget-gradient-background-styles/` | Sibling — established gradients section in theme.json |
 | `planning/features/style-polish-round-2/` | Predecessor — introduced categorical color system |
 | `planning/backlog/gui-palette-shift.md` | Consumer — palette shifts become JSON-only after this feature |
-| `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md` | Blueprint — must update for consolidated theme structure |
-| `.claude/IgnoreScopeContext/architecture/DATAFLOWCHART.md` | Blueprint — update theme loading flow |
+| `docs/architecture/GUI_STATE_STYLES.md` | Blueprint — must update for consolidated theme structure |
+| `docs/architecture/DATAFLOWCHART.md` | Blueprint — update theme loading flow |
