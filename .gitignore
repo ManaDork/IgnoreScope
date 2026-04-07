@@ -54,9 +54,9 @@ htmlcov/
 # Assets (excluded from GitHub)
 Icons/
 
-# Workbench (local scratch)
-_workbench/_bugs/
-_workbench/_feedback/
+# Planning & workbench (local-only)
+planning/
+_workbench/
 
 # OS
 .DS_Store
