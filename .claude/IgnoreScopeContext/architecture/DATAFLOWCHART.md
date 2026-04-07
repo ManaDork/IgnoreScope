@@ -463,6 +463,8 @@ container_ops_ui.py   → Container UI (thin layer: CORE execute_create/remove �
                          Calls docker/container_lifecycle.py, no CLI imports
 config_manager.py     → Orchestrator (open/switch/save project+scope)
 app.py                → Wiring      (creates shared tree, connects signals)
+__init__.py           → Bootstrap   (QApplication + Fusion style for full QSS control)
 style_engine.py       → Rendering   (StyleGui: gradients, colors, consolidated *_theme.json)
 delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
+container_root_panel.py → Config UI (header + pattern list + JSON viewer, themed via config_panel section)
 ```

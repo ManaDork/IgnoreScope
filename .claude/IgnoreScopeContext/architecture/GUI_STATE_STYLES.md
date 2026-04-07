@@ -268,6 +268,28 @@ Color variables for list panel (Session History) GradientClass resolution. Still
 | `warning` | `#FFCE5D` | `base.palette.accent_yellow` |
 | `destructive` | `#FF7069` | `base.palette.accent_red` |
 
+### 5.3 Consolidated Theme — `config_panel`
+
+QSS-driving theme keys for the Desktop Docker Scope Config panel (ContainerRootPanel). Each value is a `ui` section key name resolved to hex via `ui_color()` at stylesheet build time. Allows independent theming of the config panel without affecting other panels.
+
+| Key | Default `ui` Ref | QSS Target | Purpose |
+|-----|-----------------|------------|---------|
+| `header_bg` | `surface_bg` | `#configHeaderFrame` background | Header frame background |
+| `header_text` | `accent_primary` | `#configHeaderLabel` color | Header label text |
+| `viewer_bg` | `panel_bg` | `#configViewerText` background | JSON viewer background |
+| `viewer_text` | `text_primary` | `#configViewerText` color | JSON viewer text |
+| `border` | `border` | `#configHeaderFrame`, `#configViewerText` border | Panel borders |
+| `pattern_bg` | `panel_bg` | `#patternListWidget`, `#patternMountCombo` background | Pattern list + mount combo background |
+| `pattern_text` | `text_primary` | `#patternListWidget`, `#patternMountCombo` color | Pattern list + mount combo text |
+| `pattern_border` | `border` | `#patternListWidget`, `#patternMountCombo` border | Pattern list + mount combo border |
+| `pattern_label` | `text_muted` | `#patternMountLabel` color | "Mount:" label text |
+| `pattern_status` | `text_muted` | `#patternStatusLabel` color | Pattern count status text |
+| `scrollbar_bg` | `panel_bg` | `#configPanel QScrollBar` track | Scrollbar gutter background |
+| `scrollbar_handle` | `border` | `#configPanel QScrollBar::handle` | Scrollbar thumb |
+| `scrollbar_handle_hover` | `accent_secondary` | `#configPanel QScrollBar::handle:hover` | Scrollbar thumb on hover |
+
+**Scrollbar note:** QSS scrollbar styling requires the Fusion style (`app.setStyle("Fusion")` in `gui/__init__.py`). The Windows native `windowsvista` style renders scrollbars via the OS theme and ignores QSS. Fusion is set at app startup to enable full QSS control.
+
 ---
 
 ## 6. Font Variable Reference
