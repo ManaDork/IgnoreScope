@@ -25,7 +25,7 @@ Each argument is a **variable name** (string) resolved from a style JSON file at
 GradientClass("masked", "masked", "hidden", "revealed")
                   │         │         │          │
                   ▼         ▼         ▼          ▼
-              tree_state_style.json lookup
+              *_theme.json local_host.state_colors lookup
                   │         │         │          │
                   ▼         ▼         ▼          ▼
               #4A3B42   #4A3B42   #2E3440    #4A4838
@@ -221,60 +221,60 @@ Session History panel states, derived from `entry_type` (HistoryEntryType enum) 
 
 ## 5. Color Variable Reference
 
-### 5.1 tree_state_style.json
+### 5.1 Consolidated Theme — `local_host.state_colors`
 
-Color variables for tree panel GradientClass resolution. Each variable maps to a hex color from the Nord palette or state color definitions.
+Color variables for tree panel GradientClass resolution. Stored in the consolidated `*_theme.json` under `local_host.state_colors`. Scope panels inherit these values via deep-merge (scope overrides merge on top of local_host at load time).
 
-| Variable | Hex | Color Group | Source |
-|----------|-----|-------------|--------|
-| `background` | `#3B4252` | Neutral | `palette.polar_night_1` |
-| `mounted` | `#3D4A3E` | Green | `state_colors.mounted` |
-| `pushed` | `#3D4A3E` | Green | `state_colors.pushed` (same hex as mounted) |
-| `masked` | `#4A3B42` | Red | `state_colors.masked` |
-| `revealed` | `#4A4838` | Yellow | `state_colors.revealed` |
-| `visible` | `#4C566A` | — | `visibility_colors.visible` |
-| `virtual` | `#373E4D` | — | `visibility_colors.virtual` |
-| `hidden` | `#2E3440` | — | `visibility_colors.hidden` |
-| `warning` | `#D08770` | Warning | `palette.orange` |
-| `selected` | `#5E81AC` | — | `delegate.selection_color` |
+| Variable | Hex | Category | Purpose |
+|----------|-----|----------|---------|
+| `visibility.background` | `#1A1035` | Visibility | Default/background |
+| `visibility.visible` | `#2D1F55` | Visibility | Container sees this node |
+| `visibility.hidden` | `#0F0A1E` | Visibility | Container cannot see |
+| `visibility.virtual` | `#1E1240` | Visibility | Structural/virtual path |
+| `visibility.container_only` | `#150E2E` | Visibility | Container-only node |
+| `config.mount` | `#00E5CC` | Config | Mount root accent |
+| `config.masked` | `#FF6B9D` | Config | Masked by pattern |
+| `config.revealed` | `#FFB15D` | Config | Revealed under mask |
+| `config.pushed` | `#8B5CF6` | Config | Pushed file accent |
+| `inherited.masked` | `#D94A7B` | Inherited | Ancestor pattern covers |
+| `inherited.revealed` | `#DE954B` | Inherited | Ancestor reveal |
+| `inherited.virtual_auth` | `#7C4DFF` | Inherited | Virtual auth inherited |
+| `inherited.virtual_volume` | `#7C4DFF` | Inherited | Virtual volume inherited |
+| `ancestor.visible` | `#FFB15D` | Ancestor | Has visible descendant |
+| `virtual.volume` | `#8B5CF6` | Virtual | Non-filesystem volume |
+| `virtual.auth` | `#8B5CF6` | Virtual | Non-filesystem auth |
+| `status.warning` | `#FFB15D` | Status | Attention-required |
+| `ui.selected` | `#6366F1` | UI | Selection override |
 
-**Color groups** (semantic families):
+**Color categories** (semantic families):
 
-- **Green** (mount/push): `mounted`, `pushed` — active content in container
-- **Red** (mask): `masked` — content excluded from container
-- **Yellow** (reveal): `revealed` — content restored under mask
-- **Warning** (orphan): `warning` — attention-required state
-- **Neutral**: `background` — no state / default
+- **Config** (mount/mask/reveal/push): direct user actions on nodes
+- **Inherited**: ancestor pattern coverage
+- **Visibility**: what the container sees
+- **Virtual**: non-filesystem entries
+- **Status**: attention indicators
+- **UI**: selection/interaction overlays
 
-**Variable naming convention:** `warning`, `conflict`, and other color names describe **visual intent**, not state names. The same variable name (e.g., `warning`) may resolve to different hex values in different JSON configs — tree panels use `tree_state_style.json`, list panels use `list_style.json`. Each config file is an independent namespace.
+**Per-panel differentiation:** The `scope` section in the consolidated theme can override any `local_host` color. At load time, scope values are deep-merged over local_host. Empty scope = identical to local_host. TreeDisplayConfig accepts a `panel` param ("local_host" or "scope") to select the resolved color set.
 
-### 5.2 list_style.json
+### 5.2 list_style.json (standalone)
 
-Color variables for list panel (Session History) GradientClass resolution.
+Color variables for list panel (Session History) GradientClass resolution. Still loaded from a standalone JSON file (list panel section deferred until session_history is wired to UI).
 
 | Variable | Hex | Source |
 |----------|-----|--------|
-| `background` | `#3B4252` | `ui.panel_bg` |
-| `selected` | `#5E81AC` | `ui.accent_secondary` |
-| `warning` | `#EBCB8B` | `palette.yellow` |
-| `destructive` | `#BF616A` | `palette.red` |
-
-**Migration from theme.json dotted paths:**
-
-| Old Reference | New Variable |
-|---------------|-------------|
-| `ui.panel_bg` | `background` |
-| `ui.accent_secondary` | `selected` |
-| `palette.yellow` | `warning` |
-| `palette.red` | `destructive` |
+| `background` | `#231745` | `base.palette.base_2` |
+| `selected` | `#6366F1` | `base.palette.accent_blue` |
+| `warning` | `#FFCE5D` | `base.palette.accent_yellow` |
+| `destructive` | `#FF7069` | `base.palette.accent_red` |
 
 ---
 
 ## 6. Font Variable Reference
 
-### 6.1 tree_state_font.json
+### 6.1 Consolidated Theme — `local_host.fonts`
 
-Font variables for tree panel FontStyleClass resolution. All values use **variable indirection** — `text_color` references a variable name resolved by TreeDisplayConfig, not a direct hex value.
+Font variables for tree panel FontStyleClass resolution. Stored in the consolidated `*_theme.json` under `local_host.fonts`. Scope panels inherit via deep-merge (same pattern as state_colors). All values use **variable indirection** — `text_color` references a variable name resolved by TreeDisplayConfig, not a direct hex value.
 
 | Variable | Weight | Italic | text_color (variable) | Used By |
 |----------|--------|--------|----------------------|---------|
@@ -297,30 +297,31 @@ Font variables for list panel (Session History) FontStyleClass resolution. Same 
 |----------|--------|--------|----------------------|
 | `default` | normal | false | `text_primary` |
 
-### 6.3 One-Off Color Variables (Base Class Definitions)
+### 6.3 Text and Delegate Variables (Injected from Theme)
 
-The following hex colors are used in rendering but don't correspond to any gradient state variable. First pass: defined as class-level variables on the base DisplayConfig classes. JSON storage decisions deferred.
+The following values are used in rendering but don't correspond to gradient state variables. All are injected from the consolidated `*_theme.json` at init time — no hardcoded hex defaults in Python.
 
-**TreeDisplayConfig base class:**
+**TreeDisplayConfig** (from `base.text` + `base.delegate`):
 
 | Variable | Hex | Purpose | Source |
 |----------|-----|---------|--------|
-| `text_primary` | `#ECEFF4` | Bright text for visible/active states | `palette.snow_storm_2` |
-| `text_dim` | `#616E88` | Muted text for hidden states | (custom, between snow_storm and polar_night) |
-| `text_warning` | `#D08770` | Orange text for orphaned files | `palette.orange` |
-| `text_pushed_sync` | `#BDA4FF` | Pushed sync text (placeholder) | matches `accent_purple` |
-| `text_pushed_nosync` | `#8B7BBF` | Pushed nosync text (placeholder) | dimmed variant of `accent_purple` |
-| `hover_color` | `#4C566A` | Delegate hover overlay | `delegate.hover_color` (same hex as gradient `visible`) |
-| `hover_alpha` | 60 | Delegate hover overlay alpha | `delegate.hover_alpha` |
-| `selection_alpha` | 100 | Delegate selection overlay alpha | `delegate.selection_alpha` |
+| `text_primary` | `#E8DEFF` | Bright text for visible/active states | `base.text.text_primary` |
+| `text_dim` | `#A89BC8` | Muted text for hidden states | `base.text.text_dim` |
+| `text_warning` | `#FFB15D` | Orange text for orphaned files | `base.text.text_warning` |
+| `text_virtual_purple` | `#8B5CF6` | Purple text for virtual nodes | `base.text.text_virtual_purple` |
+| `text_pushed_sync` | `#8B5CF6` | Pushed sync text (placeholder) | `base.text.text_pushed_sync` |
+| `text_pushed_nosync` | `#6B4EC4` | Pushed nosync text (placeholder) | `base.text.text_pushed_nosync` |
+| `hover_color` | `#2D1F55` | Delegate hover overlay | `base.delegate.hover_color` |
+| `hover_alpha` | 60 | Delegate hover overlay alpha | `base.delegate.hover_alpha` |
+| `selection_alpha` | 100 | Delegate selection overlay alpha | `base.delegate.selection_alpha` |
 
-**ListDisplayConfig base class:**
+**ListDisplayConfig** (from `base.text`):
 
 | Variable | Hex | Purpose |
 |----------|-----|---------|
-| `text_primary` | `#ECEFF4` | Bright text for all history entries |
+| `text_primary` | `#E8DEFF` | Bright text for all history entries |
 
-**Note:** `selected` (#5E81AC) is already a gradient state variable — only its alpha (100) is a one-off. `hover_color` shares its hex with the gradient `visible` variable but serves a different rendering purpose (overlay vs gradient stop).
+**Note:** `ui.selected` (`#6366F1`) is a gradient state variable — only its alpha (100) is injected as `selection_alpha`. `hover_color` shares its hex with `visibility.visible` but serves a different rendering purpose (overlay vs gradient stop).
 
 ---
 
@@ -359,11 +360,11 @@ The following hex colors are used in rendering but don't correspond to any gradi
 └──────┬───────┘                          │
        │                                  ▼
        ▼                           ┌──────────────┐
-┌──────────────┐                   │  Font JSON   │
-│  Style JSON  │                   │  lookup      │
-│  var → hex   │                   │  → weight,   │
-│  resolution  │                   │    italic,   │
-└──────┬───────┘                   │    text_color│
+┌──────────────┐                   │  Theme fonts │
+│  Theme state │                   │  lookup      │
+│  color_vars  │                   │  → weight,   │
+│  var → hex   │                   │    italic,   │
+│  resolution  │                   │    text_color│
        │                           └──────┬───────┘
        ▼                                  │
 ┌──────────────┐                          │

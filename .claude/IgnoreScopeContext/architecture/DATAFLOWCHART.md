@@ -454,7 +454,7 @@ mount_data_tree.py    → Runtime State Host (hosts NodeState instances from cor
                          GUI hosts runtime instances and Stage 2 (mirrored) descendant walk.
                          See: COREFLOWCHART.md Phase 3 for computation rules.
 mount_data_model.py   → Qt Adapter  (MountDataTreeModel wraps tree + DisplayConfig)
-display_config.py     → View Rules  (columns, filtering, checkbox behavior)
+display_config.py     → View Rules  (columns, filtering, checkbox behavior, per-panel theme identity)
 local_host_view.py    → Left Panel  (widget + RMB menu + undo)
 scope_view.py         → Right Panel (widget + RMB menu + file ops signals)
 file_ops_ui.py        → File Op UI  (thin layer: preflight dialog → CORE execute → tree refresh)
@@ -463,6 +463,6 @@ container_ops_ui.py   → Container UI (thin layer: CORE execute_create/remove �
                          Calls docker/container_lifecycle.py, no CLI imports
 config_manager.py     → Orchestrator (open/switch/save project+scope)
 app.py                → Wiring      (creates shared tree, connects signals)
-style_engine.py       → Rendering   (StyleGui: gradients, colors, theme.json)
+style_engine.py       → Rendering   (StyleGui: gradients, colors, consolidated *_theme.json)
 delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
 ```

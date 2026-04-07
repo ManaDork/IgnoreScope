@@ -11,6 +11,7 @@ from IgnoreScope.gui.style_engine import (
     GradientClass,
     FontStyleClass,
     StateStyleClass,
+    StyleGui,
 )
 from IgnoreScope.gui.display_config import (
     ColumnDef,
@@ -24,6 +25,18 @@ from IgnoreScope.gui.display_config import (
     FILE_STATE_TABLE,
 )
 from IgnoreScope.gui.list_display_config import ListDisplayConfig
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def reset_singleton():
+    """Reset StyleGui singleton between tests."""
+    StyleGui._reset()
+    yield
+    StyleGui._reset()
 
 
 # ===========================================================================
@@ -359,20 +372,20 @@ class TestJsonLoading:
 
     def test_resolve_text_color_primary(self, config):
         font = FontStyleClass(text_color_var="text_primary")
-        assert config.resolve_text_color(font) == "#F0E5FF"
+        assert config.resolve_text_color(font) == "#E8DEFF"
 
     def test_resolve_text_color_dim(self, config):
         font = FontStyleClass(text_color_var="text_dim")
-        assert config.resolve_text_color(font) == "#BEB2D5"
+        assert config.resolve_text_color(font) == "#A89BC8"
 
     def test_resolve_text_color_purple(self, config):
         font = FontStyleClass(text_color_var="text_virtual_purple")
-        assert config.resolve_text_color(font) == "#BDA4FF"
+        assert config.resolve_text_color(font) == "#8B5CF6"
 
     def test_resolve_text_color_unknown_fallback(self, config):
         """Unknown var falls back to text_primary."""
         font = FontStyleClass(text_color_var="nonexistent_var")
-        assert config.resolve_text_color(font) == "#F0E5FF"
+        assert config.resolve_text_color(font) == "#E8DEFF"
 
 
 # ===========================================================================
@@ -483,4 +496,55 @@ class TestListDisplayConfig:
 
     def test_resolve_text_color(self, config):
         font = FontStyleClass(text_color_var="text_primary")
-        assert config.resolve_text_color(font) == "#F0E5FF"
+        assert config.resolve_text_color(font) == "#E8DEFF"
+
+
+# ===========================================================================
+# Consolidated Theme — Per-Panel Identity
+# ===========================================================================
+
+class TestPerPanelIdentity:
+    """Verify TreeDisplayConfig panel identity and scope deep-merge."""
+
+    def test_local_host_panel_default(self):
+        """TreeDisplayConfig defaults to local_host panel."""
+        config = TreeDisplayConfig()
+        sg = StyleGui.instance()
+        local_colors = sg._theme_data["local_host"]["state_colors"]
+        assert config.color_vars == local_colors
+
+    def test_scope_panel_inherits_local_host(self):
+        """Scope panel with empty overrides inherits local_host colors."""
+        config = TreeDisplayConfig(panel="scope")
+        sg = StyleGui.instance()
+        local_colors = sg._theme_data["local_host"]["state_colors"]
+        # With empty scope section, resolved colors should match local_host
+        assert config.color_vars == local_colors
+
+    def test_scope_display_config_uses_scope_panel(self):
+        """ScopeDisplayConfig passes panel='scope'."""
+        config = ScopeDisplayConfig()
+        sg = StyleGui.instance()
+        resolved = sg._theme_data["_scope_resolved"]["state_colors"]
+        assert config.color_vars == resolved
+
+    def test_delegate_values_from_theme(self):
+        """hover_color, hover_alpha, selection_alpha come from theme delegate."""
+        config = TreeDisplayConfig()
+        sg = StyleGui.instance()
+        delegate = sg._theme_data["base"]["delegate"]
+        assert config.hover_color == delegate["hover_color"]
+        assert config.hover_alpha == delegate["hover_alpha"]
+        assert config.selection_alpha == delegate["selection_alpha"]
+
+    def test_no_hex_class_defaults(self):
+        """TreeDisplayConfig has no class-level hex defaults."""
+        # These used to be class-level attributes — now injected from theme
+        config = TreeDisplayConfig()
+        assert hasattr(config, "text_primary")
+        assert hasattr(config, "text_dim")
+        assert hasattr(config, "hover_color")
+        # All should be strings starting with #
+        assert config.text_primary.startswith("#")
+        assert config.text_dim.startswith("#")
+        assert config.hover_color.startswith("#")

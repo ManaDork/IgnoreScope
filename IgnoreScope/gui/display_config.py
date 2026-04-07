@@ -1,24 +1,21 @@
 """TreeDisplayConfig Base + Subclasses.
 
 TreeDisplayConfig base class with LocalHostDisplayConfig and
-ScopeDisplayConfig subclasses. Loads color/font variables from JSON files
-(``tree_state_style.json``, ``tree_state_font.json``). Contains
+ScopeDisplayConfig subclasses. Receives pre-resolved color/font dicts
+from the consolidated ``*_theme.json`` via StyleGui. Contains
 ``state_styles: dict[str, StateStyleClass]`` for display state name -> visual
 lookup, ``columns: list[ColumnDef]``, and content filter booleans.
 Folder states derived via ``derive_gradient()`` formula.
 File states derived via ``derive_file_style()`` formula.
-Each config CAN point to different JSON files. Does NOT store state,
-render UI, or interact with CORE.
+Does NOT store state, render UI, or interact with CORE.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
-from .style_engine import FontStyleClass, GradientClass, StateStyleClass
+from .style_engine import FontStyleClass, GradientClass, StateStyleClass, StyleGui
 
 
 # ------------------------------------------------------------------
@@ -344,33 +341,24 @@ def _resolve_folder_state(node_state, virtual_type: str = "mirrored") -> str:
 class BaseDisplayConfig:
     """Shared display configuration base for tree and list panels.
 
-    Loads color/font variables from JSON, builds state_styles dict
-    from a caller-provided state definitions dictionary.
+    Receives pre-resolved color/font/text dicts from the consolidated
+    theme. Builds state_styles dict from a caller-provided state
+    definitions dictionary.
     """
-
-    text_primary: str = "#F0E5FF"
 
     def __init__(
         self,
         state_defs: dict[str, tuple[Optional[GradientClass], str]],
-        color_json: str,
-        font_json: str,
+        color_vars: dict[str, str],
+        font_vars: dict[str, dict],
+        text_colors: dict[str, str],
     ):
-        gui_dir = Path(__file__).parent
+        self._color_vars = color_vars
+        self._font_vars = font_vars
 
-        with open(gui_dir / color_json, "r") as f:
-            self._color_vars: dict[str, str] = json.load(f)
-
-        with open(gui_dir / font_json, "r") as f:
-            self._font_vars: dict[str, dict] = json.load(f)
-
-        # Load text colors from theme.json (consolidated — no hardcoded hex)
-        theme_path = gui_dir / "theme.json"
-        if theme_path.exists():
-            with open(theme_path, "r") as f:
-                theme = json.load(f)
-            for attr, value in theme.get("text", {}).items():
-                setattr(self, attr, value)
+        # Apply text colors as instance attributes (replaces theme.json loading)
+        for attr, value in text_colors.items():
+            setattr(self, attr, value)
 
         self.state_styles: dict[str, StateStyleClass] = self._build_state_styles(state_defs)
 
@@ -403,27 +391,31 @@ class BaseDisplayConfig:
 class TreeDisplayConfig(BaseDisplayConfig):
     """Display configuration for tree panels.
 
-    Extends BaseDisplayConfig with tree-specific color variables,
-    columns, display filters, and undo scope.
+    Receives panel-specific resolved dicts from the consolidated theme.
+    Panel identity ("local_host" or "scope") determines which state_colors
+    and fonts section is used. Scope inherits from local_host via deep-merge.
     """
 
-    # Fallback defaults — overridden by theme.json "text" section at init
-    text_dim: str = "#BEB2D5"
-    text_warning: str = "#FFB15D"
-    text_virtual_purple: str = "#BDA4FF"
-    # Unused placeholders — pushed sync/nosync font colors (future wiring)
-    text_pushed_sync: str = "#BDA4FF"
-    text_pushed_nosync: str = "#8B7BBF"
-    hover_color: str = "#50476F"
-    hover_alpha: int = 60
-    selection_alpha: int = 100
+    def __init__(self, panel: str = "local_host"):
+        sg = StyleGui.instance()
+        theme = sg._theme_data
+        if panel == "scope":
+            resolved = theme["_scope_resolved"]
+        else:
+            resolved = theme["local_host"]
 
-    def __init__(
-        self,
-        color_json: str = "tree_state_style.json",
-        font_json: str = "tree_state_font.json",
-    ):
-        super().__init__(_TREE_STATE_DEFS, color_json, font_json)
+        super().__init__(
+            _TREE_STATE_DEFS,
+            color_vars=resolved["state_colors"],
+            font_vars=resolved["fonts"],
+            text_colors=theme["base"]["text"],
+        )
+
+        # Delegate overlay values from theme
+        delegate = theme["base"]["delegate"]
+        self.hover_color: str = delegate["hover_color"]
+        self.hover_alpha: int = delegate["hover_alpha"]
+        self.selection_alpha: int = delegate["selection_alpha"]
 
     # Subclass-defined attributes (defaults)
     columns: list[ColumnDef] = []
@@ -458,8 +450,8 @@ class LocalHostDisplayConfig(TreeDisplayConfig):
     display_orphaned = True
     undo_scope = "full"
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self):
+        super().__init__(panel="local_host")
         self.columns = [
             ColumnDef(
                 header="Local Host",
@@ -484,8 +476,8 @@ class ScopeDisplayConfig(TreeDisplayConfig):
     display_orphaned = True
     undo_scope = "selection_history"
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self):
+        super().__init__(panel="scope")
         self.columns = [
             ColumnDef(
                 header="Container Scope",

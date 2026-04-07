@@ -1,13 +1,13 @@
 """Color Theme Engine.
 
-Singleton that loads theme.json, pre-builds QColor lookups for all 6 theme
-sections, generates the application QSS stylesheet, and constructs
-GradientClass instances from variable-resolved colors. Provides
-``build_gradient(GradientClass, color_vars, width)`` for 4-stop universal
-gradient construction. Does NOT define visual states (those live in
-TreeDisplayConfig.state_styles), create widgets, interact with tree models,
-or manage application state. This is the ONLY layout-phase module with real
-logic.
+Singleton that loads the consolidated ``*_theme.json`` file, pre-builds
+QColor lookups for delegate overlays, generates the application QSS
+stylesheet, and constructs GradientClass instances from variable-resolved
+colors. Provides ``build_gradient(GradientClass, color_vars, width)`` for
+4-stop universal gradient construction. Does NOT define visual states
+(those live in TreeDisplayConfig.state_styles), create widgets, interact
+with tree models, or manage application state. This is the ONLY
+layout-phase module with real logic.
 """
 
 from __future__ import annotations
@@ -139,18 +139,56 @@ class GradientBackgroundMixin:
 
 
 # ------------------------------------------------------------------
+# Consolidated theme loader
+# ------------------------------------------------------------------
+
+def _load_consolidated_theme(path: Path) -> dict:
+    """Load consolidated theme file. Validate required sections.
+
+    Deep-merges ``scope`` over ``local_host`` into ``_scope_resolved``
+    so that scope panels inherit local_host defaults for any missing keys.
+    """
+    with open(path, "r") as f:
+        raw = json.load(f)
+
+    required = {"base", "gradients", "local_host", "config_panel"}
+    missing = required - raw.keys()
+    if missing:
+        raise ValueError(f"Theme file missing sections: {missing}")
+
+    # Deep-merge scope over local_host
+    local = raw["local_host"]
+    scope_raw = raw.get("scope", {})
+    raw["_scope_resolved"] = {
+        "state_colors": {**local.get("state_colors", {}),
+                         **scope_raw.get("state_colors", {})},
+        "fonts": {**local.get("fonts", {}),
+                  **scope_raw.get("fonts", {})},
+    }
+    return raw
+
+
+# ------------------------------------------------------------------
 # StyleGui singleton
 # ------------------------------------------------------------------
 
 class StyleGui:
-    """Singleton style engine -- loads theme.json."""
+    """Singleton style engine -- loads consolidated *_theme.json."""
 
     _instance: Optional[StyleGui] = None
 
     def __init__(self):
-        theme_path = Path(__file__).parent / "theme.json"
-        with open(theme_path, "r") as f:
-            self._theme = json.load(f)
+        theme_path = self._find_theme_file()
+        self._theme_data = _load_consolidated_theme(theme_path)
+
+        # Map old access patterns to base subsections
+        self._theme = {
+            "palette": self._theme_data["base"]["palette"],
+            "ui": self._theme_data["base"]["ui"],
+            "text": self._theme_data["base"]["text"],
+            "delegate": self._theme_data["base"]["delegate"],
+            "gradients": self._theme_data["gradients"],
+        }
 
         # Delegate overlay colors
         d = self._theme["delegate"]
@@ -162,6 +200,15 @@ class StyleGui:
         # Widget gradients
         self._widget_gradients: dict[str, WidgetGradientDef] = {}
         self._load_widget_gradients()
+
+    @staticmethod
+    def _find_theme_file() -> Path:
+        """Find *_theme.json in gui directory."""
+        gui_dir = Path(__file__).parent
+        candidates = list(gui_dir.glob("*_theme.json"))
+        if not candidates:
+            raise FileNotFoundError("No *_theme.json found in gui/")
+        return candidates[0]
 
     @classmethod
     def instance(cls) -> StyleGui:
@@ -218,12 +265,17 @@ class StyleGui:
         return self._hover_qcolor
 
     def palette_color(self, key: str) -> str:
-        """Get Nord palette hex value by key."""
-        return self._theme["palette"].get(key, "#FFFFFF")
+        """Get palette hex value by key. KeyError if missing."""
+        return self._theme["palette"][key]
 
     def ui_color(self, key: str) -> str:
-        """Get UI semantic color hex value by key."""
-        return self._theme["ui"].get(key, "#FFFFFF")
+        """Get UI semantic color hex value by key. KeyError if missing."""
+        return self._theme["ui"][key]
+
+    def config_panel_style(self) -> dict[str, str]:
+        """Resolve config_panel section values to hex via ui lookup."""
+        raw = self._theme_data.get("config_panel", {})
+        return {k: self.ui_color(v) for k, v in raw.items()}
 
     # ------------------------------------------------------------------
     # Widget Gradient API
@@ -258,13 +310,13 @@ class StyleGui:
         """Resolve a color reference to hex. Theme var lookup or hex passthrough."""
         if color_ref.startswith("#"):
             return color_ref
-        pal = self._theme.get("palette", {})
+        pal = self._theme["palette"]
         if color_ref in pal:
             return pal[color_ref]
-        ui = self._theme.get("ui", {})
+        ui = self._theme["ui"]
         if color_ref in ui:
             return ui[color_ref]
-        return pal.get("base_0", "#383144")
+        return pal["base_0"]
 
     def build_widget_gradient(
         self,
@@ -372,6 +424,22 @@ class StyleGui:
             else ui["panel_bg"]
         )
 
+        # Resolve config_panel section — var names → hex via ui lookup
+        cp = self._theme_data.get("config_panel", {})
+        config_header_bg = self.ui_color(cp.get("header_bg", "surface_bg"))
+        config_header_text = self.ui_color(cp.get("header_text", "accent_primary"))
+        config_viewer_bg = self.ui_color(cp.get("viewer_bg", "panel_bg"))
+        config_viewer_text = self.ui_color(cp.get("viewer_text", "text_primary"))
+        config_border = self.ui_color(cp.get("border", "border"))
+        config_pattern_bg = self.ui_color(cp.get("pattern_bg", "panel_bg"))
+        config_pattern_text = self.ui_color(cp.get("pattern_text", "text_primary"))
+        config_pattern_border = self.ui_color(cp.get("pattern_border", "border"))
+        config_pattern_label = self.ui_color(cp.get("pattern_label", "text_muted"))
+        config_pattern_status = self.ui_color(cp.get("pattern_status", "text_muted"))
+        config_scrollbar_bg = self.ui_color(cp.get("scrollbar_bg", "panel_bg"))
+        config_scrollbar_handle = self.ui_color(cp.get("scrollbar_handle", "border"))
+        config_scrollbar_hover = self.ui_color(cp.get("scrollbar_handle_hover", "accent_secondary"))
+
         return _STYLESHEET_TEMPLATE.format(
             window_bg=ui["window_bg"],
             gradient_window_bg=gradient_window_bg,
@@ -388,6 +456,19 @@ class StyleGui:
             accent_secondary=ui["accent_secondary"],
             accent_teal=ui["accent_teal"],
             checkbox_x_path=checkbox_x_path,
+            config_header_bg=config_header_bg,
+            config_header_text=config_header_text,
+            config_viewer_bg=config_viewer_bg,
+            config_viewer_text=config_viewer_text,
+            config_border=config_border,
+            config_pattern_bg=config_pattern_bg,
+            config_pattern_text=config_pattern_text,
+            config_pattern_border=config_pattern_border,
+            config_pattern_label=config_pattern_label,
+            config_pattern_status=config_pattern_status,
+            config_scrollbar_bg=config_scrollbar_bg,
+            config_scrollbar_handle=config_scrollbar_handle,
+            config_scrollbar_hover=config_scrollbar_hover,
         )
 
 
@@ -642,13 +723,13 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 }}
 
 #configHeaderFrame {{
-    background-color: {surface_bg};
-    border: 1px solid {border};
+    background-color: {config_header_bg};
+    border: 1px solid {config_border};
     border-radius: 4px;
 }}
 
 #configHeaderLabel {{
-    color: {accent_primary};
+    color: {config_header_text};
     font-weight: bold;
     font-size: 12px;
     background: transparent;
@@ -658,10 +739,86 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 #configViewerText {{
     font-family: "Consolas", "Monaco", "Courier New", monospace;
     font-size: 11px;
-    background-color: {panel_bg};
-    color: {text_primary};
-    border: 1px solid {border};
+    background-color: {config_viewer_bg};
+    color: {config_viewer_text};
+    border: 1px solid {config_border};
     border-radius: 4px;
+}}
+
+#patternListWidget {{
+    background-color: {config_pattern_bg};
+    color: {config_pattern_text};
+    border: 1px solid {config_pattern_border};
+    border-radius: 4px;
+}}
+
+#patternListWidget::item {{
+    padding: 3px 6px;
+}}
+
+#patternMountCombo {{
+    background-color: {config_pattern_bg};
+    color: {config_pattern_text};
+    border: 1px solid {config_pattern_border};
+    border-radius: 4px;
+    padding: 4px 8px;
+}}
+
+#patternMountLabel {{
+    color: {config_pattern_label};
+}}
+
+#patternStatusLabel {{
+    color: {config_pattern_status};
+    font-size: 11px;
+}}
+
+#patternAddBtn {{
+    min-width: 40px;
+    padding: 3px 8px;
+}}
+
+/* Config panel scrollbars */
+#configPanel QScrollBar:vertical {{
+    background-color: {config_scrollbar_bg};
+    width: 12px;
+    border-radius: 6px;
+}}
+
+#configPanel QScrollBar::handle:vertical {{
+    background-color: {config_scrollbar_handle};
+    border-radius: 6px;
+    min-height: 20px;
+}}
+
+#configPanel QScrollBar::handle:vertical:hover {{
+    background-color: {config_scrollbar_hover};
+}}
+
+#configPanel QScrollBar::add-line:vertical,
+#configPanel QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+#configPanel QScrollBar:horizontal {{
+    background-color: {config_scrollbar_bg};
+    height: 12px;
+    border-radius: 6px;
+}}
+
+#configPanel QScrollBar::handle:horizontal {{
+    background-color: {config_scrollbar_handle};
+    border-radius: 6px;
+    min-width: 20px;
+}}
+
+#configPanel QScrollBar::handle:horizontal:hover {{
+    background-color: {config_scrollbar_hover};
+}}
+
+#configPanel QScrollBar::add-line:horizontal,
+#configPanel QScrollBar::sub-line:horizontal {{
+    width: 0px;
 }}
 
 /* Dialog styling */
