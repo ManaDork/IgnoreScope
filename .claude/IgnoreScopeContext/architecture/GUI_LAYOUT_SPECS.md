@@ -502,7 +502,7 @@ See `GUI_STATE_STYLES.md` Section 2 for full specification.
 
 ### H. State Enumeration
 
-14 tree states (7 folder + 7 file) + 2 selected overrides. Each state has a truth table condition, GradientClass, and FontStyleClass.
+20 tree states (12 folder + 8 file) + 2 selected overrides. Folder states derived via `derive_gradient()` formula. File states use truth table. Each state has a GradientClass and FontStyleClass.
 
 Folder states read: `visibility` + `has_pushed_descendant` + `has_direct_visible_child`.
 File states read: `visibility` + `pushed` + `host_orphaned`.

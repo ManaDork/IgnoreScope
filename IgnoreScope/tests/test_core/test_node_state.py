@@ -300,7 +300,20 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.mounted is True
+        assert ns.is_mount_root is True
         assert ns.visibility == "visible"
+
+    def test_child_of_mount_is_not_mount_root(self, tmp_path: Path):
+        src = tmp_path / "src"
+        child = src / "main.py"
+
+        ns = compute_node_state(
+            path=child,
+            mount_specs=_make_mount_specs({src}),
+            pushed_files=set(),
+        )
+        assert ns.mounted is True
+        assert ns.is_mount_root is False
 
     def test_mask_point_itself_is_masked(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -312,7 +325,19 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.masked is True
+        assert ns.is_mount_root is False
         assert ns.visibility == "masked"
+
+    def test_path_outside_mount_not_mount_root(self, tmp_path: Path):
+        outside = tmp_path / "other"
+
+        ns = compute_node_state(
+            path=outside,
+            mount_specs=_make_mount_specs({tmp_path / "src"}),
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is False
+        assert ns.mounted is False
 
     def test_reveal_point_itself_is_revealed(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -942,7 +967,7 @@ class TestTruthTableRegression:
         assert s.visibility == "visible"
 
     def test_folder_mounted_masked(self, tmp_path: Path):
-        """F3: masked, no pushed descendant → FOLDER_MOUNTED_MASKED."""
+        """Masked folder, no pushed descendant → FOLDER_MASKED."""
         src = tmp_path / "src"
         vendor = src / "vendor"
         ms = MountSpecPath(mount_root=src, patterns=["vendor/"])
@@ -955,9 +980,8 @@ class TestTruthTableRegression:
         assert s.has_pushed_descendant is False
 
     def test_folder_mounted_masked_pushed(self, tmp_path: Path):
-        """F4: masked, has pushed descendant → FOLDER_MOUNTED_MASKED_PUSHED.
-        Only reachable when mirrored=False — with mirrored=True, pushed
-        descendants trigger virtual upgrade via Check 2."""
+        """Masked folder with pushed descendant (mirrored=False).
+        With mirrored=True, pushed descendants trigger virtual upgrade."""
         src = tmp_path / "src"
         vendor = src / "vendor"
         pushed_file = vendor / "secret.py"

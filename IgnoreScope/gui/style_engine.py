@@ -158,10 +158,6 @@ class StyleGui:
             accent_primary=ui["accent_primary"],
             accent_secondary=ui["accent_secondary"],
             accent_teal=ui["accent_teal"],
-            frost_0=pal["frost_0"],
-            frost_1=pal["frost_1"],
-            frost_2=pal["frost_2"],
-            frost_3=pal["frost_3"],
             checkbox_x_path=checkbox_x_path,
         )
 

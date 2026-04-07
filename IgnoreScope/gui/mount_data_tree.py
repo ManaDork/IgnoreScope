@@ -70,6 +70,7 @@ class MountDataNode:
     children_loaded: bool = False
     is_file: bool = False
     is_virtual: bool = False
+    virtual_type: str = "mirrored"        # "mirrored" | "volume" | "auth"
     source: NodeSource = NodeSource.PROJECT
     container_path: str = ""              # Sibling root container target path
 

@@ -12,7 +12,7 @@ HistoryDelegate: List delegate parameterized by ListDisplayConfig.
 Reads HistoryStateRole from the model, resolves visual state,
 paints 3-layer rows (gradient -> overlay -> text). No symbols.
 
-No TreeContext enum. No RowStyleInput. Config-parameterized.
+Config-parameterized delegates — state derivation via resolve_tree_state().
 """
 
 from __future__ import annotations
