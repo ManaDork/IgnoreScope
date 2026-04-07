@@ -10,6 +10,8 @@ from PyQt6.QtGui import QColor
 from IgnoreScope.gui.style_engine import (
     StyleGui,
     GradientClass,
+    GradientStop,
+    WidgetGradientDef,
     FontStyleClass,
     StateStyleClass,
 )
@@ -213,3 +215,200 @@ class TestBuildGradient:
         color_vars = {"a": "#FFFFFF"}
         g = sg.build_gradient(gradient_class, color_vars, 1200)
         assert g.finalStop().x() == 1200
+
+
+# ===========================================================================
+# Widget Gradient Dataclass tests
+# ===========================================================================
+
+class TestGradientStop:
+    """Verify GradientStop frozen dataclass behavior."""
+
+    def test_fields(self):
+        s = GradientStop(position=0.5, color="frost_0", offset_px=10)
+        assert s.position == 0.5
+        assert s.color == "frost_0"
+        assert s.offset_px == 10
+
+    def test_defaults(self):
+        s = GradientStop(position=0.0, color="#FF0000")
+        assert s.offset_px == 0
+
+    def test_frozen(self):
+        s = GradientStop(position=0.0, color="a")
+        with pytest.raises(AttributeError):
+            s.position = 0.5
+
+
+class TestWidgetGradientDef:
+    """Verify WidgetGradientDef frozen dataclass behavior."""
+
+    def test_linear_defaults(self):
+        stops = (GradientStop(0.0, "a"), GradientStop(1.0, "b"))
+        g = WidgetGradientDef(type="linear", stops=stops)
+        assert g.anchor == "vertical"
+        assert g.angle == 0.0
+        assert g.child_opacity == 0
+
+    def test_radial_fields(self):
+        stops = (GradientStop(0.0, "a"), GradientStop(1.0, "b"))
+        g = WidgetGradientDef(
+            type="radial", stops=stops,
+            center_x=0.3, center_y=0.7, radius=0.4,
+        )
+        assert g.center_x == 0.3
+        assert g.center_y == 0.7
+        assert g.radius == 0.4
+
+    def test_frozen(self):
+        stops = (GradientStop(0.0, "a"),)
+        g = WidgetGradientDef(type="linear", stops=stops)
+        with pytest.raises(AttributeError):
+            g.type = "radial"
+
+
+# ===========================================================================
+# Widget Gradient StyleGui API tests
+# ===========================================================================
+
+class TestWidgetGradientLoading:
+    """Test theme.json gradient loading and resolution."""
+
+    def test_gradients_loaded(self, sg):
+        """theme.json 'gradients' section parsed into WidgetGradientDef."""
+        names = sg.widget_gradient_names()
+        assert "main_window" in names
+        assert "dock_panel" in names
+        assert "config_panel" in names
+        assert "status_bar" in names
+
+    def test_gradient_stop_count(self, sg):
+        """Each gradient has the expected number of stops."""
+        g = sg._widget_gradients["main_window"]
+        assert len(g.stops) == 2
+        g = sg._widget_gradients["dock_panel"]
+        assert len(g.stops) == 3
+        g = sg._widget_gradients["status_bar"]
+        assert len(g.stops) == 3
+
+    def test_gradient_types(self, sg):
+        """All current gradients are linear."""
+        for name in sg.widget_gradient_names():
+            assert sg._widget_gradients[name].type == "linear"
+
+
+class TestResolveGradientColor:
+    """Test color reference resolution."""
+
+    def test_hex_passthrough(self, sg):
+        assert sg._resolve_gradient_color("#BDA4FF") == "#BDA4FF"
+
+    def test_palette_lookup(self, sg):
+        assert sg._resolve_gradient_color("base_0") == "#383144"
+
+    def test_ui_lookup(self, sg):
+        assert sg._resolve_gradient_color("surface_bg") == "#50476F"
+
+    def test_unknown_fallback(self, sg):
+        result = sg._resolve_gradient_color("nonexistent_var")
+        assert result == "#383144"  # falls back to base_0
+
+
+class TestBuildWidgetGradient:
+    """Test widget gradient construction."""
+
+    def test_returns_none_for_unknown(self, sg):
+        assert sg.build_widget_gradient("no_such_gradient", 800, 600) is None
+
+    def test_linear_vertical(self, sg):
+        """main_window is a vertical linear gradient."""
+        from PyQt6.QtGui import QLinearGradient
+        grad = sg.build_widget_gradient("main_window", 800, 600)
+        assert isinstance(grad, QLinearGradient)
+        stops = grad.stops()
+        assert len(stops) == 2
+        # Vertical: start at top center, end at bottom center
+        assert grad.start().x() == 400  # width / 2
+        assert grad.start().y() == 0
+        assert grad.finalStop().x() == 400
+        assert grad.finalStop().y() == 600
+
+    def test_linear_horizontal(self, sg):
+        """status_bar is a horizontal linear gradient."""
+        grad = sg.build_widget_gradient("status_bar", 1000, 30)
+        stops = grad.stops()
+        assert len(stops) == 3
+        # Horizontal: start at left center, end at right center
+        assert grad.start().x() == 0
+        assert grad.start().y() == 15  # height / 2
+        assert grad.finalStop().x() == 1000
+        assert grad.finalStop().y() == 15
+
+    def test_stop_colors_resolved(self, sg):
+        """Gradient stop colors resolve from theme variables."""
+        grad = sg.build_widget_gradient("main_window", 800, 600)
+        stops = grad.stops()
+        # base_1 = #3F3A57, base_0 = #383144
+        assert_color(stops[0][1], "#3F3A57", "stop 0 = base_1")
+        assert_color(stops[1][1], "#383144", "stop 1 = base_0")
+
+
+class TestRowGradientOpacity:
+    """Test row_gradient_opacity property."""
+
+    def test_reads_from_theme(self, sg):
+        assert sg.row_gradient_opacity == 242
+
+    def test_default_when_missing(self):
+        """Default is 255 if key absent."""
+        sg = StyleGui.instance()
+        # Remove the key temporarily
+        original = sg._theme["delegate"].pop("row_gradient_opacity", None)
+        try:
+            assert sg.row_gradient_opacity == 255
+        finally:
+            if original is not None:
+                sg._theme["delegate"]["row_gradient_opacity"] = original
+
+
+class TestChildBg:
+    """Test _child_bg opacity computation."""
+
+    def test_transparent_when_opacity_zero(self, sg):
+        """child_opacity=0 → 'transparent'."""
+        result = sg._child_bg("main_window", "#3B4252")
+        assert result == "transparent"
+
+    def test_opaque_when_opacity_255(self, sg):
+        """child_opacity=255 → passthrough color."""
+        # Temporarily set child_opacity to 255
+        gdef = sg._widget_gradients["main_window"]
+        original = gdef
+        sg._widget_gradients["main_window"] = WidgetGradientDef(
+            type=gdef.type, stops=gdef.stops,
+            anchor=gdef.anchor, angle=gdef.angle,
+            child_opacity=255,
+        )
+        try:
+            assert sg._child_bg("main_window", "#3B4252") == "#3B4252"
+        finally:
+            sg._widget_gradients["main_window"] = original
+
+    def test_partial_opacity(self, sg):
+        """child_opacity between 0 and 255 → rgba string."""
+        gdef = sg._widget_gradients["main_window"]
+        original = gdef
+        sg._widget_gradients["main_window"] = WidgetGradientDef(
+            type=gdef.type, stops=gdef.stops,
+            anchor=gdef.anchor, angle=gdef.angle,
+            child_opacity=128,
+        )
+        try:
+            result = sg._child_bg("main_window", "#3B4252")
+            assert result == "rgba(59, 66, 82, 128)"
+        finally:
+            sg._widget_gradients["main_window"] = original
+
+    def test_unknown_gradient(self, sg):
+        """Unknown gradient name → 'transparent'."""
+        assert sg._child_bg("nonexistent", "#FF0000") == "transparent"

@@ -43,6 +43,55 @@
         "selection_color": "#9BA5FF",
         "selection_alpha": 100,
         "hover_color": "#50476F",
-        "hover_alpha": 60
+        "hover_alpha": 60,
+        "row_gradient_opacity": 242
+    },
+    "gradients": {
+        "main_window": {
+            "type": "linear",
+            "anchor": "vertical",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "base_1" },
+                { "pos": 1.0, "color": "base_0" }
+            ],
+            "_note": "Darkest at bottom — deep vertical wash"
+        },
+        "dock_panel": {
+            "type": "linear",
+            "anchor": "vertical",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "surface_bg" },
+                { "pos": 0.5, "color": "base_2" },
+                { "pos": 1.0, "color": "base_1" }
+            ],
+            "_note": "Glass card: lighter top edge fading to panel body — 3-stop top-lit"
+        },
+        "config_panel": {
+            "type": "linear",
+            "anchor": "vertical",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "base_2" },
+                { "pos": 1.0, "color": "base_1" }
+            ],
+            "_note": "Subtle top-lit glass, darker than dock panels"
+        },
+        "status_bar": {
+            "type": "linear",
+            "anchor": "horizontal",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "base_0" },
+                { "pos": 0.5, "color": "base_1" },
+                { "pos": 1.0, "color": "base_0" }
+            ],
+            "_note": "Subtle center-bright horizontal bar"
+        }
     }
 }

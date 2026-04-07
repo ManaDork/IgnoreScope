@@ -436,3 +436,104 @@ The old architecture had three separate tree contexts (PROJECT, EXCEPTION, SCOPE
 ### TreeContext.SCOPE Note
 
 > `TreeContext.SCOPE` — defined with text colors in theme.json but currently unused by any view. The enum value and theme colors are retained during migration but not wired into the new style system. The unified FontStyleClass variables replace per-context text color logic.
+
+---
+
+## 9. Widget Gradient System
+
+Separate from the delegate GradientClass system (Sections 1–8), the widget gradient system provides JSON-driven gradient backgrounds for QWidget subclasses.
+
+### 9.1 Dataclasses
+
+```
+GradientStop(position, color, offset_px=0)
+    position: 0.0–1.0 percentage along gradient line
+    color:    theme var name or "#hex" direct
+    offset_px: signed pixel nudge from computed position
+
+WidgetGradientDef(type, stops, anchor, angle, center_x, center_y, radius, child_opacity)
+    type:          "linear" or "radial"
+    stops:         tuple[GradientStop, ...] — 2+ stops
+    anchor:        "horizontal" or "vertical" (linear only)
+    angle:         degrees offset from anchor baseline (linear only)
+    center_x/y:    % of widget dimensions (radial only)
+    radius:        % of smaller dimension (radial only)
+    child_opacity: 0–255, controls child widget background transparency
+```
+
+### 9.2 JSON Schema (theme.json "gradients" section)
+
+Each entry is a named gradient definition:
+
+```json
+{
+    "gradients": {
+        "gradient_name": {
+            "type": "linear",
+            "anchor": "vertical",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "palette_or_ui_var" },
+                { "pos": 1.0, "color": "#hex_direct" }
+            ]
+        }
+    }
+}
+```
+
+Stop `color` resolution order:
+1. `#hex` prefix → passthrough
+2. `theme.palette[color]` → hex
+3. `theme.ui[color]` → hex
+4. Fallback → `palette.polar_night_0`
+
+### 9.3 Active Gradient Definitions
+
+| Name | Type | Anchor | Stops | Widget |
+|------|------|--------|-------|--------|
+| `main_window` | linear | vertical | 2 (top-lit, dark bottom) | QMainWindow (IgnoreScopeApp) |
+| `dock_panel` | linear | vertical | 3 (glass card, lighter top edge) | QDockWidget (both docks) |
+| `config_panel` | linear | vertical | 2 (subtle top-lit) | ContainerRootPanel |
+| `status_bar` | linear | horizontal | 3 (center-bright bar) | QStatusBar |
+
+### 9.4 GradientBackgroundMixin
+
+Mixin class providing `paintEvent()` that paints the gradient before `super().paintEvent()`. Widgets set `_gradient_name` to a key from the gradients section.
+
+```
+class GradientBackgroundMixin:
+    _gradient_name = ""
+    paintEvent() → QPainter fills widget rect with resolved gradient → super().paintEvent()
+```
+
+MRO: Mixin must appear before QWidget subclass (e.g., `class MyWidget(GradientBackgroundMixin, QWidget)`).
+
+### 9.5 Transparency Cascade
+
+```
+┌─────────────────────────────┐
+│  Widget gradient             │  ← always opaque (painted by mixin)
+│  ┌───────────────────────┐  │
+│  │ Child widget bg        │  │  ← child_opacity: 0=transparent, 255=opaque
+│  │  ┌─────────────────┐  │  │
+│  │  │ Row gradient     │  │  │  ← row_gradient_opacity: 0=invisible, 255=opaque
+│  │  │ (delegate state) │  │  │     Text/symbols always at full opacity
+│  │  └─────────────────┘  │  │
+│  └───────────────────────┘  │
+└─────────────────────────────┘
+```
+
+- `child_opacity` (per-gradient, 0–255): Controls QSS `background-color` alpha for child widgets. At 0, children are transparent and the widget gradient shows through.
+- `row_gradient_opacity` (theme.json delegate section, 0–255): Controls delegate row gradient painter opacity. At 242 (~95%), widget gradient subtly bleeds through row backgrounds. Text/symbols render at full opacity.
+
+### 9.6 Separation from Delegate System
+
+| Aspect | Widget Gradients (Section 9) | Delegate Gradients (Section 1) |
+|--------|------------------------------|-------------------------------|
+| Target | QWidget backgrounds | Tree/list row backgrounds |
+| Model | WidgetGradientDef (N stops) | GradientClass (4 fixed stops) |
+| Config | theme.json "gradients" section | state_style.json / list_style.json |
+| Rendering | GradientBackgroundMixin.paintEvent() | GradientDelegate._paint_gradient() |
+| Angles | Configurable anchor + angle | Always horizontal |
+| Types | Linear + Radial | Linear only |
