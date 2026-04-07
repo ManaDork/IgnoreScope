@@ -40,5 +40,5 @@ All 4 target widgets ship together. No phasing needed — gradient system is sel
 | `IgnoreScope/gui/container_root_panel.py` | Mixin application |
 | `IgnoreScope/gui/delegates.py` | `_paint_gradient()` reads + applies `row_gradient_opacity` |
 | `IgnoreScope/tests/test_gui/test_style_engine.py` | New test class for widget gradients |
-| `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md` | New section |
-| `.claude/IgnoreScopeContext/architecture/GUI_STRUCTURE.md` | Widget hierarchy update |
+| `docs/architecture/GUI_STATE_STYLES.md` | New section |
+| `docs/architecture/GUI_STRUCTURE.md` | Widget hierarchy update |

@@ -96,5 +96,5 @@ None — all design decisions resolved during discovery. Transparency cascade re
 | `planning/features/formulaic-gradient-system/` | Reference — established the 4-stop GradientClass pattern for delegates |
 | `planning/features/font-derived-parity/` | Sibling — completed file style derivation using existing gradient system |
 | `planning/backlog/gui-palette-shift.md` | Future — palette changes will auto-propagate through theme var references |
-| `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md` | Blueprint — must add widget gradient section |
-| `.claude/IgnoreScopeContext/architecture/GUI_STRUCTURE.md` | Blueprint — update widget hierarchy with gradient capability |
+| `docs/architecture/GUI_STATE_STYLES.md` | Blueprint — must add widget gradient section |
+| `docs/architecture/GUI_STRUCTURE.md` | Blueprint — update widget hierarchy with gradient capability |

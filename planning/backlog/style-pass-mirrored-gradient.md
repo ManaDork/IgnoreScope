@@ -30,4 +30,4 @@ Adjust FOLDER_MASKED_REVEALED gradient to emphasize the "masked" aspect more —
 
 - `gui/display_config.py` line 72-75: gradient definition
 - `gui/display_config.py` line 160: state mapping
-- `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md`: style reference doc
+- `docs/architecture/GUI_STATE_STYLES.md`: style reference doc

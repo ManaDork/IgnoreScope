@@ -42,7 +42,7 @@
 ### [node_state.py:6] COREFLOWCHART reference without link
 - **Type:** stale-reference
 - **Current:** "This module is the CORE owner of per-node state (COREFLOWCHART Phase 3)."
-- **Actual:** COREFLOWCHART is in `.claude/IgnoreScopeContext/architecture/` — no code-level link
+- **Actual:** COREFLOWCHART is in `docs/architecture/` — no code-level link
 - **Recommendation:** minor — add path or replace with plain description
 
 ### [node_state.py:87] Visibility value order doesn't match truth table

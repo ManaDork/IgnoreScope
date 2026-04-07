@@ -180,7 +180,7 @@ New tests:
 6. **`test_font_vars_count`** — update expected count from 6 → 8
 7. **`test_font_vars_keys`** — update expected key set
 
-#### `.claude/IgnoreScopeContext/architecture/GUI_STATE_STYLES.md`
+#### `docs/architecture/GUI_STATE_STYLES.md`
 
 Updates:
 - Add `derive_file_style()` documentation parallel to `derive_gradient()` section
