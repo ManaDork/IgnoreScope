@@ -475,6 +475,25 @@ class TestConsolidatedThemeLoader:
         result = _load_consolidated_theme(p)
         assert result["_scope_resolved"]["state_colors"] == {"x": "#FFFFFF"}
 
+    def test_absent_scope_inherits_local_host(self, tmp_path):
+        """Theme with no scope key at all still produces _scope_resolved."""
+        import json
+        from IgnoreScope.gui.style_engine import _load_consolidated_theme
+        theme = {
+            "base": {"palette": {}, "ui": {}, "text": {}, "delegate": {}},
+            "gradients": {},
+            "local_host": {
+                "state_colors": {"y": "#AAAAAA"},
+                "fonts": {"muted": {"weight": "normal"}},
+            },
+            "config_panel": {},
+        }
+        p = tmp_path / "test_v1_theme.json"
+        p.write_text(json.dumps(theme))
+        result = _load_consolidated_theme(p)
+        assert result["_scope_resolved"]["state_colors"] == {"y": "#AAAAAA"}
+        assert result["_scope_resolved"]["fonts"] == {"muted": {"weight": "normal"}}
+
 
 class TestConsolidatedStyleGuiAPI:
     """Test consolidated-specific StyleGui API."""
@@ -506,6 +525,15 @@ class TestConsolidatedStyleGuiAPI:
         resolved = sg._theme_data["_scope_resolved"]
         assert "state_colors" in resolved
         assert "fonts" in resolved
+
+    def test_config_panel_bad_var_raises(self, sg):
+        """config_panel referencing nonexistent ui variable raises KeyError."""
+        # Inject a bad reference into the config_panel section
+        sg._theme_data["config_panel"]["_test_bad"] = "nonexistent_ui_key"
+        with pytest.raises(KeyError):
+            sg.config_panel_style()
+        # Clean up
+        del sg._theme_data["config_panel"]["_test_bad"]
 
     def test_theme_data_base_sections(self, sg):
         """_theme_data.base has all 4 subsections."""
