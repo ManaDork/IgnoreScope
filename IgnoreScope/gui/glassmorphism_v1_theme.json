@@ -5,51 +5,61 @@
     },
     "base": {
         "palette": {
-            "base_0": "#0F0A1E",
-            "base_1": "#1A1035",
-            "base_2": "#231745",
-            "base_3": "#2D1F55",
-            "surface_0": "#3D2A6E",
+            "base_0": "#1C1C27",
+            "base_1": "#23283B",
+            "base_2": "#333A52",
+            "base_3": "#3C455D",
+            "surface_0": "#4F5971",
             "text_bright": "#F8F4FF",
             "text_primary": "#E8DEFF",
             "text_secondary": "#A89BC8",
             "text_muted": "#6B5A8A",
             "accent_blue": "#6366F1",
-            "accent_teal": "#00E5CC",
+            "accent_teal": "#00D4AA",
             "accent_green": "#34D399",
-            "accent_orange": "#FFB15D",
-            "accent_pink": "#FF6B9D",
-            "accent_purple": "#8B5CF6",
-            "accent_red": "#FF7069",
-            "accent_yellow": "#FFCE5D"
+            "accent_orange": "#DD9B4C",
+            "accent_pink": "#DC6888",
+            "accent_purple": "#662477",
+            "accent_red": "#F17149",
+            "accent_yellow": "#FFCE5D",
+            "local_host_top": "#2A3045",
+            "local_host_mid": "#23283B",
+            "local_host_bottom": "#1C2030",
+            "scope_top": "#483F68",
+            "scope_mid": "#403960",
+            "scope_bottom": "#383058",
+            "grad_top": "#4F5971",
+            "grad_mid": "#353A4C",
+            "grad_bottom": "#1C1C27"
         },
         "ui": {
-            "window_bg": "#1A1035",
-            "panel_bg": "#231745",
-            "surface_bg": "#2D1F55",
-            "border": "#3D2A6E",
+            "window_bg": "#1C1C27",
+            "panel_bg": "#333A52",
+            "surface_bg": "#3D2C5C",
+            "border": "#3C455D",
             "text_primary": "#E8DEFF",
             "text_bright": "#F8F4FF",
             "text_muted": "#A89BC8",
             "text_disabled": "#6B5A8A",
-            "accent_primary": "#8B5CF6",
+            "accent_primary": "#CE42EC",
             "accent_secondary": "#6366F1",
-            "accent_teal": "#00E5CC"
+            "accent_teal": "#00D4AA",
+            "pattern_list_bg": "#3C455D"
         },
         "text": {
             "text_primary": "#E8DEFF",
             "text_dim": "#A89BC8",
-            "text_warning": "#FFB15D",
-            "text_virtual_purple": "#8B5CF6",
-            "text_pushed_sync": "#8B5CF6",
-            "text_pushed_nosync": "#6B4EC4"
+            "text_warning": "#DD9B4C",
+            "text_virtual_purple": "#9040B0",
+            "text_pushed_sync": "#F17149",
+            "text_pushed_nosync": "#C05838"
         },
         "delegate": {
             "selection_color": "#6366F1",
             "selection_alpha": 100,
-            "hover_color": "#2D1F55",
+            "hover_color": "#333A52",
             "hover_alpha": 60,
-            "row_gradient_opacity": 242
+            "row_gradient_opacity": 217
         }
     },
     "gradients": {
@@ -59,10 +69,11 @@
             "angle": 0,
             "child_opacity": 0,
             "stops": [
-                { "pos": 0.0, "color": "base_1" },
-                { "pos": 1.0, "color": "base_0" }
+                { "pos": 0.0, "color": "grad_top" },
+                { "pos": 0.5, "color": "grad_mid" },
+                { "pos": 1.0, "color": "grad_bottom" }
             ],
-            "_note": "Darkest at bottom — deep purple vertical wash"
+            "_note": "3-stop: blue-gray top → dark mid → near-black bottom"
         },
         "dock_panel": {
             "type": "linear",
@@ -70,11 +81,23 @@
             "angle": 0,
             "child_opacity": 0,
             "stops": [
-                { "pos": 0.0, "color": "surface_bg" },
-                { "pos": 0.5, "color": "base_2" },
-                { "pos": 1.0, "color": "base_1" }
+                { "pos": 0.0, "color": "local_host_top" },
+                { "pos": 0.5, "color": "local_host_mid" },
+                { "pos": 1.0, "color": "local_host_bottom" }
             ],
-            "_note": "Glass card: lighter top edge fading to panel body — 3-stop top-lit"
+            "_note": "Local Host panel: cooler blue-gray tint"
+        },
+        "scope_dock_panel": {
+            "type": "linear",
+            "anchor": "vertical",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "scope_top" },
+                { "pos": 0.5, "color": "scope_mid" },
+                { "pos": 1.0, "color": "scope_bottom" }
+            ],
+            "_note": "Scope panel: warmer purple tint, visually distinct from local_host"
         },
         "config_panel": {
             "type": "linear",
@@ -102,28 +125,26 @@
     },
     "local_host": {
         "state_colors": {
-            "visibility.background":     "#1A1035",
-            "visibility.visible":        "#2D1F55",
-            "visibility.hidden":         "#0F0A1E",
-            "visibility.virtual":        "#1E1240",
-            "visibility.container_only": "#150E2E",
+            "visibility.accessible":     "#44368B",
+            "visibility.restricted":     "#23283B",
+            "visibility.virtual":        "#2E2448",
 
-            "config.mount":              "#00E5CC",
-            "config.masked":             "#FF6B9D",
-            "config.revealed":           "#FFB15D",
-            "config.pushed":             "#8B5CF6",
+            "config.mount":              "#DC6888",
+            "config.masked":             "#6C3439",
+            "config.revealed":           "#DD9B4C",
+            "config.pushed":             "#F17149",
 
-            "inherited.masked":          "#D94A7B",
-            "inherited.revealed":        "#DE954B",
-            "inherited.virtual_auth":    "#7C4DFF",
-            "inherited.virtual_volume":  "#7C4DFF",
+            "inherited.masked":          "#582A2E",
+            "inherited.revealed":        "#B88040",
+            "inherited.virtual_auth":    "#501E60",
+            "inherited.virtual_volume":  "#501E60",
 
-            "ancestor.visible":          "#FFB15D",
+            "ancestor.visible":          "#DD9B4C",
 
-            "virtual.volume":            "#8B5CF6",
-            "virtual.auth":              "#8B5CF6",
+            "virtual.volume":            "#662477",
+            "virtual.auth":              "#662477",
 
-            "status.warning":            "#FFB15D",
+            "status.warning":            "#DD9B4C",
             "ui.selected":               "#6366F1"
         },
         "fonts": {
@@ -138,7 +159,29 @@
         }
     },
     "scope": {
-        "state_colors": {},
+        "state_colors": {
+            "visibility.accessible":     "#3A2E78",
+            "visibility.restricted":     "#1E1A30",
+            "visibility.virtual":        "#281E40",
+
+            "config.mount":              "#C85878",
+            "config.masked":             "#5A2B30",
+            "config.revealed":           "#C88840",
+            "config.pushed":             "#D06040",
+
+            "inherited.masked":          "#4A2228",
+            "inherited.revealed":        "#A07035",
+            "inherited.virtual_auth":    "#441A55",
+            "inherited.virtual_volume":  "#441A55",
+
+            "ancestor.visible":          "#C88840",
+
+            "virtual.volume":            "#581E68",
+            "virtual.auth":              "#581E68",
+
+            "status.warning":            "#C88840",
+            "ui.selected":               "#5558E0"
+        },
         "fonts": {}
     },
     "config_panel": {
@@ -147,7 +190,7 @@
         "viewer_bg": "panel_bg",
         "viewer_text": "text_primary",
         "border": "border",
-        "pattern_bg": "panel_bg",
+        "pattern_bg": "pattern_list_bg",
         "pattern_text": "text_primary",
         "pattern_border": "border",
         "pattern_label": "text_muted",
