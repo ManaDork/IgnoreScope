@@ -4,7 +4,7 @@
 > All code changes must respect this flow. If reality diverges, update the code, not this chart.
 >
 > CORE flow reference: `COREFLOWCHART.md` (Phases 7-8 are shared cross-domain concepts; Phases 1-6 are domain-specific pipelines)
-> State model: 20 states (12 folder + 8 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
+> State model: 22 states (14 folder + 8 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
 
 ---
 
@@ -454,7 +454,7 @@ mount_data_tree.py    → Runtime State Host (hosts NodeState instances from cor
                          GUI hosts runtime instances and Stage 2 (mirrored) descendant walk.
                          See: COREFLOWCHART.md Phase 3 for computation rules.
 mount_data_model.py   → Qt Adapter  (MountDataTreeModel wraps tree + DisplayConfig)
-display_config.py     → View Rules  (columns, filtering, checkbox behavior, per-panel theme identity)
+display_config.py     → View Rules  (columns, filtering, checkbox behavior)
 local_host_view.py    → Left Panel  (widget + RMB menu + undo)
 scope_view.py         → Right Panel (widget + RMB menu + file ops signals)
 file_ops_ui.py        → File Op UI  (thin layer: preflight dialog → CORE execute → tree refresh)
@@ -463,8 +463,7 @@ container_ops_ui.py   → Container UI (thin layer: CORE execute_create/remove �
                          Calls docker/container_lifecycle.py, no CLI imports
 config_manager.py     → Orchestrator (open/switch/save project+scope)
 app.py                → Wiring      (creates shared tree, connects signals)
-__init__.py           → Bootstrap   (QApplication + Fusion style for full QSS control)
 style_engine.py       → Rendering   (StyleGui: gradients, colors, consolidated *_theme.json)
-delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
 container_root_panel.py → Config UI (header + pattern list + JSON viewer, themed via config_panel section)
+delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
 ```

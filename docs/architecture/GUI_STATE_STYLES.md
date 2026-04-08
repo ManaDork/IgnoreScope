@@ -22,13 +22,14 @@ Each argument is a **variable name** (string) resolved from a style JSON file at
 ### Variable Name Resolution
 
 ```
-GradientClass("masked", "masked", "hidden", "revealed")
-                  │         │         │          │
-                  ▼         ▼         ▼          ▼
-              *_theme.json local_host.state_colors lookup
-                  │         │         │          │
-                  ▼         ▼         ▼          ▼
-              #4A3B42   #4A3B42   #2E3440    #4A4838
+GradientClass("visibility.virtual", "visibility.virtual", "inherited.masked", "config.revealed")
+                  │                   │                     │                    │
+                  ▼                   ▼                     ▼                    ▼
+              *_theme.json → local_host.state_colors lookup
+              (scope panel uses _scope_resolved.state_colors)
+                  │                   │                     │                    │
+                  ▼                   ▼                     ▼                    ▼
+              #2E2448             #2E2448               #582A2E              #DD9B4C
                   │         │         │          │
                   ▼         ▼         ▼          ▼
               QLinearGradient(0.0, 0.25, 0.50, 0.75)
@@ -56,7 +57,7 @@ StateStyleClass:
     font:     FontStyleClass(font_var)
 ```
 
-**StateStyleClass** is the complete visual recipe for one node state. It composes a GradientClass (background gradient) with a FontStyleClass (text properties). Each of the 15 tree states and 5 list states maps to exactly one StateStyleClass.
+**StateStyleClass** is the complete visual recipe for one node state. It composes a GradientClass (background gradient) with a FontStyleClass (text properties). Each of the 22 tree states and 5 list states maps to exactly one StateStyleClass.
 
 ### FontStyleClass
 
@@ -64,7 +65,7 @@ StateStyleClass:
 FontStyleClass(font_var)
 ```
 
-`font_var` is a variable name resolved from a font JSON file. Defines text weight, italic, and text color. See Section 6 for variable tables.
+`font_var` is a variable name resolved from the consolidated theme's `local_host.fonts` section (or `_scope_resolved.fonts` for the scope panel). Defines text weight, italic, and text color. See Section 6 for variable tables.
 
 ### Selected State Override Mechanism
 
@@ -90,98 +91,112 @@ These are not independent states — they modify the node's current StateStyleCl
 
 ## 3. State Enumeration — Tree Panels
 
-20 tree states (12 folder + 8 file) + 2 selected overrides.
+22 tree states (14 folder + 8 file) + 2 selected overrides.
 
-Folder states derived via `derive_gradient()` formula — no hand-built gradients or lookup tables.
-File states derived via `derive_file_style()` formula — simplified 4-position model (no ancestor tracking).
+Visibility is pure STATE (`accessible`, `restricted`, `virtual`). METHOD flags (`is_masked`, `is_revealed`, `is_mount_root`, etc.) from NodeState drive accent positions (P3/P4) in the gradient. GUI reads CORE-computed NodeState fields via if/elif resolution — no tree walking in the GUI.
 
-### Gradient Formula
+### 3.1 Folder States (14)
+
+14 states derived from CORE visibility STATE + boolean METHOD flags + tree-context fields. Resolved by `_resolve_folder_state()` in `display_config.py`.
+
+| ID | State Name | Resolution Path | GradientClass(pos1, pos2, pos3, pos4) | FontStyleClass |
+|----|-----------|-----------------|---------------------------------------|---------------|
+| F1 | `FOLDER_HIDDEN` | vis=restricted, not masked, no descendants | `(restricted, restricted, restricted, restricted)` | `muted` |
+| F2 | `FOLDER_VISIBLE` | vis=accessible, not revealed, not mount_root | `(accessible, accessible, accessible, accessible)` | `default` |
+| F3 | `FOLDER_MOUNTED` | vis=accessible, is_mount_root, no vis descendants | `(accessible, accessible, accessible, config.mount)` | `default` |
+| F4 | `FOLDER_MOUNTED_REVEALED` | vis=accessible, is_mount_root, has_vis_desc | `(accessible, accessible, accessible, config.mount)` | `default` |
+| F5 | `FOLDER_MASKED` | vis=restricted, masked=T | `(restricted, restricted, restricted, inherited.masked)` | `muted` |
+| F6 | `FOLDER_MASKED_REVEALED` | vis=virtual, masked=T, has_vis_desc | `(virtual, virtual, inherited.masked, config.revealed)` | `default` |
+| F7 | `FOLDER_MASKED_MIRRORED` | vis=virtual, masked=T, no vis descendants | `(virtual, virtual, inherited.masked, inherited.masked)` | `default` |
+| F8 | `FOLDER_REVEALED` | vis=accessible, revealed=T | `(accessible, restricted, restricted, config.revealed)` | `default` |
+| F9 | `FOLDER_MIRRORED` | vis=virtual, not masked, no vis descendants | `(virtual, virtual, virtual, virtual)` | `virtual_mirrored` |
+| F10 | `FOLDER_MIRRORED_REVEALED` | vis=virtual, not masked, has_vis_desc | `(virtual, virtual, virtual, ancestor.visible)` | `virtual_mirrored` |
+| F11 | `FOLDER_VIRTUAL_VOLUME` | vis=virtual, virtual_type=volume | `(virtual, virtual, virtual, virtual.volume)` | `virtual_volume` |
+| F12 | `FOLDER_VIRTUAL_AUTH` | vis=virtual, virtual_type=auth | `(virtual, virtual, virtual, virtual.auth)` | `virtual_auth` |
+| F13 | `FOLDER_PUSHED_ANCESTOR` | vis=restricted, not masked, has_vis_desc | `(restricted, restricted, restricted, ancestor.visible)` | `default` |
+| F14 | `FOLDER_CONTAINER_ONLY` | vis=virtual, container_only=T | `(virtual, virtual, virtual, virtual)` | `italic` |
+
+**Folder resolution** (if/elif chain in `_resolve_folder_state()`, first match wins):
 
 ```
-P1 = visibility     what the container sees     (visible, hidden, mirrored, background, co)
-P2 = context         parent/inherited visibility (visible, hidden, background, co)
-P3 = ancestor        descendant tracking         (ancestor.visible, or falls to P4)
-P4 = config          direct/inherited action     (config.mount, config.revealed, inherited.masked, virtual.*)
-
-Fallback chain: P3 → P4 → P1 (when no ancestor/config, position uses visibility color)
+visibility | masked | revealed | mount_root | virtual_type | has_vis_desc | -> State Name              | Font
+---------- | ------ | -------- | ---------- | ------------ | ------------ | -------------------------- | -------
+virtual    | -      | -        | -          | volume       | -            | FOLDER_VIRTUAL_VOLUME      | virtual_volume
+virtual    | -      | -        | -          | auth         | -            | FOLDER_VIRTUAL_AUTH        | virtual_auth
+virtual    | T      | -        | -          | -            | T            | FOLDER_MASKED_REVEALED     | default
+virtual    | T      | -        | -          | -            | F            | FOLDER_MASKED_MIRRORED     | default
+virtual    | F      | -        | -          | -            | T            | FOLDER_MIRRORED_REVEALED   | virtual_mirrored
+virtual    | F      | -        | -          | -            | F            | FOLDER_MIRRORED            | virtual_mirrored
+accessible | -      | T        | -          | -            | -            | FOLDER_REVEALED            | default
+accessible | -      | F        | T          | -            | T            | FOLDER_MOUNTED_REVEALED    | default
+accessible | -      | F        | T          | -            | F            | FOLDER_MOUNTED             | default
+accessible | -      | F        | F          | -            | -            | FOLDER_VISIBLE             | default
+restricted | -      | -        | -          | -            | -            | (check masked)             |
+ ↳ masked  | T      | -        | -          | -            | -            | FOLDER_MASKED              | muted
+ ↳ !masked | -      | -        | -          | -            | T            | FOLDER_PUSHED_ANCESTOR     | default
+ ↳ !masked | -      | -        | -          | -            | F            | FOLDER_HIDDEN              | muted
 ```
 
-**P1-P2 relationship:** P2 mirrors P1 except REVEALED (P1=visible, P2=hidden — visible in hidden context).
+"-" = field not checked for this state (any value matches).
 
-### Color Variable System (categorical)
+**Notes:**
 
-| Category | Variables | Position | Purpose |
-|----------|----------|----------|---------|
-| `visibility.*` | `.visible`, `.hidden`, `.virtual`, `.background`, `.container_only` | P1, P2 | What the container sees |
-| `config.*` | `.mount`, `.revealed`, `.pushed` | P4 | User's direct config action |
-| `inherited.*` | `.masked` | P4 | Ancestor pattern covers this node |
-| `ancestor.*` | `.visible` | P3 | Has visible descendant (pushed or revealed) |
-| `virtual.*` | `.volume`, `.auth` | P4 | Non-filesystem accent |
-| `status.*` | `.warning` | P4 | Status indicators |
-| `ui.*` | `.selected` | P2, P3 | Selection override |
-
-### 3.1 Folder States (12)
-
-Derived via `derive_gradient()` from node properties:
-
-| State | P1 | P2 | P3 | P4 | Font |
-|---|---|---|---|---|---|
-| FOLDER_HIDDEN | background | background | — | — | muted |
-| FOLDER_VISIBLE | visible | visible | — | — | default |
-| FOLDER_MOUNTED | visible | visible | — | config.mount | default |
-| FOLDER_MOUNTED_REVEALED | visible | visible | ancestor.visible | config.mount | default |
-| FOLDER_MASKED | hidden | hidden | — | inherited.masked | muted |
-| FOLDER_REVEALED | visible | hidden | — | config.revealed | default |
-| FOLDER_MIRRORED | mirrored(hidden) | hidden | — | — | virtual_mirrored |
-| FOLDER_MIRRORED_REVEALED | mirrored(hidden) | hidden | ancestor.visible | — | virtual_mirrored |
-| FOLDER_VIRTUAL_VOLUME | mirrored(virtual) | virtual | — | virtual.volume | virtual_volume |
-| FOLDER_VIRTUAL_AUTH | mirrored(virtual) | virtual | — | virtual.auth | virtual_auth |
-| FOLDER_PUSHED_ANCESTOR | background | background | ancestor.visible | — | default |
-| FOLDER_CONTAINER_ONLY | co | co | — | — | italic |
-
-"—" = falls to next in chain (P3→P4→P1).
-
-**Key distinctions:**
-
-- **MOUNTED vs VISIBLE:** Mount root gets config.mount accent (greenish). Non-mount visible folders are neutral.
-- **MIRRORED vs VIRTUAL_VOLUME/AUTH:** Mirrored = structural host directory (hidden background, white text). Volume/Auth = non-filesystem entry (virtual accent + purple text).
-- **REVEALED P2=hidden:** Visible in hidden context — punch-through shows as visible left fading into hidden context.
+- **FOLDER_VISIBLE** = "accessible" in CORE. vis=accessible is produced when mounted=T or revealed=T. The mount_root boolean and revealed boolean disambiguate within accessible.
+- **FOLDER_PUSHED_ANCESTOR** = restricted folder (not under any mount, not masked) with a visible descendant. Distinct from F5 (FOLDER_MASKED) which is a masked folder inside a mount.
+- **FOLDER_MASKED_REVEALED** vs **FOLDER_MASKED_MIRRORED**: Both vis=virtual with masked=T. Visible descendant presence distinguishes "parent of visible content" from "structural mkdir-p intermediate."
+- **FOLDER_MIRRORED** vs **FOLDER_MIRRORED_REVEALED**: Both vis=virtual without masked. These are structural paths above mount boundaries.
+- **FOLDER_CONTAINER_ONLY**: vis=virtual with container_only=T. Container-only nodes that aren't masked get virtual visibility in Stage 1.
+- New states vs prior spec: FOLDER_MOUNTED, FOLDER_MOUNTED_REVEALED, FOLDER_MIRRORED, FOLDER_MIRRORED_REVEALED, FOLDER_VIRTUAL_VOLUME, FOLDER_VIRTUAL_AUTH, FOLDER_CONTAINER_ONLY are new. Old F3 (FOLDER_MOUNTED_MASKED) and F4 (FOLDER_MOUNTED_MASKED_PUSHED) consolidated into F5 (FOLDER_MASKED) — mount_root distinction now handled by FOLDER_MOUNTED/FOLDER_MOUNTED_REVEALED.
 
 ### 3.2 File States (8)
 
-Derived via `derive_file_style()` from node properties. Simplified model parallel to `derive_gradient()`:
+8 states derived from CORE visibility STATE + boolean METHOD flags. Resolved by `_resolve_file_state()` in `display_config.py`. File gradients use P1=visibility state, P2/P3=always `visibility.restricted`, P4=config accent or fallback.
+
+| ID | State Name | Resolution Path | GradientClass(pos1, pos2, pos3, pos4) | FontStyleClass |
+|----|-----------|-----------------|---------------------------------------|---------------|
+| FI1 | `FILE_HIDDEN` | vis=restricted, not pushed, not masked | `(visibility.restricted, visibility.restricted, visibility.restricted, visibility.restricted)` | `muted` |
+| FI2 | `FILE_VISIBLE` | vis=accessible, not revealed | `(visibility.accessible, visibility.restricted, visibility.restricted, visibility.accessible)` | `default` |
+| FI3 | `FILE_MASKED` | vis=restricted, masked=T, not pushed | `(visibility.restricted, visibility.restricted, visibility.restricted, visibility.restricted)` | `muted` |
+| FI4 | `FILE_REVEALED` | vis=accessible, revealed=T | `(visibility.accessible, visibility.restricted, visibility.restricted, config.revealed)` | `default` |
+| FI5 | `FILE_PUSHED` | vis=restricted, pushed=T, host_orphaned=F | `(visibility.restricted, visibility.restricted, visibility.restricted, config.pushed)` | `default` |
+| FI6 | `FILE_HOST_ORPHAN` | vis=restricted, pushed=T, host_orphaned=T | *(DEFERRED — gradient TBD)* | `italic` |
+| FI7 | `FILE_CONTAINER_ORPHAN` | container_orphaned=T | `(visibility.restricted, visibility.restricted, visibility.restricted, status.warning)` | `italic` |
+| FI8 | `FILE_CONTAINER_ONLY` | container_only=T | `(visibility.virtual, visibility.restricted, visibility.restricted, visibility.virtual)` | `italic` |
+
+**File resolution** (if/elif chain in `_resolve_file_state()`, first match wins):
 
 ```
-P1 = visibility     what the container sees     (visible, hidden, container_only)
-P2 = background     always visibility.background (no parent context for files)
-P3 = background     always visibility.background (no ancestor tracking for files)
-P4 = config/status  pushed accent or warning     (config.pushed, status.warning, or falls to P2)
-
-Font: container_only/orphaned → "italic", hidden/masked (not pushed) → "muted", else → "default"
-Host orphan: gradient=None (DEFERRED — blocked on core orphan detection)
+container_only | container_orphaned | visibility  | revealed | pushed | host_orph | -> State Name         | Font
+-------------- | ------------------ | ----------- | -------- | ------ | --------- | --------------------- | ------
+T              | -                  | -           | -        | -      | -         | FILE_CONTAINER_ONLY   | italic
+-              | T                  | -           | -        | -      | -         | FILE_CONTAINER_ORPHAN | italic
+-              | -                  | accessible  | T        | -      | -         | FILE_REVEALED         | default
+-              | -                  | accessible  | F        | -      | -         | FILE_VISIBLE          | default
+-              | -                  | restricted  | -        | T      | T         | FILE_HOST_ORPHAN      | italic (DEFERRED)
+-              | -                  | restricted  | -        | T      | F         | FILE_PUSHED           | default
+-              | -                  | restricted  | -        | F      | -         | (check masked)        |
+ ↳ masked=T    | -                  | -           | -        | -      | -         | FILE_MASKED           | muted
+ ↳ masked=F    | -                  | -           | -        | -      | -         | FILE_HIDDEN           | muted
 ```
 
-| ID | State Name | Condition | GradientClass | Font |
-|----|-----------|-----------|---------------|------|
-| FI1 | `FILE_HIDDEN` | vis=hidden, pushed=F | `(vis.hidden, vis.bg, vis.bg, vis.bg)` | `muted` |
-| FI2 | `FILE_VISIBLE` | vis=visible | `(vis.visible, vis.bg, vis.bg, vis.bg)` | `default` |
-| FI3 | `FILE_MASKED` | vis=masked, pushed=F | `(vis.hidden, vis.bg, vis.bg, vis.bg)` | `muted` |
-| FI4 | `FILE_REVEALED` | vis=revealed | `(vis.visible, vis.bg, vis.bg, vis.bg)` | `default` |
-| FI5 | `FILE_PUSHED` | pushed=T | `(vis.hidden, vis.bg, vis.bg, cfg.pushed)` | `default` |
-| FI6 | `FILE_HOST_ORPHAN` | pushed=T, host_orphaned=T | *(DEFERRED)* | `italic` |
-| FI7 | `FILE_CONTAINER_ORPHAN` | vis=orphaned | `(vis.hidden, vis.bg, vis.bg, status.warning)` | `italic` |
-| FI8 | `FILE_CONTAINER_ONLY` | vis=container_only | `(vis.co, vis.bg, vis.bg, vis.bg)` | `italic` |
+"-" = field not checked (any value).
 
-FILE_MASKED and FILE_HIDDEN share the same gradient — font color may be the primary differentiator (TBD). FILE_REVEALED and FILE_VISIBLE similarly share gradients. Both kept as separate states for future font color distinction. Pushed file special treatment deferred.
+**Notes:**
+
+- **FILE_CONTAINER_ONLY** is new. container_only=T nodes get vis=virtual in Stage 1, resolved first in the if/elif chain.
+- **FILE_CONTAINER_ORPHAN** resolved via `container_orphaned` boolean flag, not the visibility string (vis=restricted for orphaned nodes).
+- **FILE_HOST_ORPHAN** is DEFERRED. The state exists in the design model but requires scoping decisions about scan coverage before implementation.
+- **Pushed redundancy rule:** When pushed=T AND visibility=accessible, the push is redundant. `_resolve_file_state()` checks `vis == "accessible"` before pushed, so these resolve as FILE_VISIBLE or FILE_REVEALED.
+- File resolver was converted from FILE_STATE_TABLE lookup to if/elif chain, matching folder pattern.
 
 ### 3.3 Selected State Overrides
 
 | Override | Applies To | Mechanism |
 |----------|-----------|-----------|
-| FOLDER_SELECTED | Any folder state | pos2 -> `ui.selected`, pos3 -> `ui.selected` |
-| FILE_SELECTED | Any file state | pos2 -> `ui.selected`, pos3 -> `ui.selected` |
+| FOLDER_SELECTED | Any F1–F14 state | pos2 -> `selected`, pos3 -> `selected` |
+| FILE_SELECTED | Any FI1–FI8 state | pos2 -> `selected`, pos3 -> `selected` |
 
-Selected overrides modify the base state at paint time — not separate StateStyleClass entries.
+Selected overrides are applied at paint time. They do not create new StateStyleClass entries — they modify the base state's GradientClass positions. See Section 2 for the override mechanism.
 
 ---
 
@@ -199,7 +214,7 @@ Session History panel states, derived from `entry_type` (HistoryEntryType enum) 
 | H4 | `HISTORY_DESTRUCTIVE` | `(background, background, destructive, destructive)` | `default` | Destructive action, not at cursor |
 | H5 | `HISTORY_DESTRUCTIVE_SELECTED` | `(selected, background, destructive, destructive)` | `default` | Destructive action at undo cursor |
 
-**Variable resolution:** History states use `list_style.json` for color variables and `list_font.json` for font variables (separate from tree panel JSONs).
+**Variable resolution:** History states use `list_style.json` for color variables and `list_font.json` for font variables (separate files — not yet consolidated into `*_theme.json`; deferred until session history panel is wired).
 
 ### 4.2 MatrixState Resolution Table
 
@@ -223,72 +238,62 @@ Session History panel states, derived from `entry_type` (HistoryEntryType enum) 
 
 ### 5.1 Consolidated Theme — `local_host.state_colors`
 
-Color variables for tree panel GradientClass resolution. Stored in the consolidated `*_theme.json` under `local_host.state_colors`. Scope panels inherit these values via deep-merge (scope overrides merge on top of local_host at load time).
+**Source:** `*_theme.json` → `local_host.state_colors` section
 
-| Variable | Hex | Category | Purpose |
-|----------|-----|----------|---------|
-| `visibility.background` | `#1A1035` | Visibility | Default/background |
-| `visibility.visible` | `#2D1F55` | Visibility | Container sees this node |
-| `visibility.hidden` | `#0F0A1E` | Visibility | Container cannot see |
-| `visibility.virtual` | `#1E1240` | Visibility | Structural/virtual path |
-| `visibility.container_only` | `#150E2E` | Visibility | Container-only node |
-| `config.mount` | `#00E5CC` | Config | Mount root accent |
-| `config.masked` | `#FF6B9D` | Config | Masked by pattern |
-| `config.revealed` | `#FFB15D` | Config | Revealed under mask |
-| `config.pushed` | `#8B5CF6` | Config | Pushed file accent |
-| `inherited.masked` | `#D94A7B` | Inherited | Ancestor pattern covers |
-| `inherited.revealed` | `#DE954B` | Inherited | Ancestor reveal |
-| `inherited.virtual_auth` | `#7C4DFF` | Inherited | Virtual auth inherited |
-| `inherited.virtual_volume` | `#7C4DFF` | Inherited | Virtual volume inherited |
-| `ancestor.visible` | `#FFB15D` | Ancestor | Has visible descendant |
-| `virtual.volume` | `#8B5CF6` | Virtual | Non-filesystem volume |
-| `virtual.auth` | `#8B5CF6` | Virtual | Non-filesystem auth |
-| `status.warning` | `#FFB15D` | Status | Attention-required |
-| `ui.selected` | `#6366F1` | UI | Selection override |
+Color variables for tree panel GradientClass resolution. Uses categorical dot-notation naming. The scope panel inherits these values via deep-merge (see Section 5.3).
 
-**Color categories** (semantic families):
+| Variable | Hex (local_host) | Hex (scope) | Color Group |
+|----------|-------------------|-------------|-------------|
+| `visibility.accessible` | `#44368B` | `#3A2E78` | State — content accessible to container |
+| `visibility.restricted` | `#23283B` | `#1E1A30` | State — content restricted from container |
+| `visibility.virtual` | `#2E2448` | `#281E40` | State — structural intermediate / container-only |
+| `config.mount` | `#DC6888` | `#C85878` | Pink — mount root / active mount |
+| `config.masked` | `#6C3439` | `#5A2B30` | Dark red — content excluded from container |
+| `config.revealed` | `#DD9B4C` | `#C88840` | Orange — content restored under mask |
+| `config.pushed` | `#F17149` | `#D06040` | Red-orange — docker cp'd content |
+| `inherited.masked` | `#582A2E` | `#4A2228` | Dark red (dim) — inherited mask from ancestor |
+| `inherited.revealed` | `#B88040` | `#A07035` | Orange (dim) — inherited reveal from ancestor |
+| `inherited.virtual_auth` | `#501E60` | `#441A55` | Purple — virtual auth path |
+| `inherited.virtual_volume` | `#501E60` | `#441A55` | Purple — virtual volume path |
+| `ancestor.visible` | `#DD9B4C` | `#C88840` | Orange — ancestor has visible descendants |
+| `virtual.volume` | `#662477` | `#581E68` | Purple — volume virtual node |
+| `virtual.auth` | `#662477` | `#581E68` | Purple — auth virtual node |
+| `status.warning` | `#DD9B4C` | `#C88840` | Orange — attention-required state |
+| `ui.selected` | `#6366F1` | `#5558E0` | Indigo — delegate selection overlay |
 
-- **Config** (mount/mask/reveal/push): direct user actions on nodes
-- **Inherited**: ancestor pattern coverage
-- **Visibility**: what the container sees
-- **Virtual**: non-filesystem entries
-- **Status**: attention indicators
-- **UI**: selection/interaction overlays
+**Color groups** (semantic families):
 
-**Per-panel differentiation:** The `scope` section in the consolidated theme can override any `local_host` color. At load time, scope values are deep-merged over local_host. Empty scope = identical to local_host. TreeDisplayConfig accepts a `panel` param ("local_host" or "scope") to select the resolved color set.
+- **Pink/Red** (mount/mask): `config.mount`, `config.masked`, `inherited.masked` — mount root and content excluded from container
+- **Purple** (virtual): `virtual.*`, `inherited.virtual_*` — virtual path content
+- **Red-orange** (push): `config.pushed` — docker cp'd content
+- **Orange** (reveal/warning): `config.revealed`, `inherited.revealed`, `ancestor.visible`, `status.warning` — restored or attention-required
+- **State** (visibility): `visibility.*` — 3 pure state keys mapping directly to visibility field values
 
-### 5.2 list_style.json (standalone)
+**Variable naming convention:** Dot-notation groups variables by **semantic origin** (visibility, config, inherited, virtual, status, ui). The same group prefix may resolve to different hex values per panel — the scope panel can override any variable via `scope.state_colors` deep-merge.
 
-Color variables for list panel (Session History) GradientClass resolution. Still loaded from a standalone JSON file (list panel section deferred until session_history is wired to UI).
+### 5.2 list_style.json (not yet consolidated)
+
+Color variables for list panel (Session History) GradientClass resolution. Still stored in separate `list_style.json` — will be consolidated as a `session_history` section when the list panel is wired.
 
 | Variable | Hex | Source |
 |----------|-----|--------|
-| `background` | `#231745` | `base.palette.base_2` |
-| `selected` | `#6366F1` | `base.palette.accent_blue` |
-| `warning` | `#FFCE5D` | `base.palette.accent_yellow` |
-| `destructive` | `#FF7069` | `base.palette.accent_red` |
+| `background` | `#231745` | `ui.panel_bg` |
+| `selected` | `#6366F1` | `ui.accent_secondary` |
+| `warning` | `#FFCE5D` | `palette.accent_yellow` |
+| `destructive` | `#FF7069` | `palette.accent_red` |
 
-### 5.3 Consolidated Theme — `config_panel`
+### 5.3 Per-Panel Deep-Merge (Scope Override)
 
-QSS-driving theme keys for the Desktop Docker Scope Config panel (ContainerRootPanel). Each value is a `ui` section key name resolved to hex via `ui_color()` at stylesheet build time. Allows independent theming of the config panel without affecting other panels.
+At load time, `_load_consolidated_theme()` deep-merges `scope.state_colors` over a copy of `local_host.state_colors` (same for fonts). The result is stored in `_scope_resolved`.
 
-| Key | Default `ui` Ref | QSS Target | Purpose |
-|-----|-----------------|------------|---------|
-| `header_bg` | `surface_bg` | `#configHeaderFrame` background | Header frame background |
-| `header_text` | `accent_primary` | `#configHeaderLabel` color | Header label text |
-| `viewer_bg` | `panel_bg` | `#configViewerText` background | JSON viewer background |
-| `viewer_text` | `text_primary` | `#configViewerText` color | JSON viewer text |
-| `border` | `border` | `#configHeaderFrame`, `#configViewerText` border | Panel borders |
-| `pattern_bg` | `panel_bg` | `#patternListWidget`, `#patternMountCombo` background | Pattern list + mount combo background |
-| `pattern_text` | `text_primary` | `#patternListWidget`, `#patternMountCombo` color | Pattern list + mount combo text |
-| `pattern_border` | `border` | `#patternListWidget`, `#patternMountCombo` border | Pattern list + mount combo border |
-| `pattern_label` | `text_muted` | `#patternMountLabel` color | "Mount:" label text |
-| `pattern_status` | `text_muted` | `#patternStatusLabel` color | Pattern count status text |
-| `scrollbar_bg` | `panel_bg` | `#configPanel QScrollBar` track | Scrollbar gutter background |
-| `scrollbar_handle` | `border` | `#configPanel QScrollBar::handle` | Scrollbar thumb |
-| `scrollbar_handle_hover` | `accent_secondary` | `#configPanel QScrollBar::handle:hover` | Scrollbar thumb on hover |
+```
+local_host.state_colors  ──copy──→  merged dict
+scope.state_colors       ──update→  merged dict  →  _scope_resolved.state_colors
+```
 
-**Scrollbar note:** QSS scrollbar styling requires the Fusion style (`app.setStyle("Fusion")` in `gui/__init__.py`). The Windows native `windowsvista` style renders scrollbars via the OS theme and ignores QSS. Fusion is set at app startup to enable full QSS control.
+- **Empty scope sections** = scope panel is visually identical to local_host
+- **Scope overrides** only need to declare keys that differ — all others inherit from local_host
+- `TreeDisplayConfig(panel="scope")` reads from `_scope_resolved`; `TreeDisplayConfig(panel="local_host")` reads from `local_host` directly
 
 ---
 
@@ -296,54 +301,59 @@ QSS-driving theme keys for the Desktop Docker Scope Config panel (ContainerRootP
 
 ### 6.1 Consolidated Theme — `local_host.fonts`
 
-Font variables for tree panel FontStyleClass resolution. Stored in the consolidated `*_theme.json` under `local_host.fonts`. Scope panels inherit via deep-merge (same pattern as state_colors). All values use **variable indirection** — `text_color` references a variable name resolved by TreeDisplayConfig, not a direct hex value.
+**Source:** `*_theme.json` → `local_host.fonts` section
+
+Font variables for tree panel FontStyleClass resolution. All values use **variable indirection** — `text_color` references a variable name resolved against `base.text` at construction time, not a direct hex value. Scope panel inherits via deep-merge (same pattern as state_colors).
 
 | Variable | Weight | Italic | text_color (variable) | Used By |
 |----------|--------|--------|----------------------|---------|
-| `default` | normal | false | `text_primary` | F2, F4–F8, FI2, FI4–FI5 |
-| `muted` | normal | false | `text_dim` | F1, F3, FI1, FI3 |
-| `italic` | normal | true | `text_warning` | FI6, FI7, FI8 |
-| `virtual_mirrored` | normal | false | `text_primary` | F9, F10 |
-| `virtual_volume` | normal | true | `text_virtual_purple` | F11 |
-| `virtual_auth` | normal | true | `text_virtual_purple` | F12 |
-| `pushed_sync` | normal | false | `text_pushed_sync` | *(unused placeholder — future pushed sync wiring)* |
-| `pushed_nosync` | normal | false | `text_pushed_nosync` | *(unused placeholder — future pushed nosync wiring)* |
+| `default` | normal | false | `text_primary` | F2–F4, F6–F8, F10, F13, FI2, FI4–FI5 |
+| `muted` | normal | false | `text_dim` | F1, F5, FI1, FI3 |
+| `italic` | normal | true | `text_warning` | F14, FI6–FI8 |
+| `virtual_mirrored` | normal | false | `text_primary` | F9 (FOLDER_MIRRORED), F10 (FOLDER_MIRRORED_REVEALED) |
+| `virtual_volume` | normal | true | `text_virtual_purple` | F11 (FOLDER_VIRTUAL_VOLUME) |
+| `virtual_auth` | normal | true | `text_virtual_purple` | F12 (FOLDER_VIRTUAL_AUTH) |
+| `pushed_sync` | normal | false | `text_pushed_sync` | Pushed files (synced) |
+| `pushed_nosync` | normal | false | `text_pushed_nosync` | Pushed files (not synced) |
 
-**Note:** Text color is included in FontStyleClass to unify text rendering. The old TreeContext-based text color axis is absorbed: all tree contexts share the same font variables via their respective display configs. `pushed_sync` and `pushed_nosync` are placeholder entries — font keys and theme colors exist but are not wired to any node state. They will be connected when pushed file sync-state tracking lands.
+**Note:** Text color is included in FontStyleClass to unify text rendering. The old TreeContext-based text color axis is absorbed: all tree contexts share the same font variables via their respective display configs.
 
-### 6.2 list_font.json
+### 6.2 list_font.json (not yet consolidated)
 
-Font variables for list panel (Session History) FontStyleClass resolution. Same variable indirection pattern.
+Font variables for list panel (Session History) FontStyleClass resolution. Same variable indirection pattern. Still stored in separate `list_font.json` — will be consolidated when the list panel is wired.
 
 | Variable | Weight | Italic | text_color (variable) |
 |----------|--------|--------|----------------------|
 | `default` | normal | false | `text_primary` |
 
-### 6.3 Text and Delegate Variables (Injected from Theme)
+### 6.3 Text Colors + Delegate Overlays (Injected from Theme)
 
-The following values are used in rendering but don't correspond to gradient state variables. All are injected from the consolidated `*_theme.json` at init time — no hardcoded hex defaults in Python.
+The following values are used in rendering but don't correspond to gradient state variables. All are injected from the consolidated theme at construction time — **no class-level hex defaults** remain in Python.
 
-**TreeDisplayConfig** (from `base.text` + `base.delegate`):
+**TreeDisplayConfig** — injected from `base.text` section:
 
-| Variable | Hex | Purpose | Source |
-|----------|-----|---------|--------|
-| `text_primary` | `#E8DEFF` | Bright text for visible/active states | `base.text.text_primary` |
-| `text_dim` | `#A89BC8` | Muted text for hidden states | `base.text.text_dim` |
-| `text_warning` | `#FFB15D` | Orange text for orphaned files | `base.text.text_warning` |
-| `text_virtual_purple` | `#8B5CF6` | Purple text for virtual nodes | `base.text.text_virtual_purple` |
-| `text_pushed_sync` | `#8B5CF6` | Pushed sync text (placeholder) | `base.text.text_pushed_sync` |
-| `text_pushed_nosync` | `#6B4EC4` | Pushed nosync text (placeholder) | `base.text.text_pushed_nosync` |
-| `hover_color` | `#2D1F55` | Delegate hover overlay | `base.delegate.hover_color` |
+| Variable | Hex | Purpose | Theme Source |
+|----------|-----|---------|--------------|
+| `text_primary` | `#E8DEFF` | Bright text for accessible/active states | `base.text.text_primary` |
+| `text_dim` | `#A89BC8` | Muted text for restricted states | `base.text.text_dim` |
+| `text_warning` | `#DD9B4C` | Orange text for orphaned files | `base.text.text_warning` |
+| `text_virtual_purple` | `#9040B0` | Purple text for virtual paths | `base.text.text_virtual_purple` |
+| `text_pushed_sync` | `#F17149` | Red-orange text for synced pushes | `base.text.text_pushed_sync` |
+| `text_pushed_nosync` | `#C05838` | Dim red-orange for unsynced pushes | `base.text.text_pushed_nosync` |
+
+**TreeDisplayConfig** — injected from `base.delegate` section:
+
+| Variable | Value | Purpose | Theme Source |
+|----------|-------|---------|--------------|
+| `hover_color` | `#333A52` | Delegate hover overlay | `base.delegate.hover_color` |
 | `hover_alpha` | 60 | Delegate hover overlay alpha | `base.delegate.hover_alpha` |
 | `selection_alpha` | 100 | Delegate selection overlay alpha | `base.delegate.selection_alpha` |
 
-**ListDisplayConfig** (from `base.text`):
+**ListDisplayConfig** — injected from `base.text` section:
 
 | Variable | Hex | Purpose |
 |----------|-----|---------|
 | `text_primary` | `#E8DEFF` | Bright text for all history entries |
-
-**Note:** `ui.selected` (`#6366F1`) is a gradient state variable — only its alpha (100) is injected as `selection_alpha`. `hover_color` shares its hex with `visibility.visible` but serves a different rendering purpose (overlay vs gradient stop).
 
 ---
 
@@ -382,12 +392,15 @@ The following values are used in rendering but don't correspond to gradient stat
 └──────┬───────┘                          │
        │                                  ▼
        ▼                           ┌──────────────┐
-┌──────────────┐                   │  Theme fonts │
-│  Theme state │                   │  lookup      │
-│  color_vars  │                   │  → weight,   │
-│  var → hex   │                   │    italic,   │
-│  resolution  │                   │    text_color│
-       │                           └──────┬───────┘
+┌──────────────────┐                │  Font lookup │
+│ *_theme.json      │                │  local_host  │
+│ local_host.       │                │  .fonts (or  │
+│  state_colors     │                │  _scope_     │
+│ (or _scope_       │                │  resolved)   │
+│  resolved for     │                │  → weight,   │
+│  scope panel)     │                │    italic,   │
+│ var → hex         │                │    text_color│
+└──────┬────────────┘                └──────┬───────┘
        ▼                                  │
 ┌──────────────┐                          │
 │ QLinearGrad  │                          │
@@ -440,10 +453,10 @@ The old architecture had three separate tree contexts (PROJECT, EXCEPTION, SCOPE
 | E9: file `container` hidden | EXCEPTION | — (eliminated) | Container discovery removed |
 | E10: file `container` visible | EXCEPTION | — (eliminated) | Container discovery removed |
 | E11–E16: pending states | EXCEPTION | — (eliminated) | No staging; operations are instant |
-| S1: mount_root `mounted` visible | SCOPE | F2: `FOLDER_VISIBLE` | "mounted" IS "visible" in CORE |
+| S1: mount_root `mounted` visible | SCOPE | F3: `FOLDER_MOUNTED` | "mounted" IS "accessible" in CORE |
 | S2: normal `unmarked` visible | SCOPE | F2: `FOLDER_VISIBLE` | Same gradient colors |
-| S3: `revealed` visible | SCOPE | F7: `FOLDER_REVEALED` | Same gradient colors |
-| S4: `masked` virtual | SCOPE | F5/F6: `FOLDER_MASKED_REVEALED` or `FOLDER_MASKED_MIRRORED` | Split into 2 states by direct child check |
+| S3: `revealed` visible | SCOPE | F8: `FOLDER_REVEALED` | Same gradient colors |
+| S4: `masked` virtual | SCOPE | F6/F7: `FOLDER_MASKED_REVEALED` or `FOLDER_MASKED_MIRRORED` | Split into 2 states by direct child check |
 
 ### Eliminated Concepts
 
@@ -458,105 +471,4 @@ The old architecture had three separate tree contexts (PROJECT, EXCEPTION, SCOPE
 
 ### TreeContext.SCOPE Note
 
-> `TreeContext.SCOPE` — defined with text colors in theme.json but currently unused by any view. The enum value and theme colors are retained during migration but not wired into the new style system. The unified FontStyleClass variables replace per-context text color logic.
-
----
-
-## 9. Widget Gradient System
-
-Separate from the delegate GradientClass system (Sections 1–8), the widget gradient system provides JSON-driven gradient backgrounds for QWidget subclasses.
-
-### 9.1 Dataclasses
-
-```
-GradientStop(position, color, offset_px=0)
-    position: 0.0–1.0 percentage along gradient line
-    color:    theme var name or "#hex" direct
-    offset_px: signed pixel nudge from computed position
-
-WidgetGradientDef(type, stops, anchor, angle, center_x, center_y, radius, child_opacity)
-    type:          "linear" or "radial"
-    stops:         tuple[GradientStop, ...] — 2+ stops
-    anchor:        "horizontal" or "vertical" (linear only)
-    angle:         degrees offset from anchor baseline (linear only)
-    center_x/y:    % of widget dimensions (radial only)
-    radius:        % of smaller dimension (radial only)
-    child_opacity: 0–255, controls child widget background transparency
-```
-
-### 9.2 JSON Schema (theme.json "gradients" section)
-
-Each entry is a named gradient definition:
-
-```json
-{
-    "gradients": {
-        "gradient_name": {
-            "type": "linear",
-            "anchor": "vertical",
-            "angle": 0,
-            "child_opacity": 0,
-            "stops": [
-                { "pos": 0.0, "color": "palette_or_ui_var" },
-                { "pos": 1.0, "color": "#hex_direct" }
-            ]
-        }
-    }
-}
-```
-
-Stop `color` resolution order:
-1. `#hex` prefix → passthrough
-2. `theme.palette[color]` → hex
-3. `theme.ui[color]` → hex
-4. Fallback → `palette.polar_night_0`
-
-### 9.3 Active Gradient Definitions
-
-| Name | Type | Anchor | Stops | Widget |
-|------|------|--------|-------|--------|
-| `main_window` | linear | vertical | 2 (top-lit, dark bottom) | QMainWindow (IgnoreScopeApp) |
-| `dock_panel` | linear | vertical | 3 (glass card, lighter top edge) | QDockWidget (both docks) |
-| `config_panel` | linear | vertical | 2 (subtle top-lit) | ContainerRootPanel |
-| `status_bar` | linear | horizontal | 3 (center-bright bar) | QStatusBar |
-
-### 9.4 GradientBackgroundMixin
-
-Mixin class providing `paintEvent()` that paints the gradient before `super().paintEvent()`. Widgets set `_gradient_name` to a key from the gradients section.
-
-```
-class GradientBackgroundMixin:
-    _gradient_name = ""
-    paintEvent() → QPainter fills widget rect with resolved gradient → super().paintEvent()
-```
-
-MRO: Mixin must appear before QWidget subclass (e.g., `class MyWidget(GradientBackgroundMixin, QWidget)`).
-
-### 9.5 Transparency Cascade
-
-```
-┌─────────────────────────────┐
-│  Widget gradient             │  ← always opaque (painted by mixin)
-│  ┌───────────────────────┐  │
-│  │ Child widget bg        │  │  ← child_opacity: 0=transparent, 255=opaque
-│  │  ┌─────────────────┐  │  │
-│  │  │ Row gradient     │  │  │  ← row_gradient_opacity: 0=invisible, 255=opaque
-│  │  │ (delegate state) │  │  │     Text/symbols always at full opacity
-│  │  └─────────────────┘  │  │
-│  └───────────────────────┘  │
-└─────────────────────────────┘
-```
-
-- `child_opacity` (per-gradient, 0–255): Controls QSS `background-color` alpha for child widgets. At 0, children are transparent and the widget gradient shows through.
-- `row_gradient_opacity` (theme.json delegate section, 0–255): Controls delegate row gradient painter opacity. At 242 (~95%), widget gradient subtly bleeds through row backgrounds. Text/symbols render at full opacity.
-
-### 9.6 Separation from Delegate System
-
-| Aspect | Widget Gradients (Section 9) | Delegate Gradients (Section 1) |
-|--------|------------------------------|-------------------------------|
-| Target | QWidget backgrounds | Tree/list row backgrounds |
-| Model | WidgetGradientDef (N stops) | GradientClass (4 fixed stops) |
-| Config | theme.json "gradients" section | state_style.json / list_style.json |
-| Rendering | GradientBackgroundMixin.paintEvent() | GradientDelegate._paint_gradient() |
-| Angles | Configurable anchor + angle | Always horizontal |
-| Types | Linear + Radial | Linear only |
+> `TreeContext.SCOPE` — now wired via `TreeDisplayConfig(panel="scope")`. The scope panel reads from `_scope_resolved` (deep-merge of `scope` over `local_host` sections in the consolidated `*_theme.json`). Per-panel differentiation is achieved by overriding keys in the `scope.state_colors` and `scope.fonts` sections — empty sections inherit all values from `local_host`.

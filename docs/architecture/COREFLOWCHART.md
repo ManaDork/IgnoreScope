@@ -4,7 +4,7 @@
 > All code changes must respect this flow. If reality diverges, update the code, not this chart.
 >
 > GUI flow reference: `DATAFLOWCHART.md` (Phases 7-8 are shared cross-domain concepts; Phases 1-6 are domain-specific pipelines)
-> State model: 20 states (12 folder + 8 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
+> State model: 14 states (7 folder + 7 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
 
 ---
 
@@ -85,7 +85,7 @@ Raw boolean flags computed via ancestor walk (is_descendant checks), then combin
 
 Dual computation: config queries (primary) + inverse pattern derivation (cross-reference with discrepancy logging).
 
-*(Full state model: 20 states (12 folder + 8 file) — see GUI_STATE_STYLES.md Section 3)*
+*(Full state model: 14 states — see GUI_STATE_STYLES.md Section 3)*
 
 ---
 
@@ -153,11 +153,11 @@ PHASE 3: APPLY NODE STATE
         ├── Stage 1 visibility (MatrixState — per-node, no tree context):
         │       FOR EACH node:
         │           node.visibility = compute_visibility(node flags)
-        │           → orphaned / revealed / masked / visible / hidden
+        │           → accessible / restricted / virtual
         │
         ├── Stage 2 visibility (config-native — no tree walks):
         │       IF config.mirrored:
-        │           FOR EACH path with visibility in ("masked", "hidden"):
+        │           FOR EACH path with visibility == "restricted":
         │               Check 1: owning_spec.has_exception_descendant(path)
         │               Check 2: config.has_pushed_descendant(path)
         │               Check 3: any mount_root is descendant of path
@@ -166,15 +166,10 @@ PHASE 3: APPLY NODE STATE
         │       CORE-owned in core/node_state.py. GUI uses CORE results only.
         │
         ├── Stage 3 descendant folder fields (config-native — no tree walks):
-        │       is_mount_root = (path == mount_spec.mount_root)
         │       has_pushed_descendant = config.has_pushed_descendant(path)
         │       has_direct_visible_child = parents of revealed/pushed nodes (single pass)
         │
         └── Returns: HostFileTree with all NodeState populated
-        │
-        │   GUI further classifies virtual nodes by MountDataNode.virtual_type
-        │   (mirrored/volume/auth) for display state resolution. CORE produces
-        │   a single "virtual" visibility; subtypes are a presentation concern.
 
 
 PHASE 4: VALIDATION
