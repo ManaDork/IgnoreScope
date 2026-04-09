@@ -2,7 +2,31 @@
 
 > **Platform: Windows only** — macOS and Linux are not yet tested or supported.
 
-IgnoreScope is a Docker container management tool that uses volume layering to selectively hide directories from your project while allowing individual files to be pushed or pulled at runtime via `docker cp`. It provides both a CLI and a PyQt6 GUI for managing scoped container configurations across multiple projects.
+IgnoreScope is a Docker container management tool that uses volume layering to selectively hide directories from your project while allowing individual files to be pushed or pulled at runtime via `docker cp`. It provides both a CLI and a PyQt6 GUI with a glassmorphism-styled theme system for managing scoped container configurations across multiple projects.
+
+## What's New in v0.3
+
+### Theme & Visual System
+- **Glassmorphism theme** — single consolidated `glassmorphism_v1_theme.json` drives all colors, gradients, and fonts
+- **Widget gradient backgrounds** — JSON-driven panel gradients for docks, status bar, config panel
+- **Formulaic gradient derivation** — `derive_gradient()` and `derive_file_style()` replace hand-built state definitions
+- **Categorical color system** — state classification with deep navy + vivid accent palette
+- **Tree highlight fix** — suppress Windows accent bleed in branch indicators, focus rects, and palette
+
+### Core Architecture
+- **Visibility refactor** — pure STATE values (`accessible`, `restricted`, `virtual`) replacing mixed boolean flags
+- **New folder states** — `FOLDER_MOUNTED`, `FOLDER_MOUNTED_REVEALED`, `FOLDER_MIRRORED`, `FOLDER_MIRRORED_REVEALED`
+- **O(1) state resolution** — replaces O(n*states) gradient matching
+
+### GUI
+- **Config panel collapse/expand** — min/max pin pattern for reliable dock sizing
+- **Dead code removal** — Undo/Redo menu enabled, unused extensions and compose module removed
+- **Focus suppression** — unconditional focus rect clearing + QPalette.Highlight override
+
+### Infrastructure
+- **GitHub-primary VCS** — architecture docs moved to `docs/architecture/`, local configs gitignored
+- **New architecture doc** — `THEME_WORKFLOW.md` for color sampling and theme application
+- **Expanded test coverage** — style engine, display config, and node state test suites
 
 ## Prerequisites
 
