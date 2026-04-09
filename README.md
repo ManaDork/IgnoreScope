@@ -68,6 +68,11 @@ winget install --id=astral-sh.uv -e
 uv tool install git+https://github.com/ManaDork/IgnoreScope
 ```
 
+Upgrade from a previous version:
+```bash
+uv tool upgrade ignorescope-docker
+```
+
 Verify:
 ```bash
 ignorescope-docker --help
