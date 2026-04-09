@@ -1,23 +1,24 @@
 """Color Theme Engine.
 
-Singleton that loads theme.json, pre-builds QColor lookups for all 6 theme
-sections, generates the application QSS stylesheet, and constructs
-GradientClass instances from variable-resolved colors. Provides
-``build_gradient(GradientClass, color_vars, width)`` for 4-stop universal
-gradient construction. Does NOT define visual states (those live in
-TreeDisplayConfig.state_styles), create widgets, interact with tree models,
-or manage application state. This is the ONLY layout-phase module with real
-logic.
+Singleton that loads the consolidated ``*_theme.json`` file, pre-builds
+QColor lookups for delegate overlays, generates the application QSS
+stylesheet, and constructs GradientClass instances from variable-resolved
+colors. Provides ``build_gradient(GradientClass, color_vars, width)`` for
+4-stop universal gradient construction. Does NOT define visual states
+(those live in TreeDisplayConfig.state_styles), create widgets, interact
+with tree models, or manage application state. This is the ONLY
+layout-phase module with real logic.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtGui import QColor, QLinearGradient
+from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QRadialGradient
 
 
 # ------------------------------------------------------------------
@@ -57,18 +58,137 @@ class StateStyleClass:
 
 
 # ------------------------------------------------------------------
+# Dataclasses — Widget Gradient System
+# ------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GradientStop:
+    """One color stop in a widget gradient."""
+
+    position: float          # 0.0–1.0, percentage along gradient line
+    color: str               # theme var name (e.g. "base_0") or "#hex" direct
+    offset_px: int = 0       # signed pixel nudge from percentage position
+
+
+@dataclass(frozen=True)
+class WidgetGradientDef:
+    """Definition for a widget background gradient.
+
+    Linear: anchor axis + angle offset. Gradient line runs along
+    the anchor dimension, rotated by angle degrees.
+    Radial: center point + radius as percentages of widget dimensions.
+    """
+
+    type: str                            # "linear" or "radial"
+    stops: tuple[GradientStop, ...]      # 2+ color stops
+
+    # Linear-specific
+    anchor: str = "vertical"             # "horizontal" or "vertical"
+    angle: float = 0.0                   # degrees offset from anchor baseline
+
+    # Radial-specific
+    center_x: float = 0.5               # % of widget width  (0.0=left, 1.0=right)
+    center_y: float = 0.5               # % of widget height (0.0=top, 1.0=bottom)
+    radius: float = 0.5                 # % of smaller dimension
+
+    # Child widget transparency
+    child_opacity: int = 0              # 0=fully transparent (gradient shows through),
+                                        # 255=fully opaque (child paints own bg)
+
+
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _rotate(
+    x: float, y: float, cx: float, cy: float, rad: float,
+) -> tuple[float, float]:
+    """Rotate point (x, y) around center (cx, cy) by rad radians."""
+    cos_a = math.cos(rad)
+    sin_a = math.sin(rad)
+    dx, dy = x - cx, y - cy
+    return cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a
+
+
+# ------------------------------------------------------------------
+# GradientBackgroundMixin
+# ------------------------------------------------------------------
+
+class GradientBackgroundMixin:
+    """Mixin for widgets that paint a gradient background.
+
+    Subclass must set ``_gradient_name`` to a key from
+    theme.json ``"gradients"`` section.
+    """
+
+    _gradient_name: str = ""
+
+    def paintEvent(self, event):
+        if self._gradient_name:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            gradient = StyleGui.instance().build_widget_gradient(
+                self._gradient_name,
+                self.width(),
+                self.height(),
+            )
+            if gradient:
+                painter.fillRect(self.rect(), QBrush(gradient))
+            painter.end()
+        super().paintEvent(event)
+
+
+# ------------------------------------------------------------------
+# Consolidated theme loader
+# ------------------------------------------------------------------
+
+def _load_consolidated_theme(path: Path) -> dict:
+    """Load consolidated theme file. Validate required sections.
+
+    Deep-merges ``scope`` over ``local_host`` into ``_scope_resolved``
+    so that scope panels inherit local_host defaults for any missing keys.
+    """
+    with open(path, "r") as f:
+        raw = json.load(f)
+
+    required = {"base", "gradients", "local_host", "config_panel"}
+    missing = required - raw.keys()
+    if missing:
+        raise ValueError(f"Theme file missing sections: {missing}")
+
+    # Deep-merge scope over local_host
+    local = raw["local_host"]
+    scope_raw = raw.get("scope", {})
+    raw["_scope_resolved"] = {
+        "state_colors": {**local.get("state_colors", {}),
+                         **scope_raw.get("state_colors", {})},
+        "fonts": {**local.get("fonts", {}),
+                  **scope_raw.get("fonts", {})},
+    }
+    return raw
+
+
+# ------------------------------------------------------------------
 # StyleGui singleton
 # ------------------------------------------------------------------
 
 class StyleGui:
-    """Singleton style engine -- loads theme.json."""
+    """Singleton style engine -- loads consolidated *_theme.json."""
 
     _instance: Optional[StyleGui] = None
 
     def __init__(self):
-        theme_path = Path(__file__).parent / "theme.json"
-        with open(theme_path, "r") as f:
-            self._theme = json.load(f)
+        theme_path = self._find_theme_file()
+        self._theme_data = _load_consolidated_theme(theme_path)
+
+        # Map old access patterns to base subsections
+        self._theme = {
+            "palette": self._theme_data["base"]["palette"],
+            "ui": self._theme_data["base"]["ui"],
+            "text": self._theme_data["base"]["text"],
+            "delegate": self._theme_data["base"]["delegate"],
+            "gradients": self._theme_data["gradients"],
+        }
 
         # Delegate overlay colors
         d = self._theme["delegate"]
@@ -76,6 +196,19 @@ class StyleGui:
         self._selection_qcolor.setAlpha(d["selection_alpha"])
         self._hover_qcolor = QColor(d["hover_color"])
         self._hover_qcolor.setAlpha(d["hover_alpha"])
+
+        # Widget gradients
+        self._widget_gradients: dict[str, WidgetGradientDef] = {}
+        self._load_widget_gradients()
+
+    @staticmethod
+    def _find_theme_file() -> Path:
+        """Find *_theme.json in themes directory."""
+        themes_dir = Path(__file__).resolve().parent.parent / "themes"
+        candidates = list(themes_dir.glob("*_theme.json"))
+        if not candidates:
+            raise FileNotFoundError("No *_theme.json found in themes/")
+        return candidates[0]
 
     @classmethod
     def instance(cls) -> StyleGui:
@@ -132,12 +265,145 @@ class StyleGui:
         return self._hover_qcolor
 
     def palette_color(self, key: str) -> str:
-        """Get Nord palette hex value by key."""
-        return self._theme["palette"].get(key, "#FFFFFF")
+        """Get palette hex value by key. KeyError if missing."""
+        return self._theme["palette"][key]
 
     def ui_color(self, key: str) -> str:
-        """Get UI semantic color hex value by key."""
-        return self._theme["ui"].get(key, "#FFFFFF")
+        """Get UI semantic color hex value by key. KeyError if missing."""
+        return self._theme["ui"][key]
+
+    def config_panel_style(self) -> dict[str, str]:
+        """Resolve config_panel section values to hex via ui lookup."""
+        raw = self._theme_data.get("config_panel", {})
+        return {k: self.ui_color(v) for k, v in raw.items()}
+
+    # ------------------------------------------------------------------
+    # Widget Gradient API
+    # ------------------------------------------------------------------
+
+    def _load_widget_gradients(self) -> None:
+        """Parse theme.json 'gradients' section into WidgetGradientDef instances."""
+        gradients_data = self._theme.get("gradients", {})
+        for name, gdef in gradients_data.items():
+            if name.startswith("_"):
+                continue
+            stops = tuple(
+                GradientStop(
+                    position=s["pos"],
+                    color=s["color"],
+                    offset_px=s.get("offset", 0),
+                )
+                for s in gdef.get("stops", [])
+            )
+            self._widget_gradients[name] = WidgetGradientDef(
+                type=gdef.get("type", "linear"),
+                stops=stops,
+                anchor=gdef.get("anchor", "vertical"),
+                angle=gdef.get("angle", 0.0),
+                center_x=gdef.get("center_x", 0.5),
+                center_y=gdef.get("center_y", 0.5),
+                radius=gdef.get("radius", 0.5),
+                child_opacity=gdef.get("child_opacity", 0),
+            )
+
+    def _resolve_gradient_color(self, color_ref: str) -> str:
+        """Resolve a color reference to hex. Theme var lookup or hex passthrough."""
+        if color_ref.startswith("#"):
+            return color_ref
+        pal = self._theme["palette"]
+        if color_ref in pal:
+            return pal[color_ref]
+        ui = self._theme["ui"]
+        if color_ref in ui:
+            return ui[color_ref]
+        return pal["base_0"]
+
+    def build_widget_gradient(
+        self,
+        name: str,
+        width: float,
+        height: float,
+    ) -> Optional[QLinearGradient | QRadialGradient]:
+        """Build QLinearGradient or QRadialGradient from named definition.
+
+        Resolves stop colors, computes pixel positions from percentages + offsets,
+        constructs gradient at widget dimensions.
+
+        Args:
+            name: Gradient name from theme.json "gradients" section.
+            width: Widget width in pixels.
+            height: Widget height in pixels.
+
+        Returns:
+            QLinearGradient or QRadialGradient, or None if name not found.
+        """
+        gdef = self._widget_gradients.get(name)
+        if gdef is None:
+            return None
+
+        resolved = [
+            (stop, self._resolve_gradient_color(stop.color))
+            for stop in gdef.stops
+        ]
+
+        if gdef.type == "radial":
+            cx = width * gdef.center_x
+            cy = height * gdef.center_y
+            r = min(width, height) * gdef.radius
+            grad = QRadialGradient(cx, cy, r)
+            for stop, hex_color in resolved:
+                grad.setColorAt(stop.position, QColor(hex_color))
+            return grad
+
+        # Linear gradient
+        if gdef.anchor == "horizontal":
+            x1, y1 = 0.0, height / 2
+            x2, y2 = float(width), height / 2
+        else:  # vertical
+            x1, y1 = width / 2, 0.0
+            x2, y2 = width / 2, float(height)
+
+        if gdef.angle != 0:
+            rot_cx, rot_cy = width / 2, height / 2
+            rad = math.radians(gdef.angle)
+            x1, y1 = _rotate(x1, y1, rot_cx, rot_cy, rad)
+            x2, y2 = _rotate(x2, y2, rot_cx, rot_cy, rad)
+
+        grad = QLinearGradient(x1, y1, x2, y2)
+        for stop, hex_color in resolved:
+            px_pos = stop.position
+            if stop.offset_px:
+                length = math.hypot(x2 - x1, y2 - y1)
+                px_pos += stop.offset_px / length if length > 0 else 0
+            px_pos = max(0.0, min(1.0, px_pos))
+            grad.setColorAt(px_pos, QColor(hex_color))
+
+        return grad
+
+    def widget_gradient_names(self) -> list[str]:
+        """List available widget gradient names."""
+        return list(self._widget_gradients.keys())
+
+    @property
+    def row_gradient_opacity(self) -> int:
+        """Row gradient opacity (0–255) from theme.json delegate section."""
+        return self._theme.get("delegate", {}).get("row_gradient_opacity", 255)
+
+    def _child_bg(self, gradient_name: str, base_color: str) -> str:
+        """Compute child background-color with alpha from gradient's child_opacity."""
+        grad_def = self._widget_gradients.get(gradient_name)
+        if not grad_def or grad_def.child_opacity == 0:
+            return "transparent"
+        if grad_def.child_opacity >= 255:
+            return base_color
+        r = int(base_color[1:3], 16)
+        g = int(base_color[3:5], 16)
+        b = int(base_color[5:7], 16)
+        return f"rgba({r}, {g}, {b}, {grad_def.child_opacity})"
+
+    # ------------------------------------------------------------------
+    # Stylesheet
+    # ------------------------------------------------------------------
 
     def build_stylesheet(self) -> str:
         """Build APP_STYLESHEET from theme.json ui tokens."""
@@ -146,8 +412,39 @@ class StyleGui:
         # Resolve checkbox X icon path (forward slashes for Qt QSS)
         checkbox_x = Path(__file__).parent / "icons" / "checkbox_x.svg"
         checkbox_x_path = str(checkbox_x).replace("\\", "/")
+
+        # Gradient-aware backgrounds: transparent when widget/parent has gradient
+        gradient_window_bg = (
+            "transparent" if "main_window" in self._widget_gradients
+            else ui["window_bg"]
+        )
+        gradient_tree_bg = self._child_bg("dock_panel", ui["panel_bg"])
+        gradient_status_bg = (
+            "transparent" if "status_bar" in self._widget_gradients
+            else ui["panel_bg"]
+        )
+
+        # Resolve config_panel section — var names → hex via ui lookup
+        cp = self._theme_data.get("config_panel", {})
+        config_header_bg = self.ui_color(cp.get("header_bg", "surface_bg"))
+        config_header_text = self.ui_color(cp.get("header_text", "accent_primary"))
+        config_viewer_bg = self.ui_color(cp.get("viewer_bg", "panel_bg"))
+        config_viewer_text = self.ui_color(cp.get("viewer_text", "text_primary"))
+        config_border = self.ui_color(cp.get("border", "border"))
+        config_pattern_bg = self.ui_color(cp.get("pattern_bg", "panel_bg"))
+        config_pattern_text = self.ui_color(cp.get("pattern_text", "text_primary"))
+        config_pattern_border = self.ui_color(cp.get("pattern_border", "border"))
+        config_pattern_label = self.ui_color(cp.get("pattern_label", "text_muted"))
+        config_pattern_status = self.ui_color(cp.get("pattern_status", "text_muted"))
+        config_scrollbar_bg = self.ui_color(cp.get("scrollbar_bg", "panel_bg"))
+        config_scrollbar_handle = self.ui_color(cp.get("scrollbar_handle", "border"))
+        config_scrollbar_hover = self.ui_color(cp.get("scrollbar_handle_hover", "accent_secondary"))
+
         return _STYLESHEET_TEMPLATE.format(
             window_bg=ui["window_bg"],
+            gradient_window_bg=gradient_window_bg,
+            gradient_tree_bg=gradient_tree_bg,
+            gradient_status_bg=gradient_status_bg,
             panel_bg=ui["panel_bg"],
             surface_bg=ui["surface_bg"],
             border=ui["border"],
@@ -158,11 +455,20 @@ class StyleGui:
             accent_primary=ui["accent_primary"],
             accent_secondary=ui["accent_secondary"],
             accent_teal=ui["accent_teal"],
-            frost_0=pal["frost_0"],
-            frost_1=pal["frost_1"],
-            frost_2=pal["frost_2"],
-            frost_3=pal["frost_3"],
             checkbox_x_path=checkbox_x_path,
+            config_header_bg=config_header_bg,
+            config_header_text=config_header_text,
+            config_viewer_bg=config_viewer_bg,
+            config_viewer_text=config_viewer_text,
+            config_border=config_border,
+            config_pattern_bg=config_pattern_bg,
+            config_pattern_text=config_pattern_text,
+            config_pattern_border=config_pattern_border,
+            config_pattern_label=config_pattern_label,
+            config_pattern_status=config_pattern_status,
+            config_scrollbar_bg=config_scrollbar_bg,
+            config_scrollbar_handle=config_scrollbar_handle,
+            config_scrollbar_hover=config_scrollbar_hover,
         )
 
 
@@ -173,14 +479,14 @@ class StyleGui:
 _STYLESHEET_TEMPLATE = """\
 /* Main window */
 QMainWindow {{
-    background-color: {window_bg};
+    background-color: {gradient_window_bg};
 }}
 
 /* Tree views */
 QTreeView {{
     border: 1px solid {border};
     border-radius: 4px;
-    background-color: {panel_bg};
+    background-color: {gradient_tree_bg};
     color: {text_primary};
 }}
 
@@ -196,6 +502,18 @@ QTreeView::item:hover {{
 
 QTreeView::item:selected {{
     background: none;
+}}
+
+QTreeView::branch {{
+    background: transparent;
+}}
+
+QTreeView::branch:selected {{
+    background: transparent;
+}}
+
+QTreeView::branch:hover {{
+    background: transparent;
 }}
 
 /* Header sections */
@@ -338,7 +656,7 @@ QMenu::separator {{
 
 /* Status bar */
 QStatusBar {{
-    background-color: {panel_bg};
+    background-color: {gradient_status_bg};
     border-top: 1px solid {border};
     color: {text_primary};
 }}
@@ -356,6 +674,7 @@ QDockWidget {{
 QDockWidget::title {{
     background-color: {surface_bg};
     color: {accent_primary};
+    font-weight: bold;
     padding: 6px;
     border: 1px solid {border};
 }}
@@ -417,13 +736,13 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 }}
 
 #configHeaderFrame {{
-    background-color: {surface_bg};
-    border: 1px solid {border};
+    background-color: {config_header_bg};
+    border: 1px solid {config_border};
     border-radius: 4px;
 }}
 
 #configHeaderLabel {{
-    color: {accent_primary};
+    color: {config_header_text};
     font-weight: bold;
     font-size: 12px;
     background: transparent;
@@ -433,10 +752,86 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 #configViewerText {{
     font-family: "Consolas", "Monaco", "Courier New", monospace;
     font-size: 11px;
-    background-color: {panel_bg};
-    color: {text_primary};
-    border: 1px solid {border};
+    background-color: {config_viewer_bg};
+    color: {config_viewer_text};
+    border: 1px solid {config_border};
     border-radius: 4px;
+}}
+
+#patternListWidget {{
+    background-color: {config_pattern_bg};
+    color: {config_pattern_text};
+    border: 1px solid {config_pattern_border};
+    border-radius: 4px;
+}}
+
+#patternListWidget::item {{
+    padding: 3px 6px;
+}}
+
+#patternMountCombo {{
+    background-color: {config_pattern_bg};
+    color: {config_pattern_text};
+    border: 1px solid {config_pattern_border};
+    border-radius: 4px;
+    padding: 4px 8px;
+}}
+
+#patternMountLabel {{
+    color: {config_pattern_label};
+}}
+
+#patternStatusLabel {{
+    color: {config_pattern_status};
+    font-size: 11px;
+}}
+
+#patternAddBtn {{
+    min-width: 40px;
+    padding: 3px 8px;
+}}
+
+/* Config panel scrollbars */
+#configPanel QScrollBar:vertical {{
+    background-color: {config_scrollbar_bg};
+    width: 12px;
+    border-radius: 6px;
+}}
+
+#configPanel QScrollBar::handle:vertical {{
+    background-color: {config_scrollbar_handle};
+    border-radius: 6px;
+    min-height: 20px;
+}}
+
+#configPanel QScrollBar::handle:vertical:hover {{
+    background-color: {config_scrollbar_hover};
+}}
+
+#configPanel QScrollBar::add-line:vertical,
+#configPanel QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+#configPanel QScrollBar:horizontal {{
+    background-color: {config_scrollbar_bg};
+    height: 12px;
+    border-radius: 6px;
+}}
+
+#configPanel QScrollBar::handle:horizontal {{
+    background-color: {config_scrollbar_handle};
+    border-radius: 6px;
+    min-width: 20px;
+}}
+
+#configPanel QScrollBar::handle:horizontal:hover {{
+    background-color: {config_scrollbar_hover};
+}}
+
+#configPanel QScrollBar::add-line:horizontal,
+#configPanel QScrollBar::sub-line:horizontal {{
+    width: 0px;
 }}
 
 /* Dialog styling */

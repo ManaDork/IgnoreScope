@@ -1,5 +1,0 @@
-{
-    "default": { "weight": "normal", "italic": false, "text_color": "text_primary" },
-    "muted":   { "weight": "normal", "italic": false, "text_color": "text_dim" },
-    "italic":  { "weight": "normal", "italic": true,  "text_color": "text_warning" }
-}

@@ -3,7 +3,7 @@
 Defines the canonical NodeState dataclass and pure functions for
 computing per-node visibility from mount/mask/reveal/push configuration.
 
-This module is the CORE owner of per-node state (COREFLOWCHART Phase 3).
+This module is the CORE owner of per-node state (Phase 3 in architecture docs).
 All functions are pure — no GUI imports, no side effects.
 """
 
@@ -28,45 +28,40 @@ def compute_visibility(
     container_orphaned: bool,
     container_only: bool = False,
 ) -> str:
-    """Derive aggregate visibility from per-node boolean flags.
+    """Derive aggregate visibility STATE from per-node boolean flags.
+
+    Returns pure STATE — what the container sees. METHOD (how the node
+    got there) stays on the boolean flags: masked, revealed, mounted, etc.
 
     MatrixState truth table (first match wins):
 
-        container_orphaned  revealed  masked  mounted  container_only  ->  visibility
-        ------------------  --------  ------  -------  --------------  |   ----------
-              T               *         *       *            *         |   "orphaned"
-              F               T         *       *            *         |   "revealed"
-              F               F         T       T            *         |   "masked"
-              F               F         F       T            *         |   "visible"
-              *               F         F       F            T         |   "container_only"
-              F               F         *       F            F         |   "hidden"
+        container_only  container_orphaned  revealed  masked  mounted  ->  state
+        --------------  ------------------  --------  ------  -------  |   ----------
+              T               *               *         *       *     |   "virtual"
+              F               T               *         *       *     |   "restricted"
+              F               F               T         *       *     |   "accessible"
+              F               F               F         T       T     |   "restricted"
+              F               F               F         F       T     |   "accessible"
+              F               F               F         *       F     |   "restricted"
 
-    Note: masked requires mounted=T to produce "masked" visibility.
-    When masked=T but mounted=F (stale config), falls through to "hidden".
-    container_only is lowest priority — overridden by any host config flag.
-
-    Args:
-        mounted: Node is under a bind mount
-        masked: Node is hidden by a mask volume
-        revealed: Node is a punch-through within a masked area
-        pushed: Node has been pushed via docker cp
-        container_orphaned: Node exists in mask volume but has no parent mount
-        container_only: Node exists in container but not on host (scan diff)
+    Note: masked requires mounted=T. When masked=T but mounted=F (stale
+    config), falls through to "restricted". Stage 2 may upgrade
+    "restricted" → "virtual" for structural paths (mirrored mode).
 
     Returns:
-        One of: "orphaned", "revealed", "masked", "visible", "container_only", "hidden"
+        One of: "accessible", "restricted", "virtual"
     """
-    if container_orphaned:
-        return "orphaned"
-    if revealed:
-        return "revealed"
-    if masked and mounted:
-        return "masked"
-    if mounted:
-        return "visible"
     if container_only and not masked:
-        return "container_only"
-    return "hidden"
+        return "virtual"
+    if container_orphaned:
+        return "restricted"
+    if revealed:
+        return "accessible"
+    if masked and mounted:
+        return "restricted"
+    if mounted:
+        return "accessible"
+    return "restricted"
 
 
 @dataclass(frozen=True)
@@ -81,9 +76,10 @@ class NodeState:
         masked: Node is hidden by a mask volume
         revealed: Node is a punch-through within a masked area
         pushed: Node has been pushed via docker cp
-        container_orphaned: Pushed file stranded in mask volume, mount removed (TTFF matrix)
+        container_orphaned: Pushed file under mask volume with no active mount coverage (TTFF matrix)
         container_only: Exists in container but not on host (scan diff discovered)
-        visibility: Aggregate state — "visible"|"masked"|"virtual"|"revealed"|"hidden"|"orphaned"|"container_only"
+        is_mount_root: Node IS a mount root declaration
+        visibility: Aggregate state — orphaned|revealed|masked|visible|container_only|hidden (priority order)
         has_pushed_descendant: Any descendant has pushed=True (folders only)
         has_direct_visible_child: Immediate child has revealed=True or pushed=True (folders only)
     """
@@ -94,7 +90,8 @@ class NodeState:
     pushed: bool = False
     container_orphaned: bool = False
     container_only: bool = False
-    visibility: str = "hidden"
+    is_mount_root: bool = False
+    visibility: str = "restricted"
     has_pushed_descendant: bool = False
     has_direct_visible_child: bool = False
 
@@ -140,12 +137,10 @@ def find_paths_with_direct_visible_children(
 ) -> set[Path]:
     """Identify paths whose immediate children include revealed or pushed nodes.
 
-    Used to distinguish FOLDER_VIRTUAL_REVEALED (direct parent of visible content)
-    from FOLDER_VIRTUAL (structural intermediate only).
-
-    Checks Stage 1 flags (revealed, pushed) — NOT visibility. Virtual children
-    are structural intermediates and should NOT propagate this flag, otherwise
-    the F5/F6 distinction collapses (all virtual ancestors become F5).
+    Used by GUI to distinguish has_direct_visible_child=True (direct parent of
+    visible content) from False (structural intermediate). Checks Stage 1
+    flags (revealed, pushed) — NOT visibility. Virtual children are structural
+    and should NOT propagate this flag.
 
     Algorithm: Single pass — collect parents of revealed/pushed nodes.
     Complexity: O(n).
@@ -211,10 +206,10 @@ def compute_node_state(
     mount_specs: list['MountSpecPath'],
     pushed_files: set[Path],
 ) -> NodeState:
-    """Compute per-node state using pathspec evaluation (last-match-wins).
+    """Compute per-node state by querying MountSpecPath patterns.
 
-    Evaluates gitignore-style patterns in order via MountSpecPath,
-    enabling nested mask/reveal layering (mask → reveal → re-mask).
+    Delegates to MountSpecPath.is_masked()/is_unmasked() which use
+    gitignore-style pathspec evaluation (last-match-wins).
 
     Args:
         path: The path to evaluate
@@ -227,10 +222,12 @@ def compute_node_state(
     is_mounted = False
     is_masked = False
     is_revealed = False
+    is_mount_root = False
 
     for ms in mount_specs:
         if path == ms.mount_root or is_descendant(path, ms.mount_root):
             is_mounted = True
+            is_mount_root = (path == ms.mount_root)
             is_masked = ms.is_masked(path)
             is_revealed = ms.is_unmasked(path)
             break  # path belongs to first matching mount
@@ -255,6 +252,7 @@ def compute_node_state(
         revealed=is_revealed,
         pushed=is_pushed,
         container_orphaned=is_container_orphaned,
+        is_mount_root=is_mount_root,
         visibility=vis,
     )
 
@@ -286,7 +284,7 @@ def _compute_virtual_paths_from_config(
     """
     virtual: set[Path] = set()
     for path, state in states.items():
-        if state.visibility not in ("masked", "hidden"):
+        if state.visibility != "restricted":
             continue
 
         # Check 1: owning spec has exception pattern below this path
@@ -301,9 +299,9 @@ def _compute_virtual_paths_from_config(
             continue
 
         # Check 3: mount root below this path (above-mount structural paths)
-        # Mount roots get visibility="visible" in Stage 1, so any hidden
+        # Mount roots get visibility="accessible" in Stage 1, so any restricted
         # ancestor above a mount should become virtual.
-        if state.visibility == "hidden":
+        if not state.masked:
             for ms in config.mount_specs:
                 if ms.mount_root != path and is_descendant(ms.mount_root, path):
                     virtual.add(path)
@@ -340,18 +338,18 @@ def _cross_reference_virtual(
     missed_by_query = inverse_in_scope - query_virtual
     for path in missed_by_query:
         st = states.get(path)
-        if st and st.visibility in ("masked", "hidden"):
+        if st and st.visibility == "restricted":
             logger.warning(
                 "Virtual cross-ref: path %s is virtual by inverse pattern derivation "
-                "but NOT by config query (vis=%s). Possible detection bug.",
-                path, st.visibility,
+                "but NOT by config query (vis=%s, masked=%s). Possible detection bug.",
+                path, st.visibility, st.masked,
             )
 
     # Paths in query but not in inverse — expected for above-mount and pushed-only
     extra_in_query = query_virtual - inverse_in_scope
     for path in extra_in_query:
         st = states.get(path)
-        if st and st.visibility == "masked":
+        if st and st.masked:
             # Masked path virtual by query but not inverse — pushed-only or detection gap
             logger.debug(
                 "Virtual cross-ref: path %s virtual by query but not inverse (pushed descendant).",
@@ -365,15 +363,14 @@ def apply_node_states_from_scope(
 ) -> dict[Path, NodeState]:
     """Batch-compute NodeState for every path given a ScopeDockerConfig.
 
-    This is the COREFLOWCHART Phase 3 prescribed function:
-    ApplyNodeStateFromScope().
+    Phase 3 pipeline (architecture docs: COREFLOWCHART):
 
-    Stage 1: Per-node MatrixState (5 values)
+    Stage 1: Per-node flags + visibility (6 flags + 1 derived)
     Stage 2: Config-native virtual detection (when config.mirrored=True)
     Stage 3: Descendant folder fields (has_pushed_descendant, has_direct_visible_child)
 
     Args:
-        config: Full container configuration (mounts, masked, revealed, pushed_files)
+        config: Full container configuration (mount_specs, pushed_files)
         paths: Iterable of paths to evaluate
 
     Returns:

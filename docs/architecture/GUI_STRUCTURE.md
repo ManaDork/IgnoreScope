@@ -44,6 +44,8 @@ QMainWindow (IgnoreScopeApp)                                          app.py
 │               │                   └── QHeaderView                    (auto)
 │               │
 │               └── ContainerRootPanel  [+configPanel]                 app.py:234
+│                   │   Theme: styled via `config_panel` section of *_theme.json
+│                   │   (resolved at stylesheet build time via StyleGui.config_panel_style())
 │                   └── QVBoxLayout  [+config_panelLayout]             container_root_panel.py:48
 │                       ├── QFrame  [existing: configHeaderFrame]      container_root_panel.py:53
 │                       │   └── QHBoxLayout  [+config_headerLayout]    container_root_panel.py:56
@@ -251,6 +253,8 @@ Every stylesheet selector that sets a dimension, from `style_engine.py` `_STYLES
 | `QScrollBar::handle:horizontal` | min-width | 20px | 401 |
 
 ### Config Panel (by objectName)
+
+**Theme integration:** All config panel colors come from `*_theme.json` → `config_panel` section. Values are `ui` key references (e.g. `"header_bg": "surface_bg"`) resolved to hex at stylesheet build time via `StyleGui.config_panel_style()`. Includes header, viewer, pattern widgets, and scrollbar colors.
 
 | Selector | Property | Value | Line |
 |----------|----------|-------|------|

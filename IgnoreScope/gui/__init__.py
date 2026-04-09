@@ -23,12 +23,22 @@ def run_app(
     import faulthandler
     faulthandler.enable()
 
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QStyleFactory
+    from PyQt6.QtGui import QPalette, QColor
     from .app import IgnoreScopeApp
 
     from .icons import build_app_icon
 
     app = QApplication(sys.argv)
+    app.setStyle(QStyleFactory.create("Fusion"))
+
+    # Override QPalette.Highlight to suppress Windows accent bleed on selection
+    palette = app.palette()
+    highlight = QColor("#6366F1")
+    palette.setColor(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight, highlight)
+    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, highlight)
+    app.setPalette(palette)
+
     app.setWindowIcon(build_app_icon())
     window = IgnoreScopeApp(
         host_project_root=host_project_root,

@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
 )
 
-from .style_engine import StyleGui
+from .style_engine import GradientBackgroundMixin, StyleGui
 from .container_root_panel import ContainerRootPanel
 from .menus import MenuManager
 from .mount_data_tree import MountDataTree
@@ -38,6 +38,18 @@ from .scope_view import ScopeView
 from .system_tray import SystemTrayManager
 
 PLACEHOLDER_SCOPE = "temp"
+
+
+# ── Gradient widget subclasses ────────────────────────────────────
+
+class _GradientDockWidget(GradientBackgroundMixin, QDockWidget):
+    """QDockWidget with gradient background painted by mixin."""
+    pass
+
+
+class _GradientStatusBar(GradientBackgroundMixin, QStatusBar):
+    """QStatusBar with gradient background painted by mixin."""
+    pass
 
 
 # ── Custom splitter with three-dot grip handle ──────────────────
@@ -105,7 +117,7 @@ class _GripSplitter(QSplitter):
         return _GripHandle(self.orientation(), self)
 
 
-class IgnoreScopeApp(QMainWindow):
+class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
     """Main application window with QDockWidget-based layout.
 
     Public attributes (docks -- 2 total):
@@ -143,6 +155,7 @@ class IgnoreScopeApp(QMainWindow):
         parent=None,
     ):
         super().__init__(parent)
+        self._gradient_name = "main_window"
         self.host_project_root = host_project_root
         self.dev_mode = dev_mode
         self._settings = QSettings("IgnoreScope", "IgnoreScope")
@@ -205,7 +218,8 @@ class IgnoreScopeApp(QMainWindow):
         self.setCentralWidget(central)
 
         # Status bar
-        status_bar = QStatusBar()
+        status_bar = _GradientStatusBar()
+        status_bar._gradient_name = "status_bar"
         status_bar.setObjectName("statusBar")
         self.setStatusBar(status_bar)
         self.status_label = QLabel("No project loaded")
@@ -217,7 +231,8 @@ class IgnoreScopeApp(QMainWindow):
 
         # ── Local Host Configuration (left) ──
         # Tree container (populated later via view injection)
-        self.local_host_dock = QDockWidget("Local Host Configuration", self)
+        self.local_host_dock = _GradientDockWidget("Local Host Configuration", self)
+        self.local_host_dock._gradient_name = "dock_panel"
         self.local_host_dock.setObjectName("localHostDock")
         local_host_widget = QWidget()
         local_host_widget.setObjectName("localHost_wrapper")
@@ -233,7 +248,8 @@ class IgnoreScopeApp(QMainWindow):
 
         # ── Scope Configuration (right) ──
         # QSplitter: tree (75%) + ContainerRootPanel with header + JSON viewer (25%)
-        self.scope_dock = QDockWidget("Scope Configuration", self)
+        self.scope_dock = _GradientDockWidget("Scope Configuration", self)
+        self.scope_dock._gradient_name = "scope_dock_panel"
         self.scope_dock.setObjectName("scopeDock")
         scope_widget = QWidget()
         scope_widget.setObjectName("scope_wrapper")
@@ -249,9 +265,10 @@ class IgnoreScopeApp(QMainWindow):
         scope_splitter.setObjectName("scopeSplitter")
         scope_splitter.addWidget(self.scope_config_container)
         scope_splitter.addWidget(self.container_root_panel)
-        scope_splitter.setStretchFactor(0, 3)  # tree: 75%
-        scope_splitter.setStretchFactor(1, 1)  # panel: 25%
+        scope_splitter.setChildrenCollapsible(False)
+        self.scope_config_container.setMinimumHeight(80)
         scope_layout.addWidget(scope_splitter)
+        self._scope_splitter = scope_splitter
         self.scope_dock.setWidget(scope_widget)
 
     # ── Default Layout Sizes (pixels) ────────────────────────
@@ -305,7 +322,9 @@ class IgnoreScopeApp(QMainWindow):
         mm.save_config_action.triggered.connect(cm.save_config)
         mm.shut_down_action.triggered.connect(self._system_tray.quit_app)
 
-        # Edit menu — Undo/Redo deferred (actions stay disabled)
+        # Edit menu — Undo/Redo
+        mm.undo_action.triggered.connect(self.config_manager.undo)
+        mm.redo_action.triggered.connect(self.config_manager.redo)
         # Click-to-Toggle: single action controls both tree delegates
         mm.click_toggle_action.triggered.connect(
             lambda checked: (

@@ -5,16 +5,8 @@ Currently supported: Claude Code CLI, Git, P4 MCP Server, Workflow Setup.
 """
 
 from .install_extension import ExtensionInstaller, DeployMethod, DeployResult
-from .claude_extension import (
-    ClaudeInstaller,
-    deploy_claude,
-    verify_claude,
-)
-from .git_extension import (
-    GitInstaller,
-    deploy_git,
-    verify_git,
-)
+from .claude_extension import ClaudeInstaller
+from .git_extension import GitInstaller
 from .p4_mcp_extension import (
     P4McpInstaller,
     deploy_p4_mcp,
@@ -52,11 +44,7 @@ __all__ = [
     "DeployMethod",
     "DeployResult",
     "ClaudeInstaller",
-    "deploy_claude",
-    "verify_claude",
     "GitInstaller",
-    "deploy_git",
-    "verify_git",
     "P4McpInstaller",
     "deploy_p4_mcp",
     "verify_p4_mcp",

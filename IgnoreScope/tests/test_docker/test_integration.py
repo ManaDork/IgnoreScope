@@ -217,29 +217,14 @@ class TestMinimalContainer:
 class TestLLMContainer:
     """Tests for containers with LLM deployment."""
 
-    def test_claude_dockerfile_generation(self, temp_project: Path):
-        """Test Dockerfile generation with Claude Code."""
-        from IgnoreScope.docker.compose import generate_dockerfile_with_llm
-        from IgnoreScope.container_ext import ClaudeInstaller
+    def test_claude_deployer_basic_dockerfile(self, temp_project: Path):
+        """Test basic Dockerfile generation (non-LLM path)."""
+        from IgnoreScope.docker.compose import generate_dockerfile
 
-        deployer = ClaudeInstaller(auto_launch=True)
-        dockerfile, entrypoint = generate_dockerfile_with_llm(
-            deployer,
-            project_name="TestProject",
-            container_root="/workspace",
-        )
+        dockerfile = generate_dockerfile()
 
-        # Check Dockerfile
-        assert "Claude Code" in dockerfile
-        assert "curl" in dockerfile
-        assert "claude.ai/install.sh" in dockerfile
-        assert "WORKDIR /workspace" in dockerfile
-
-        # Check entrypoint
-        assert entrypoint is not None
-        assert "#!/bin/bash" in entrypoint
-        assert "claude" in entrypoint.lower()
-        assert "/workspace" in entrypoint
+        assert "FROM" in dockerfile
+        assert "CMD" in dockerfile
 
     def test_claude_deployer_interface(self):
         """Test ClaudeInstaller implements required interface."""
@@ -296,7 +281,7 @@ class TestLLMContainer:
 
         from IgnoreScope.core.config import ScopeDockerConfig
         from IgnoreScope.cli.commands import cmd_create, cmd_remove
-        from IgnoreScope.container_ext import deploy_claude, verify_claude
+        from IgnoreScope.container_ext import ClaudeInstaller, DeployMethod
 
         config = ScopeDockerConfig(
             mount_specs=_make_mount_specs({temp_project / "src"}),
@@ -310,11 +295,14 @@ class TestLLMContainer:
             assert success, f"Create failed: {msg}"
 
             # Deploy Claude
-            result = deploy_claude(test_container_name, timeout=300)
+            installer = ClaudeInstaller()
+            result = installer.deploy_runtime(
+                test_container_name, method=DeployMethod.FULL, timeout=300
+            )
 
             if result.success:
                 # Verify installation
-                verify_result = verify_claude(test_container_name)
+                verify_result = installer.verify(test_container_name)
                 assert verify_result.success, f"Verification failed: {verify_result.message}"
                 print(f"Claude version: {verify_result.version}")
             else:
@@ -665,12 +653,15 @@ def run_interactive_tests():
             print(f"\nDeploying Claude to {container_name}...")
             print("This may take 1-2 minutes...")
 
-            from IgnoreScope.container_ext import deploy_claude, verify_claude
+            from IgnoreScope.container_ext import ClaudeInstaller, DeployMethod
 
-            result = deploy_claude(container_name, timeout=300)
+            installer = ClaudeInstaller()
+            result = installer.deploy_runtime(
+                container_name, method=DeployMethod.FULL, timeout=300
+            )
             if result.success:
                 print(f"\n[OK] {result.message}")
-                verify = verify_claude(container_name)
+                verify = installer.verify(container_name)
                 print(f"    Version: {verify.version}")
             else:
                 print(f"\n[ERROR] {result.message}")

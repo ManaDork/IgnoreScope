@@ -105,10 +105,10 @@ Result: `{host_project_root, SubDir, Content, Stuff, Internal, Handlers}`
 
 ### Stage 1: Per-Node MatrixState
 Pure boolean flag computation → visibility from truth table.
-Paths above mount boundary get "hidden".
+Paths above mount boundary get "restricted".
 
 ### Stage 2: Config-Native Virtual Detection (refactored)
-No tree walks. Three checks per masked/hidden path:
+No tree walks. Three checks per restricted-visibility path:
 
 - **Check 1 (within-mount):** `owning_spec.has_exception_descendant(path)` — pattern string scan
 - **Check 2 (any path):** `config.has_pushed_descendant(path)` — pushed_files scan

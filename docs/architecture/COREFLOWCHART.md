@@ -153,11 +153,11 @@ PHASE 3: APPLY NODE STATE
         ├── Stage 1 visibility (MatrixState — per-node, no tree context):
         │       FOR EACH node:
         │           node.visibility = compute_visibility(node flags)
-        │           → orphaned / revealed / masked / visible / hidden
+        │           → accessible / restricted / virtual
         │
         ├── Stage 2 visibility (config-native — no tree walks):
         │       IF config.mirrored:
-        │           FOR EACH path with visibility in ("masked", "hidden"):
+        │           FOR EACH path with visibility == "restricted":
         │               Check 1: owning_spec.has_exception_descendant(path)
         │               Check 2: config.has_pushed_descendant(path)
         │               Check 3: any mount_root is descendant of path
@@ -409,7 +409,7 @@ GUI: "Install Claude CLI" menu action (Docker Container menu)
 |----------|-------------|--------|
 | Runtime Install (Claude) | `container_ops_ui.deploy_llm_to_container()` → `ClaudeInstaller.deploy_runtime(FULL)` | **ACTIVE** |
 | Runtime Install (Git) | `container_ops_ui.deploy_git_to_container()` → `GitInstaller.deploy_runtime(FULL)` | **ACTIVE** |
-| Image Bake | `compose.generate_dockerfile_with_llm()` → `ClaudeInstaller.get_dockerfile_snippets()` | **SHELVED** — defined but never called from production |
+| Image Bake | *(removed)* | Shelved code deleted in house-cleaning refactor |
 
 ### Extending for Other Extension Installers
 

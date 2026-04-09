@@ -273,33 +273,3 @@ class GitInstaller(ExtensionInstaller):
             return True, f"Git identity configured: {name} <{email}>"
         return False, f"Failed to configure identity: {stderr or stdout}"
 
-
-# Convenience functions
-def deploy_git(
-    container_name: str, distro: str = "auto", timeout: int = 120
-) -> DeployResult:
-    """Deploy Git into running container.
-
-    Args:
-        container_name: Target container name
-        distro: "debian", "alpine", or "auto"
-        timeout: Installation timeout in seconds
-
-    Returns:
-        DeployResult with status
-    """
-    installer = GitInstaller()
-    return installer.deploy(container_name, distro=distro, timeout=timeout)
-
-
-def verify_git(container_name: str) -> DeployResult:
-    """Verify Git is installed and get version.
-
-    Args:
-        container_name: Target container name
-
-    Returns:
-        DeployResult with version if installed
-    """
-    installer = GitInstaller()
-    return installer.verify(container_name)

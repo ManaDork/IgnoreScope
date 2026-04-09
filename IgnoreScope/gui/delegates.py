@@ -12,7 +12,7 @@ HistoryDelegate: List delegate parameterized by ListDisplayConfig.
 Reads HistoryStateRole from the model, resolves visual state,
 paints 3-layer rows (gradient -> overlay -> text). No symbols.
 
-No TreeContext enum. No RowStyleInput. Config-parameterized.
+Config-parameterized delegates — state derivation via resolve_tree_state().
 """
 
 from __future__ import annotations
@@ -92,6 +92,8 @@ class GradientDelegate(QStyledItemDelegate):
 
         Uses _get_row_width() hook for view-appropriate width.
         Subclasses must set self._config with a color_vars attribute.
+        Applies row_gradient_opacity from theme.json to allow widget
+        gradient bleed-through.
         """
         gradient_class = style.gradient
         total_width = self._get_row_width(option)
@@ -101,7 +103,12 @@ class GradientDelegate(QStyledItemDelegate):
             gradient_class, self._config.color_vars, total_width,
             x_offset=option.rect.x(),
         )
+        row_opacity = sg.row_gradient_opacity
+        if row_opacity < 255:
+            painter.setOpacity(row_opacity / 255.0)
         painter.fillRect(option.rect, QBrush(qt_gradient))
+        if row_opacity < 255:
+            painter.setOpacity(1.0)
 
 
 # ── TreeStyleDelegate ────────────────────────────────────────────
@@ -211,9 +218,8 @@ class TreeStyleDelegate(GradientDelegate):
         if col_idx < len(self._config.columns):
             col_def = self._config.columns[col_idx]
 
-        # Suppress focus rect on symbol columns — prevents white square artifact
-        if col_def is not None and col_def.symbol_type is not None:
-            option.state &= ~QStyle.StateFlag.State_HasFocus
+        # Suppress focus rect on all columns — prevents white square artifact
+        option.state &= ~QStyle.StateFlag.State_HasFocus
 
         # Layer 1: gradient background
         if style is not None and style.gradient is not None:

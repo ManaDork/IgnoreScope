@@ -62,31 +62,31 @@ class TestComputeVisibility:
     """Verify all 5 visibility derivation outcomes."""
 
     def test_all_false_is_hidden(self):
-        assert compute_visibility(False, False, False, False, False) == "hidden"
+        assert compute_visibility(False, False, False, False, False) == "restricted"
 
     def test_mounted_only_is_visible(self):
-        assert compute_visibility(True, False, False, False, False) == "visible"
+        assert compute_visibility(True, False, False, False, False) == "accessible"
 
     def test_masked_and_mounted_is_masked(self):
-        assert compute_visibility(True, True, False, False, False) == "masked"
+        assert compute_visibility(True, True, False, False, False) == "restricted"
 
     def test_revealed_is_revealed(self):
-        assert compute_visibility(True, True, True, False, False) == "revealed"
+        assert compute_visibility(True, True, True, False, False) == "accessible"
 
     def test_container_orphaned_takes_priority(self):
-        assert compute_visibility(False, True, False, True, True) == "orphaned"
+        assert compute_visibility(False, True, False, True, True) == "restricted"
 
     def test_container_orphaned_beats_revealed(self):
         """Container-orphaned has highest priority even if revealed is also set."""
-        assert compute_visibility(False, True, True, True, True) == "orphaned"
+        assert compute_visibility(False, True, True, True, True) == "restricted"
 
     def test_masked_without_mounted_is_hidden(self):
-        """GAP 1 fix: masked=T but mounted=F → hidden (stale config)."""
-        assert compute_visibility(False, True, False, False, False) == "hidden"
+        """GAP 1 fix: masked=T but mounted=F → restricted (stale config)."""
+        assert compute_visibility(False, True, False, False, False) == "restricted"
 
     def test_ttff_is_orphaned(self):
         """pushed=T, masked=T, mounted=F, revealed=F → orphaned flag drives it."""
-        assert compute_visibility(False, True, False, True, True) == "orphaned"
+        assert compute_visibility(False, True, False, True, True) == "restricted"
 
 
 # =============================================================================
@@ -103,7 +103,7 @@ class TestNodeStateDataclass:
         assert ns.revealed is False
         assert ns.pushed is False
         assert ns.container_orphaned is False
-        assert ns.visibility == "hidden"
+        assert ns.visibility == "restricted"
         assert ns.has_pushed_descendant is False
         assert ns.has_direct_visible_child is False
 
@@ -119,19 +119,19 @@ class TestNodeStateDataclass:
             revealed=True,
             pushed=False,
             container_orphaned=False,
-            visibility="revealed",
+            visibility="accessible",
         )
         assert ns.mounted is True
-        assert ns.visibility == "revealed"
+        assert ns.visibility == "accessible"
 
     def test_equality(self):
-        a = NodeState(mounted=True, visibility="visible")
-        b = NodeState(mounted=True, visibility="visible")
+        a = NodeState(mounted=True, visibility="accessible")
+        b = NodeState(mounted=True, visibility="accessible")
         assert a == b
 
     def test_inequality(self):
-        a = NodeState(mounted=True, visibility="visible")
-        b = NodeState(mounted=False, visibility="hidden")
+        a = NodeState(mounted=True, visibility="accessible")
+        b = NodeState(mounted=False, visibility="restricted")
         assert a != b
 
 
@@ -194,7 +194,7 @@ class TestFindContainerOrphanedPaths:
         api = src / "api"
         vendor = src / "vendor"
         f1 = api / "a.py"      # under mask + mount → NOT orphaned
-        f2 = vendor / "b.py"   # under mask, no mount → orphaned
+        f2 = vendor / "b.py"   # under mask, no mount → restricted (orphaned)
 
         orphans = find_container_orphaned_paths(
             pushed_files={f1, f2},
@@ -231,7 +231,7 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.mounted is True
-        assert ns.visibility == "visible"
+        assert ns.visibility == "accessible"
 
     def test_path_under_mount_and_mask_is_masked(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -245,7 +245,7 @@ class TestComputeNodeState:
         )
         assert ns.mounted is True
         assert ns.masked is True
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
 
     def test_path_under_mount_mask_reveal_is_revealed(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -261,7 +261,7 @@ class TestComputeNodeState:
         assert ns.mounted is True
         assert ns.masked is True
         assert ns.revealed is True
-        assert ns.visibility == "revealed"
+        assert ns.visibility == "accessible"
 
     def test_path_not_under_anything_is_hidden(self, tmp_path: Path):
         stray = tmp_path / "other" / "file.txt"
@@ -272,10 +272,10 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.mounted is False
-        assert ns.visibility == "hidden"
+        assert ns.visibility == "restricted"
 
     def test_pushed_under_removed_mount_is_hidden(self, tmp_path: Path):
-        """No mount → no mask possible → pushed file with no mount is hidden.
+        """No mount → no mask possible → pushed file with no mount is restricted.
         Orphan detection is batch-level (find_container_orphaned_paths).
         """
         pushed_file = tmp_path / "src" / "api" / "config.json"
@@ -289,7 +289,7 @@ class TestComputeNodeState:
         assert ns.mounted is False
         assert ns.masked is False
         assert ns.container_orphaned is False
-        assert ns.visibility == "hidden"
+        assert ns.visibility == "restricted"
 
     def test_mount_point_itself_is_visible(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -300,7 +300,20 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.mounted is True
-        assert ns.visibility == "visible"
+        assert ns.is_mount_root is True
+        assert ns.visibility == "accessible"
+
+    def test_child_of_mount_is_not_mount_root(self, tmp_path: Path):
+        src = tmp_path / "src"
+        child = src / "main.py"
+
+        ns = compute_node_state(
+            path=child,
+            mount_specs=_make_mount_specs({src}),
+            pushed_files=set(),
+        )
+        assert ns.mounted is True
+        assert ns.is_mount_root is False
 
     def test_mask_point_itself_is_masked(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -312,7 +325,19 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.masked is True
-        assert ns.visibility == "masked"
+        assert ns.is_mount_root is False
+        assert ns.visibility == "restricted"
+
+    def test_path_outside_mount_not_mount_root(self, tmp_path: Path):
+        outside = tmp_path / "other"
+
+        ns = compute_node_state(
+            path=outside,
+            mount_specs=_make_mount_specs({tmp_path / "src"}),
+            pushed_files=set(),
+        )
+        assert ns.is_mount_root is False
+        assert ns.mounted is False
 
     def test_reveal_point_itself_is_revealed(self, tmp_path: Path):
         src = tmp_path / "src"
@@ -325,7 +350,7 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.revealed is True
-        assert ns.visibility == "revealed"
+        assert ns.visibility == "accessible"
 
     # --- Mount-root-mask (dual state) ---
 
@@ -338,7 +363,7 @@ class TestComputeNodeState:
         ns = compute_node_state(path=api, mount_specs=[ms], pushed_files=set())
         assert ns.mounted is True
         assert ns.masked is True
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
 
     def test_mount_mask_child_is_masked(self, tmp_path: Path):
         """Child of masked folder → mounted=True, masked=True."""
@@ -349,7 +374,7 @@ class TestComputeNodeState:
         ns = compute_node_state(path=child, mount_specs=[ms], pushed_files=set())
         assert ns.mounted is True
         assert ns.masked is True
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
 
     def test_mask_with_reveal(self, tmp_path: Path):
         """Mask with punch-through reveal → child of reveal is revealed."""
@@ -361,7 +386,7 @@ class TestComputeNodeState:
         assert ns.mounted is True
         assert ns.masked is True
         assert ns.revealed is True
-        assert ns.visibility == "revealed"
+        assert ns.visibility == "accessible"
 
     def test_pushed_under_active_mask(self, tmp_path: Path):
         """Pushed file under active mask → masked, NOT orphaned (mount exists)."""
@@ -374,10 +399,10 @@ class TestComputeNodeState:
         assert ns.masked is True
         assert ns.pushed is True
         assert ns.container_orphaned is False
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
 
     def test_no_mount_no_mask(self, tmp_path: Path):
-        """No mount specs → everything hidden. Orphan detection is batch-level."""
+        """No mount specs → everything restricted. Orphan detection is batch-level."""
         pushed_file = tmp_path / "src" / "config.json"
 
         ns = compute_node_state(path=pushed_file, mount_specs=[], pushed_files={pushed_file})
@@ -385,17 +410,17 @@ class TestComputeNodeState:
         assert ns.mounted is False
         assert ns.masked is False
         assert ns.container_orphaned is False
-        assert ns.visibility == "hidden"
+        assert ns.visibility == "restricted"
 
     def test_unmounted_path_is_hidden(self, tmp_path: Path):
-        """Path not under any mount → hidden regardless of other state."""
+        """Path not under any mount → restricted regardless of other state."""
         child = tmp_path / "other" / "file.py"
 
         ms = MountSpecPath(mount_root=tmp_path / "src", patterns=["api/"])
         ns = compute_node_state(path=child, mount_specs=[ms], pushed_files=set())
         assert ns.masked is False
         assert ns.mounted is False
-        assert ns.visibility == "hidden"
+        assert ns.visibility == "restricted"
 
 
 # =============================================================================
@@ -461,20 +486,20 @@ class TestApplyNodeStatesFromScope:
         paths = [src, api, public, readme, stray]
         result = apply_node_states_from_scope(config, paths)
 
-        assert result[src].visibility == "visible"
+        assert result[src].visibility == "accessible"
         assert result[api].visibility == "virtual"
-        assert result[public].visibility == "revealed"
-        assert result[readme].visibility == "visible"
-        assert result[stray].visibility == "hidden"
+        assert result[public].visibility == "accessible"
+        assert result[readme].visibility == "accessible"
+        assert result[stray].visibility == "restricted"
 
     def test_empty_config_all_hidden(self, tmp_path: Path):
-        """Empty config → all paths hidden."""
+        """Empty config → all paths restricted."""
         config = self._make_config(tmp_path)
         paths = [tmp_path / "a", tmp_path / "b"]
         result = apply_node_states_from_scope(config, paths)
 
         for ns in result.values():
-            assert ns.visibility == "hidden"
+            assert ns.visibility == "restricted"
 
     def test_round_trip_consistency(self, tmp_path: Path):
         """Batch Stage 1 matches individual compute_node_state() calls.
@@ -550,11 +575,11 @@ class TestApplyNodeStatesFromScope:
 
         assert result[api].visibility == "virtual"
         assert result[internal].visibility == "virtual"
-        assert result[public].visibility == "revealed"
-        assert result[src].visibility == "visible"
+        assert result[public].visibility == "accessible"
+        assert result[src].visibility == "accessible"
 
     def test_mirrored_disabled_stays_masked(self, tmp_path: Path):
-        """config.mirrored=False → masked stays masked, no Stage 2."""
+        """config.mirrored=False → restricted stays restricted, no Stage 2."""
         src = tmp_path / "src"
         api = src / "api"
         public = api / "public"
@@ -570,8 +595,8 @@ class TestApplyNodeStatesFromScope:
         paths = [src, api, public]
         result = apply_node_states_from_scope(config, paths)
 
-        assert result[api].visibility == "masked"
-        assert result[public].visibility == "revealed"
+        assert result[api].visibility == "restricted"
+        assert result[public].visibility == "accessible"
 
     def test_stage3_has_pushed_descendant(self, tmp_path: Path):
         """Batch sets has_pushed_descendant on ancestor folders."""
@@ -636,8 +661,8 @@ class TestFindPathsWithDirectVisibleChildren:
         public = api / "public"
 
         states = {
-            api: NodeState(mounted=True, masked=True, visibility="masked"),
-            public: NodeState(mounted=True, masked=True, revealed=True, visibility="revealed"),
+            api: NodeState(mounted=True, masked=True, visibility="restricted"),
+            public: NodeState(mounted=True, masked=True, revealed=True, visibility="accessible"),
         }
 
         result = find_paths_with_direct_visible_children(states)
@@ -648,8 +673,8 @@ class TestFindPathsWithDirectVisibleChildren:
         pushed_file = api / "config.json"
 
         states = {
-            api: NodeState(mounted=True, masked=True, visibility="masked"),
-            pushed_file: NodeState(mounted=True, masked=True, pushed=True, visibility="masked"),
+            api: NodeState(mounted=True, masked=True, visibility="restricted"),
+            pushed_file: NodeState(mounted=True, masked=True, pushed=True, visibility="restricted"),
         }
 
         result = find_paths_with_direct_visible_children(states)
@@ -662,9 +687,9 @@ class TestFindPathsWithDirectVisibleChildren:
         public = internal / "public"
 
         states = {
-            api: NodeState(mounted=True, masked=True, visibility="masked"),
-            internal: NodeState(mounted=True, masked=True, visibility="masked"),
-            public: NodeState(mounted=True, masked=True, revealed=True, visibility="revealed"),
+            api: NodeState(mounted=True, masked=True, visibility="restricted"),
+            internal: NodeState(mounted=True, masked=True, visibility="restricted"),
+            public: NodeState(mounted=True, masked=True, revealed=True, visibility="accessible"),
         }
 
         result = find_paths_with_direct_visible_children(states)
@@ -676,8 +701,8 @@ class TestFindPathsWithDirectVisibleChildren:
         internal = api / "internal"
 
         states = {
-            api: NodeState(mounted=True, masked=True, visibility="masked"),
-            internal: NodeState(mounted=True, masked=True, visibility="masked"),
+            api: NodeState(mounted=True, masked=True, visibility="restricted"),
+            internal: NodeState(mounted=True, masked=True, visibility="restricted"),
         }
 
         result = find_paths_with_direct_visible_children(states)
@@ -789,7 +814,7 @@ class TestComputeNodeStateFromSpecs:
         )
         cache = src / "vendor" / "public" / "tmp" / "cache.dat"
         ns = compute_node_state(cache, [ms], set())
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
         assert ns.masked is True
         assert ns.revealed is False
 
@@ -802,7 +827,7 @@ class TestComputeNodeStateFromSpecs:
         )
         api = src / "vendor" / "public" / "api"
         ns = compute_node_state(api, [ms], set())
-        assert ns.visibility == "revealed"
+        assert ns.visibility == "accessible"
         assert ns.masked is True
         assert ns.revealed is True
 
@@ -811,25 +836,25 @@ class TestComputeNodeStateFromSpecs:
         src = tmp_path / "src"
         ms = MountSpecPath(mount_root=src, patterns=["vendor/"])
         ns = compute_node_state(src / "vendor", [ms], set())
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
         assert ns.masked is True
 
     def test_mount_root_is_visible(self, tmp_path: Path):
-        """Mount root with no matching patterns is visible."""
+        """Mount root with no matching patterns is accessible."""
         src = tmp_path / "src"
         ms = MountSpecPath(mount_root=src, patterns=["vendor/"])
         ns = compute_node_state(src, [ms], set())
-        assert ns.visibility == "visible"
+        assert ns.visibility == "accessible"
         assert ns.mounted is True
         assert ns.masked is False
 
     def test_path_outside_all_mounts_is_hidden(self, tmp_path: Path):
-        """Path not under any mount is hidden."""
+        """Path not under any mount is restricted."""
         src = tmp_path / "src"
         ms = MountSpecPath(mount_root=src, patterns=[])
         other = tmp_path / "other"
         ns = compute_node_state(other, [ms], set())
-        assert ns.visibility == "hidden"
+        assert ns.visibility == "restricted"
         assert ns.mounted is False
 
     def test_pushed_file_in_remask_has_correct_state(self, tmp_path: Path):
@@ -843,7 +868,7 @@ class TestComputeNodeStateFromSpecs:
         ns = compute_node_state(pushed, [ms], {pushed})
         assert ns.pushed is True
         assert ns.masked is True
-        assert ns.visibility == "masked"
+        assert ns.visibility == "restricted"
 
 
 class TestApplyFromSpecsNested:
@@ -870,12 +895,12 @@ class TestApplyFromSpecsNested:
         paths = [src, vendor, pub, tmp_dir, api]
         result = apply_node_states_from_scope(config, paths)
 
-        assert result[src].visibility == "visible"
+        assert result[src].visibility == "accessible"
         # vendor is masked but has a revealed descendant (pub) -> mirrored
         assert result[vendor].visibility == "virtual"
-        assert result[pub].visibility == "revealed"
-        assert result[tmp_dir].visibility == "masked"
-        assert result[api].visibility == "revealed"
+        assert result[pub].visibility == "accessible"
+        assert result[tmp_dir].visibility == "restricted"
+        assert result[api].visibility == "accessible"
 
     def test_mirrored_disabled_nested(self, tmp_path: Path):
         """Nested patterns with mirrored=False: no Stage 2 upgrade."""
@@ -896,8 +921,8 @@ class TestApplyFromSpecsNested:
         paths = [src, vendor, pub]
         result = apply_node_states_from_scope(config, paths)
 
-        assert result[vendor].visibility == "masked"  # no mirrored upgrade
-        assert result[pub].visibility == "revealed"
+        assert result[vendor].visibility == "restricted"  # no mirrored upgrade
+        assert result[pub].visibility == "accessible"
 
 
 # =============================================================================
@@ -926,7 +951,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [outside])
         s = result[outside]
-        assert s.visibility == "hidden"
+        assert s.visibility == "restricted"
         assert s.has_pushed_descendant is False
         assert s.has_direct_visible_child is False
 
@@ -939,10 +964,10 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src])
         s = result[src]
-        assert s.visibility == "visible"
+        assert s.visibility == "accessible"
 
     def test_folder_mounted_masked(self, tmp_path: Path):
-        """F3: masked, no pushed descendant → FOLDER_MOUNTED_MASKED."""
+        """Masked folder, no pushed descendant → FOLDER_MASKED."""
         src = tmp_path / "src"
         vendor = src / "vendor"
         ms = MountSpecPath(mount_root=src, patterns=["vendor/"])
@@ -951,13 +976,12 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src, vendor])
         s = result[vendor]
-        assert s.visibility == "masked"
+        assert s.visibility == "restricted"
         assert s.has_pushed_descendant is False
 
     def test_folder_mounted_masked_pushed(self, tmp_path: Path):
-        """F4: masked, has pushed descendant → FOLDER_MOUNTED_MASKED_PUSHED.
-        Only reachable when mirrored=False — with mirrored=True, pushed
-        descendants trigger virtual upgrade via Check 2."""
+        """Masked folder with pushed descendant (mirrored=False).
+        With mirrored=True, pushed descendants trigger virtual upgrade."""
         src = tmp_path / "src"
         vendor = src / "vendor"
         pushed_file = vendor / "secret.py"
@@ -969,7 +993,7 @@ class TestTruthTableRegression:
         config.mirrored = False
         result = apply_node_states_from_scope(config, [src, vendor, pushed_file])
         s = result[vendor]
-        assert s.visibility == "masked"
+        assert s.visibility == "restricted"
         assert s.has_pushed_descendant is True
 
     def test_folder_virtual_revealed(self, tmp_path: Path):
@@ -1017,7 +1041,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src, vendor, public])
         s = result[public]
-        assert s.visibility == "revealed"
+        assert s.visibility == "accessible"
         assert s.revealed is True
 
     def test_folder_pushed_ancestor(self, tmp_path: Path):
@@ -1036,7 +1060,7 @@ class TestTruthTableRegression:
             config, [outside, outside / "deep", pushed_file],
         )
         s = result[outside]
-        assert s.visibility == "hidden"
+        assert s.visibility == "restricted"
         assert s.has_pushed_descendant is True
 
     # F9 (FOLDER_CONTAINER_ONLY) requires container scan diff —
@@ -1053,7 +1077,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [outside])
         s = result[outside]
-        assert s.visibility == "hidden"
+        assert s.visibility == "restricted"
         assert s.pushed is False
 
     def test_file_visible(self, tmp_path: Path):
@@ -1066,7 +1090,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src, f])
         s = result[f]
-        assert s.visibility == "visible"
+        assert s.visibility == "accessible"
         assert s.pushed is False
 
     def test_file_masked(self, tmp_path: Path):
@@ -1080,7 +1104,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src, vendor, f])
         s = result[f]
-        assert s.visibility == "masked"
+        assert s.visibility == "restricted"
         assert s.pushed is False
 
     def test_file_revealed(self, tmp_path: Path):
@@ -1095,7 +1119,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src, vendor, public, f])
         s = result[f]
-        assert s.visibility == "revealed"
+        assert s.visibility == "accessible"
         assert s.revealed is True
 
     def test_file_pushed_in_hidden(self, tmp_path: Path):
@@ -1109,7 +1133,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [outside, f])
         s = result[f]
-        assert s.visibility == "hidden"
+        assert s.visibility == "restricted"
         assert s.pushed is True
 
     def test_file_pushed_in_masked(self, tmp_path: Path):
@@ -1124,11 +1148,11 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [src, vendor, f])
         s = result[f]
-        assert s.visibility == "masked"
+        assert s.visibility == "restricted"
         assert s.pushed is True
 
     def test_file_container_orphan(self, tmp_path: Path):
-        """FI7: orphaned → FILE_CONTAINER_ORPHAN.
+        """FI7: restricted (orphaned) → FILE_CONTAINER_ORPHAN.
         Condition: pushed=T, masked=T, mounted=F, revealed=F."""
         src = tmp_path / "src"
         vendor = src / "vendor"
@@ -1143,7 +1167,7 @@ class TestTruthTableRegression:
         )
         result = apply_node_states_from_scope(config, [f])
         s = result[f]
-        # pushed=T, not under any mount → hidden, not masked → not orphaned
+        # pushed=T, not under any mount → restricted, not masked → not orphaned
         # Need: pushed + masked + not mounted
         # This requires the file to be masked but mount removed
         # Simulate: file was pushed to vendor/ which was masked under src/,
@@ -1177,7 +1201,7 @@ class TestTruthTableRegression:
         )
         assert result[vendor].visibility == "virtual"
         assert result[internal].visibility == "virtual"
-        assert result[public].visibility == "revealed"
+        assert result[public].visibility == "accessible"
 
     def test_virtual_from_pushed_descendant(self, tmp_path: Path):
         """Config query Check 2: masked path with pushed descendant → virtual."""
@@ -1211,7 +1235,7 @@ class TestTruthTableRegression:
         )
         assert result[project].visibility == "virtual"
         assert result[subdir].visibility == "virtual"
-        assert result[src].visibility == "visible"
+        assert result[src].visibility == "accessible"
 
     def test_mirrored_disabled_no_virtual(self, tmp_path: Path):
         """When mirrored=False, no virtual detection occurs."""
@@ -1224,5 +1248,5 @@ class TestTruthTableRegression:
         )
         config.mirrored = False
         result = apply_node_states_from_scope(config, [src, vendor, public])
-        assert result[vendor].visibility == "masked"  # no upgrade
+        assert result[vendor].visibility == "restricted"  # no upgrade
 

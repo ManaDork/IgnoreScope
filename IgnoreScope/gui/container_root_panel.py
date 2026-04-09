@@ -25,8 +25,10 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
+from .style_engine import GradientBackgroundMixin
 
-class ContainerRootPanel(QWidget):
+
+class ContainerRootPanel(GradientBackgroundMixin, QWidget):
     """Header frame + pattern list + collapsible JSON config viewer panel.
 
     Layout:
@@ -43,6 +45,7 @@ class ContainerRootPanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None, tree=None):
         super().__init__(parent)
+        self._gradient_name = "config_panel"
         self._tree = tree
         self.setObjectName("configPanel")
         self._setup_ui()
@@ -63,7 +66,7 @@ class ContainerRootPanel(QWidget):
         header_layout.setContentsMargins(6, 6, 6, 6)
         header_layout.setSpacing(6)
 
-        self._header_label = QLabel("▼ Desktop Docker Scope Config")
+        self._header_label = QLabel("▶ Desktop Docker Scope Config")
         self._header_label.setObjectName("configHeaderLabel")
         self._header_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         header_layout.addWidget(self._header_label, alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -95,6 +98,11 @@ class ContainerRootPanel(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding,
         )
 
+        # Start collapsed — hide content, constrain to header-only
+        self._config_text_edit.setVisible(False)
+        if self._pattern_widget is not None:
+            self._pattern_widget.setVisible(False)
+
     # -- Config text property --
 
     @property
@@ -109,11 +117,28 @@ class ContainerRootPanel(QWidget):
 
     # -- Collapse toggle --
 
-    def _toggle_config_viewer(self) -> None:
-        """Toggle the JSON viewer visibility.
+    def _header_height(self) -> int:
+        """Compute the header-only pixel height (pure calculation, no side effects)."""
+        fm = self._header_label.fontMetrics()
+        content_h = fm.height()
+        hdr_m = self._header_frame.layout().contentsMargins()
+        panel_m = self.layout().contentsMargins()
+        # CSS border (1px) isn't reported by frameWidth(); hard-code to match QSS
+        css_border = 1
+        return (
+            panel_m.top() + panel_m.bottom()
+            + 2 * css_border
+            + hdr_m.top() + hdr_m.bottom()
+            + content_h
+        )
 
-        Sets maximumHeight to header-only when collapsed so the
-        QSplitter reclaims space for the tree above.
+    def _toggle_config_viewer(self) -> None:
+        """Toggle between collapsed (tree-dominant) and expanded (config-dominant).
+
+        Collapsed: pins minHeight == maxHeight to header-only so QSplitter
+        has zero ambiguity — tree gets all remaining space.
+        Expanded: floors at header height, unconstrained ceiling,
+        explicit setSizes gives panel maximum space.
         """
         visible = not self._config_text_edit.isVisible()
         self._config_text_edit.setVisible(visible)
@@ -122,20 +147,78 @@ class ContainerRootPanel(QWidget):
         arrow = "▼" if visible else "▶"
         self._header_label.setText(f"{arrow} Desktop Docker Scope Config")
         if visible:
-            self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX — unconstrained
+            self._apply_expanded_height()
         else:
-            fm = self._header_label.fontMetrics()
-            content_h = fm.height()
-            hdr_m = self._header_frame.layout().contentsMargins()
-            panel_m = self.layout().contentsMargins()
-            # CSS border (1px) isn't reported by frameWidth(); hard-code to match QSS
-            css_border = 1
-            self.setMaximumHeight(
-                panel_m.top() + panel_m.bottom()
-                + 2 * css_border
-                + hdr_m.top() + hdr_m.bottom()
-                + content_h
-            )
+            self._apply_collapsed_height()
+            self._collapse_in_splitter()
+
+    def _apply_collapsed_height(self) -> None:
+        """Pin minHeight == maxHeight to header-only (zero ambiguity for splitter)."""
+        h = self._header_height()
+        self.setMinimumHeight(h)
+        self.setMaximumHeight(h)
+
+    def _apply_expanded_height(self) -> None:
+        """Floor at header height, unconstrained ceiling, panel dominates splitter."""
+        h = self._header_height()
+        self.setMinimumHeight(h)
+        self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX — unconstrained
+        self._expand_in_splitter()
+
+    def _expand_in_splitter(self) -> None:
+        """Push the parent QSplitter handle up so this panel dominates.
+
+        Tree keeps minimum height (80px from app.py) so its viewport
+        never reaches 0px — prevents QTreeView render death.
+        """
+        splitter = self._find_parent_splitter()
+        if splitter is None:
+            return
+        idx = splitter.indexOf(self)
+        if idx < 0:
+            return
+        total = sum(splitter.sizes())
+        tree_min = 80
+        sizes = [tree_min] * splitter.count()
+        sizes[idx] = total - tree_min * (splitter.count() - 1)
+        splitter.setSizes(sizes)
+
+    def _collapse_in_splitter(self) -> None:
+        """Restore tree-dominant sizes after collapse."""
+        splitter = self._find_parent_splitter()
+        if splitter is None:
+            return
+        idx = splitter.indexOf(self)
+        if idx < 0:
+            return
+        total = sum(splitter.sizes())
+        h = self._header_height()
+        sizes = [total - h] * splitter.count()
+        sizes[idx] = h
+        splitter.setSizes(sizes)
+        # Force tree viewport repaint after being shrunk during expand
+        for i in range(splitter.count()):
+            if i != idx:
+                child = splitter.widget(i)
+                if child is not None:
+                    child.update()
+
+    def _find_parent_splitter(self):
+        """Walk up the parent chain to find the containing QSplitter."""
+        from PyQt6.QtWidgets import QSplitter
+        widget = self.parentWidget()
+        while widget is not None:
+            if isinstance(widget, QSplitter):
+                return widget
+            widget = widget.parentWidget()
+        return None
+
+    # -- Initial collapsed height (deferred to first show) --
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._config_text_edit.isVisible():
+            self._apply_collapsed_height()
 
     # -- Event filter (header frame click) --
 
@@ -168,6 +251,8 @@ class ContainerRootPanel(QWidget):
                 self._pattern_widget = ContainerPatternListWidget(tree, self)
                 self._pattern_widget.setObjectName("containerPatternList")
                 self._pattern_widget.patternChanged.connect(tree._recompute_states)
+                # Match current collapse state
+                self._pattern_widget.setVisible(self._config_text_edit.isVisible())
                 # Insert before the JSON viewer (index 1, after header at index 0)
                 self.layout().insertWidget(1, self._pattern_widget)
             except Exception as e:

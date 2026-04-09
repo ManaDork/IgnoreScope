@@ -79,13 +79,13 @@ class DisplayFilterProxy(QSortFilterProxyModel):
         source_model: MountDataTreeModel = self.sourceModel()
         state = source_model.tree.get_node_state(node.path)
 
-        # ── Hidden filter ─────────────────────────────────────
-        if not self._config.display_hidden and state.visibility == "hidden":
+        # ── Hidden filter — show restricted nodes only if they have pushed content ──
+        if not self._config.display_hidden and state.visibility == "restricted":
             if not state.pushed and not state.has_pushed_descendant:
                 return False
 
         # ── Orphaned filter ───────────────────────────────────
-        if not self._config.display_orphaned and state.visibility == "orphaned":
+        if not self._config.display_orphaned and state.container_orphaned:
             return False
 
         # ── Non-mounted folder filter ─────────────────────────
@@ -93,7 +93,7 @@ class DisplayFilterProxy(QSortFilterProxyModel):
             not self._config.display_non_mounted
             and not node.is_file
             and not state.mounted
-            and state.visibility == "hidden"
+            and state.visibility == "restricted"
         ):
             if not state.pushed and not state.has_pushed_descendant:
                 return False
@@ -102,7 +102,7 @@ class DisplayFilterProxy(QSortFilterProxyModel):
         if (
             not self._config.display_masked_dead_branches
             and not node.is_file
-            and state.visibility == "masked"
+            and state.masked
             and not state.has_direct_visible_child
             and not state.has_pushed_descendant
         ):
