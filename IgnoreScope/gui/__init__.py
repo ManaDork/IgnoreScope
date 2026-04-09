@@ -23,12 +23,13 @@ def run_app(
     import faulthandler
     faulthandler.enable()
 
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QStyleFactory
     from .app import IgnoreScopeApp
 
     from .icons import build_app_icon
 
     app = QApplication(sys.argv)
+    app.setStyle(QStyleFactory.create("Fusion"))
     app.setWindowIcon(build_app_icon())
     window = IgnoreScopeApp(
         host_project_root=host_project_root,

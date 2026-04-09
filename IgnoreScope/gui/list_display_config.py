@@ -1,17 +1,20 @@
 """List Panel Configuration.
 
 ListDisplayConfig for Session History panel. Inherits BaseDisplayConfig
-for JSON loading, state_styles, resolve_text_color, color_vars.
-Uses HISTORY_ state definitions with ``list_style.json`` / ``list_font.json``.
+for state_styles, resolve_text_color, color_vars. Loads from
+``list_style.json`` / ``list_font.json`` directly (list panel section
+deferred until session_history is wired to UI).
 Does NOT store state, render UI, or interact with CORE.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Optional
 
 from .display_config import BaseDisplayConfig
-from .style_engine import GradientClass
+from .style_engine import GradientClass, StyleGui
 
 
 # ------------------------------------------------------------------
@@ -55,14 +58,21 @@ _HISTORY_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
 class ListDisplayConfig(BaseDisplayConfig):
     """Display configuration for the Session History list panel.
 
-    Inherits JSON loading, state_styles, resolve_text_color, color_vars
-    from BaseDisplayConfig. Passes HISTORY_ state defs and list-specific
-    JSON files.
+    Loads list_style.json / list_font.json directly (list panel section
+    not yet in consolidated theme). Passes resolved dicts to
+    BaseDisplayConfig.
     """
 
-    def __init__(
-        self,
-        color_json: str = "list_style.json",
-        font_json: str = "list_font.json",
-    ):
-        super().__init__(_HISTORY_STATE_DEFS, color_json, font_json)
+    def __init__(self):
+        gui_dir = Path(__file__).parent
+
+        with open(gui_dir / "list_style.json", "r") as f:
+            color_vars: dict[str, str] = json.load(f)
+
+        with open(gui_dir / "list_font.json", "r") as f:
+            font_vars: dict[str, dict] = json.load(f)
+
+        # Text colors from consolidated theme base.text section
+        text_colors = dict(StyleGui.instance()._theme_data["base"]["text"])
+
+        super().__init__(_HISTORY_STATE_DEFS, color_vars, font_vars, text_colors)

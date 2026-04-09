@@ -16,13 +16,13 @@ Every QObject that affects layout or dimensions gets `setObjectName()`. No anony
 - Existing names shown as `[existing]`. New names shown as `[+new]`.
 
 ```
-QMainWindow (IgnoreScopeApp)  [GradientBackgroundMixin: "main_window"]  app.py
+QMainWindow (IgnoreScopeApp)                                          app.py
 ├── QWidget  [+central_hidden]                                        app.py:200
 ├── QMenuBar                                                          menus.py
-├── QStatusBar  [+statusBar]  [GradientBackgroundMixin: "status_bar"] app.py:205
+├── QStatusBar  [+statusBar]                                          app.py:205
 │   └── QLabel  [+status_label]                                       app.py:207
 │
-├── _GradientDockWidget  [existing: localHostDock]  [gradient: "dock_panel"]  app.py:215
+├── QDockWidget  [existing: localHostDock]                             app.py:215
 │   └── QWidget  [+localHost_wrapper]                                  app.py:217
 │       └── QVBoxLayout  [+localHost_wrapperLayout]                    app.py:218
 │           └── QWidget  [+localHost_container]                        app.py:220
@@ -32,7 +32,7 @@ QMainWindow (IgnoreScopeApp)  [GradientBackgroundMixin: "main_window"]  app.py
 │                           └── QTreeView  [+localHostTree]            local_host_view.py:66
 │                               └── QHeaderView                       (auto — not a QObject child)
 │
-├── _GradientDockWidget  [existing: scopeDock]  [gradient: "dock_panel"]  app.py:227
+├── QDockWidget  [existing: scopeDock]                                 app.py:227
 │   └── QWidget  [+scope_wrapper]                                      app.py:229
 │       └── QVBoxLayout  [+scope_wrapperLayout]                        app.py:230
 │           └── _GripSplitter  [+scopeSplitter]                        app.py:235
@@ -43,7 +43,9 @@ QMainWindow (IgnoreScopeApp)  [GradientBackgroundMixin: "main_window"]  app.py
 │               │               └── QTreeView  [+scopeTree]            scope_view.py:96
 │               │                   └── QHeaderView                    (auto)
 │               │
-│               └── ContainerRootPanel  [+configPanel]  [GradientBackgroundMixin: "config_panel"]  app.py:234
+│               └── ContainerRootPanel  [+configPanel]                 app.py:234
+│                   │   Theme: styled via `config_panel` section of *_theme.json
+│                   │   (resolved at stylesheet build time via StyleGui.config_panel_style())
 │                   └── QVBoxLayout  [+config_panelLayout]             container_root_panel.py:48
 │                       ├── QFrame  [existing: configHeaderFrame]      container_root_panel.py:53
 │                       │   └── QHBoxLayout  [+config_headerLayout]    container_root_panel.py:56
@@ -251,6 +253,8 @@ Every stylesheet selector that sets a dimension, from `style_engine.py` `_STYLES
 | `QScrollBar::handle:horizontal` | min-width | 20px | 401 |
 
 ### Config Panel (by objectName)
+
+**Theme integration:** All config panel colors come from `*_theme.json` → `config_panel` section. Values are `ui` key references (e.g. `"header_bg": "surface_bg"`) resolved to hex at stylesheet build time via `StyleGui.config_panel_style()`. Includes header, viewer, pattern widgets, and scrollbar colors.
 
 | Selector | Property | Value | Line |
 |----------|----------|-------|------|

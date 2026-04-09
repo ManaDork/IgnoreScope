@@ -4,7 +4,9 @@ Verifies GradientClass, FontStyleClass, StateStyleClass dataclasses
 and StyleGui singleton API (build_gradient, palette_color, etc.).
 """
 
+import json
 import pytest
+from pathlib import Path
 from PyQt6.QtGui import QColor
 
 from IgnoreScope.gui.style_engine import (
@@ -51,6 +53,14 @@ def reset_singleton():
 def sg() -> StyleGui:
     """Get a fresh StyleGui instance."""
     return StyleGui.instance()
+
+
+@pytest.fixture
+def theme_data() -> dict:
+    """Load raw theme JSON for expected-value assertions."""
+    theme_path = StyleGui._find_theme_file()
+    with open(theme_path) as f:
+        return json.load(f)
 
 
 # ===========================================================================
@@ -148,30 +158,35 @@ class TestStyleGuiAPI:
         b = StyleGui.instance()
         assert a is b
 
-    def test_palette_color(self, sg):
-        assert sg.palette_color("accent_blue") == "#9BA5FF"
-        assert sg.palette_color("base_0") == "#383144"
+    def test_palette_color(self, sg, theme_data):
+        pal = theme_data["base"]["palette"]
+        assert sg.palette_color("accent_blue") == pal["accent_blue"]
+        assert sg.palette_color("base_0") == pal["base_0"]
 
-    def test_ui_color(self, sg):
-        assert sg.ui_color("window_bg") == "#3F3A57"
-        assert sg.ui_color("accent_primary") == "#9BA5FF"
+    def test_ui_color(self, sg, theme_data):
+        ui = theme_data["base"]["ui"]
+        assert sg.ui_color("window_bg") == ui["window_bg"]
+        assert sg.ui_color("accent_primary") == ui["accent_primary"]
 
-    def test_selection_color(self, sg):
+    def test_selection_color(self, sg, theme_data):
         c = sg.selection_color()
-        assert hex_of(c) == "#9ba5ff"
-        assert c.alpha() == 100
+        expected = theme_data["base"]["delegate"]["selection_color"].lower()
+        assert hex_of(c) == expected
+        assert c.alpha() == theme_data["base"]["delegate"]["selection_alpha"]
 
-    def test_hover_color(self, sg):
+    def test_hover_color(self, sg, theme_data):
         c = sg.hover_color()
-        assert hex_of(c) == "#50476f"
-        assert c.alpha() == 60
+        expected = theme_data["base"]["delegate"]["hover_color"].lower()
+        assert hex_of(c) == expected
+        assert c.alpha() == theme_data["base"]["delegate"]["hover_alpha"]
 
-    def test_build_stylesheet(self, sg):
+    def test_build_stylesheet(self, sg, theme_data):
         """build_stylesheet returns a non-empty string with theme values."""
+        ui = theme_data["base"]["ui"]
         css = sg.build_stylesheet()
         assert len(css) > 100
-        assert "#3F3A57" in css  # window_bg
-        assert "#9BA5FF" in css  # accent_primary
+        assert ui["window_bg"] in css
+        assert ui["accent_primary"] in css
 
 
 class TestBuildGradient:
@@ -285,7 +300,7 @@ class TestWidgetGradientLoading:
     def test_gradient_stop_count(self, sg):
         """Each gradient has the expected number of stops."""
         g = sg._widget_gradients["main_window"]
-        assert len(g.stops) == 2
+        assert len(g.stops) == 3
         g = sg._widget_gradients["dock_panel"]
         assert len(g.stops) == 3
         g = sg._widget_gradients["status_bar"]
@@ -303,15 +318,18 @@ class TestResolveGradientColor:
     def test_hex_passthrough(self, sg):
         assert sg._resolve_gradient_color("#BDA4FF") == "#BDA4FF"
 
-    def test_palette_lookup(self, sg):
-        assert sg._resolve_gradient_color("base_0") == "#383144"
+    def test_palette_lookup(self, sg, theme_data):
+        pal = theme_data["base"]["palette"]
+        assert sg._resolve_gradient_color("base_0") == pal["base_0"]
 
-    def test_ui_lookup(self, sg):
-        assert sg._resolve_gradient_color("surface_bg") == "#50476F"
+    def test_ui_lookup(self, sg, theme_data):
+        ui = theme_data["base"]["ui"]
+        assert sg._resolve_gradient_color("surface_bg") == ui["surface_bg"]
 
-    def test_unknown_fallback(self, sg):
+    def test_unknown_fallback(self, sg, theme_data):
+        pal = theme_data["base"]["palette"]
         result = sg._resolve_gradient_color("nonexistent_var")
-        assert result == "#383144"  # falls back to base_0
+        assert result == pal["base_0"]  # falls back to base_0
 
 
 class TestBuildWidgetGradient:
@@ -326,7 +344,7 @@ class TestBuildWidgetGradient:
         grad = sg.build_widget_gradient("main_window", 800, 600)
         assert isinstance(grad, QLinearGradient)
         stops = grad.stops()
-        assert len(stops) == 2
+        assert len(stops) == 3
         # Vertical: start at top center, end at bottom center
         assert grad.start().x() == 400  # width / 2
         assert grad.start().y() == 0
@@ -344,20 +362,24 @@ class TestBuildWidgetGradient:
         assert grad.finalStop().x() == 1000
         assert grad.finalStop().y() == 15
 
-    def test_stop_colors_resolved(self, sg):
+    def test_stop_colors_resolved(self, sg, theme_data):
         """Gradient stop colors resolve from theme variables."""
+        pal = theme_data["base"]["palette"]
         grad = sg.build_widget_gradient("main_window", 800, 600)
         stops = grad.stops()
-        # base_1 = #3F3A57, base_0 = #383144
-        assert_color(stops[0][1], "#3F3A57", "stop 0 = base_1")
-        assert_color(stops[1][1], "#383144", "stop 1 = base_0")
+        # 3-stop: grad_top → grad_mid → grad_bottom
+        mw_stops = theme_data["gradients"]["main_window"]["stops"]
+        assert_color(stops[0][1], pal[mw_stops[0]["color"]], "stop 0")
+        assert_color(stops[1][1], pal[mw_stops[1]["color"]], "stop 1")
+        assert_color(stops[2][1], pal[mw_stops[2]["color"]], "stop 2")
 
 
 class TestRowGradientOpacity:
     """Test row_gradient_opacity property."""
 
-    def test_reads_from_theme(self, sg):
-        assert sg.row_gradient_opacity == 242
+    def test_reads_from_theme(self, sg, theme_data):
+        expected = theme_data["base"]["delegate"]["row_gradient_opacity"]
+        assert sg.row_gradient_opacity == expected
 
     def test_default_when_missing(self):
         """Default is 255 if key absent."""
@@ -412,3 +434,133 @@ class TestChildBg:
     def test_unknown_gradient(self, sg):
         """Unknown gradient name → 'transparent'."""
         assert sg._child_bg("nonexistent", "#FF0000") == "transparent"
+
+
+# ===========================================================================
+# Consolidated Theme Loader tests
+# ===========================================================================
+
+class TestConsolidatedThemeLoader:
+    """Test _load_consolidated_theme() validation and deep-merge."""
+
+    def test_missing_section_raises(self, tmp_path):
+        """Missing required section raises ValueError."""
+        import json
+        from IgnoreScope.gui.style_engine import _load_consolidated_theme
+        bad_theme = tmp_path / "bad_v1_theme.json"
+        bad_theme.write_text(json.dumps({"base": {}, "gradients": {}}))
+        with pytest.raises(ValueError, match="missing sections"):
+            _load_consolidated_theme(bad_theme)
+
+    def test_scope_deep_merge(self, tmp_path):
+        """Scope overrides merge over local_host."""
+        import json
+        from IgnoreScope.gui.style_engine import _load_consolidated_theme
+        theme = {
+            "base": {"palette": {}, "ui": {}, "text": {}, "delegate": {}},
+            "gradients": {},
+            "local_host": {
+                "state_colors": {"a": "#111111", "b": "#222222"},
+                "fonts": {"default": {"weight": "normal"}},
+            },
+            "scope": {
+                "state_colors": {"b": "#BBBBBB", "c": "#CCCCCC"},
+                "fonts": {},
+            },
+            "config_panel": {},
+        }
+        p = tmp_path / "test_v1_theme.json"
+        p.write_text(json.dumps(theme))
+        result = _load_consolidated_theme(p)
+        resolved = result["_scope_resolved"]
+        assert resolved["state_colors"]["a"] == "#111111"  # inherited
+        assert resolved["state_colors"]["b"] == "#BBBBBB"  # overridden
+        assert resolved["state_colors"]["c"] == "#CCCCCC"  # scope-only
+        assert "default" in resolved["fonts"]  # inherited
+
+    def test_empty_scope_inherits_local_host(self, tmp_path):
+        """Empty scope section inherits all from local_host."""
+        import json
+        from IgnoreScope.gui.style_engine import _load_consolidated_theme
+        theme = {
+            "base": {"palette": {}, "ui": {}, "text": {}, "delegate": {}},
+            "gradients": {},
+            "local_host": {
+                "state_colors": {"x": "#FFFFFF"},
+                "fonts": {"default": {"weight": "bold"}},
+            },
+            "scope": {"state_colors": {}, "fonts": {}},
+            "config_panel": {},
+        }
+        p = tmp_path / "test_v1_theme.json"
+        p.write_text(json.dumps(theme))
+        result = _load_consolidated_theme(p)
+        assert result["_scope_resolved"]["state_colors"] == {"x": "#FFFFFF"}
+
+    def test_absent_scope_inherits_local_host(self, tmp_path):
+        """Theme with no scope key at all still produces _scope_resolved."""
+        import json
+        from IgnoreScope.gui.style_engine import _load_consolidated_theme
+        theme = {
+            "base": {"palette": {}, "ui": {}, "text": {}, "delegate": {}},
+            "gradients": {},
+            "local_host": {
+                "state_colors": {"y": "#AAAAAA"},
+                "fonts": {"muted": {"weight": "normal"}},
+            },
+            "config_panel": {},
+        }
+        p = tmp_path / "test_v1_theme.json"
+        p.write_text(json.dumps(theme))
+        result = _load_consolidated_theme(p)
+        assert result["_scope_resolved"]["state_colors"] == {"y": "#AAAAAA"}
+        assert result["_scope_resolved"]["fonts"] == {"muted": {"weight": "normal"}}
+
+
+class TestConsolidatedStyleGuiAPI:
+    """Test consolidated-specific StyleGui API."""
+
+    def test_palette_color_missing_key_raises(self, sg):
+        """Missing palette key raises KeyError."""
+        with pytest.raises(KeyError):
+            sg.palette_color("nonexistent_key")
+
+    def test_ui_color_missing_key_raises(self, sg):
+        """Missing UI key raises KeyError."""
+        with pytest.raises(KeyError):
+            sg.ui_color("nonexistent_key")
+
+    def test_config_panel_style(self, sg):
+        """config_panel_style() resolves var names to hex colors."""
+        result = sg.config_panel_style()
+        assert "header_bg" in result
+        assert "header_text" in result
+        assert "viewer_bg" in result
+        assert "viewer_text" in result
+        assert "border" in result
+        for v in result.values():
+            assert v.startswith("#")
+
+    def test_theme_data_has_scope_resolved(self, sg):
+        """Consolidated load produces _scope_resolved section."""
+        assert "_scope_resolved" in sg._theme_data
+        resolved = sg._theme_data["_scope_resolved"]
+        assert "state_colors" in resolved
+        assert "fonts" in resolved
+
+    def test_config_panel_bad_var_raises(self, sg):
+        """config_panel referencing nonexistent ui variable raises KeyError."""
+        # Inject a bad reference into the config_panel section
+        sg._theme_data["config_panel"]["_test_bad"] = "nonexistent_ui_key"
+        with pytest.raises(KeyError):
+            sg.config_panel_style()
+        # Clean up
+        del sg._theme_data["config_panel"]["_test_bad"]
+
+    def test_theme_data_base_sections(self, sg):
+        """_theme_data.base has all 4 subsections."""
+        base = sg._theme_data["base"]
+        assert "palette" in base
+        assert "ui" in base
+        assert "text" in base
+        assert "delegate" in base

@@ -249,7 +249,7 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         # ── Scope Configuration (right) ──
         # QSplitter: tree (75%) + ContainerRootPanel with header + JSON viewer (25%)
         self.scope_dock = _GradientDockWidget("Scope Configuration", self)
-        self.scope_dock._gradient_name = "dock_panel"
+        self.scope_dock._gradient_name = "scope_dock_panel"
         self.scope_dock.setObjectName("scopeDock")
         scope_widget = QWidget()
         scope_widget.setObjectName("scope_wrapper")

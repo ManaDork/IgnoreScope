@@ -4,7 +4,7 @@
 > All code changes must respect this flow. If reality diverges, update the code, not this chart.
 >
 > CORE flow reference: `COREFLOWCHART.md` (Phases 7-8 are shared cross-domain concepts; Phases 1-6 are domain-specific pipelines)
-> State model: 20 states (12 folder + 8 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
+> State model: 22 states (14 folder + 8 file) + 2 overrides — see `GUI_STATE_STYLES.md` Section 3
 
 ---
 
@@ -463,6 +463,7 @@ container_ops_ui.py   → Container UI (thin layer: CORE execute_create/remove �
                          Calls docker/container_lifecycle.py, no CLI imports
 config_manager.py     → Orchestrator (open/switch/save project+scope)
 app.py                → Wiring      (creates shared tree, connects signals)
-style_engine.py       → Rendering   (StyleGui: gradients, colors, theme.json)
+style_engine.py       → Rendering   (StyleGui: gradients, colors, consolidated *_theme.json)
+container_root_panel.py → Config UI (header + pattern list + JSON viewer, themed via config_panel section)
 delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
 ```
