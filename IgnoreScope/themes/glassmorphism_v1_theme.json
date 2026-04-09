@@ -26,7 +26,10 @@
             "scope_bottom": "#383058",
             "grad_top": "#4F5971",
             "grad_mid": "#353A4C",
-            "grad_bottom": "#1C1C27"
+            "grad_bottom": "#1C1C27",
+            "title_left": "#181535",
+            "title_mid": "#3030A0",
+            "title_right": "#4070C0"
         },
         "ui": {
             "window_bg": "#1C1C27",
@@ -117,6 +120,18 @@
                 { "pos": 1.0, "color": "base_0" }
             ],
             "_note": "Subtle center-bright horizontal bar"
+        },
+        "title_bar": {
+            "type": "linear",
+            "anchor": "horizontal",
+            "angle": 0,
+            "child_opacity": 0,
+            "stops": [
+                { "pos": 0.0, "color": "title_left" },
+                { "pos": 0.5, "color": "title_mid" },
+                { "pos": 1.0, "color": "title_right" }
+            ],
+            "_note": "Title bar: deep violet left → blue mid → lighter blue right"
         }
     },
     "local_host": {
