@@ -78,12 +78,10 @@ class MenuManager:
 
         self.undo_action = QAction("Undo", self._app)
         self.undo_action.setShortcut("Ctrl+Z")
-        self.undo_action.setEnabled(False)
         edit_menu.addAction(self.undo_action)
 
         self.redo_action = QAction("Redo", self._app)
         self.redo_action.setShortcut("Ctrl+Shift+Z")
-        self.redo_action.setEnabled(False)
         edit_menu.addAction(self.redo_action)
 
         edit_menu.addSeparator()

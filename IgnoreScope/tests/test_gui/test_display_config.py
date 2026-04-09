@@ -22,7 +22,6 @@ from IgnoreScope.gui.display_config import (
     derive_gradient,
     derive_file_style,
     _FILE_STYLE_INPUTS,
-    FILE_STATE_TABLE,
 )
 from IgnoreScope.gui.list_display_config import ListDisplayConfig
 

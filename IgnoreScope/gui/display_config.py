@@ -229,29 +229,6 @@ _TREE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
 # Folder states are derived via derive_gradient() — no lookup table needed.
 # The _FOLDER_STATE_INPUTS dict above defines all known states declaratively.
 
-# File: (visibility, pushed, host_orphaned) -> state
-# visibility is pure STATE: accessible, restricted, virtual, orphaned
-FILE_STATE_TABLE: dict[tuple, str] = {
-    ("restricted",     True,  False): "FILE_PUSHED",
-    ("restricted",     True,  True):  "FILE_HOST_ORPHAN",
-    ("restricted",     False, None):  "FILE_HIDDEN",
-    ("accessible",     False, None):  "FILE_VISIBLE",
-    ("accessible",     True,  None):  "FILE_VISIBLE",          # redundant push in visible area
-    ("orphaned",       None,  None):  "FILE_CONTAINER_ORPHAN",
-    ("virtual",        False, False): "FILE_CONTAINER_ONLY",
-}
-
-
-def _match_key(condition: tuple, table_key: tuple) -> bool:
-    """Check if a condition tuple matches a table key with None wildcards."""
-    for cond_val, key_val in zip(condition, table_key):
-        if key_val is None:
-            continue
-        if cond_val != key_val:
-            return False
-    return True
-
-
 def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrored") -> str:
     """Resolve a NodeState to a display state name.
 

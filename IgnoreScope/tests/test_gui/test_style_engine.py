@@ -82,33 +82,6 @@ class TestGradientClass:
         with pytest.raises(AttributeError):
             g.pos1 = "x"
 
-    @pytest.mark.skip(reason="GradientClass.with_selected not yet implemented")
-    def test_with_selected_default(self):
-        """with_selected replaces pos2/pos3, preserves pos1/pos4."""
-        base = GradientClass("masked", "masked", "hidden", "revealed")
-        sel = base.with_selected()
-        assert sel.pos1 == "masked"
-        assert sel.pos2 == "selected"
-        assert sel.pos3 == "selected"
-        assert sel.pos4 == "revealed"
-
-    @pytest.mark.skip(reason="GradientClass.with_selected not yet implemented")
-    def test_with_selected_custom_var(self):
-        """with_selected accepts a custom variable name."""
-        base = GradientClass("a", "b", "c", "d")
-        sel = base.with_selected("highlight")
-        assert sel.pos2 == "highlight"
-        assert sel.pos3 == "highlight"
-        assert sel.pos1 == "a"
-        assert sel.pos4 == "d"
-
-    @pytest.mark.skip(reason="GradientClass.with_selected not yet implemented")
-    def test_with_selected_returns_new_instance(self):
-        base = GradientClass("a", "b", "c", "d")
-        sel = base.with_selected()
-        assert base is not sel
-        assert base.pos2 == "b"  # original unchanged
-
 
 class TestFontStyleClass:
     """Verify FontStyleClass defaults and frozen behavior."""

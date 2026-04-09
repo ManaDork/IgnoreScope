@@ -321,7 +321,9 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         mm.save_config_action.triggered.connect(cm.save_config)
         mm.shut_down_action.triggered.connect(self._system_tray.quit_app)
 
-        # Edit menu — Undo/Redo deferred (actions stay disabled)
+        # Edit menu — Undo/Redo
+        mm.undo_action.triggered.connect(self.config_manager.undo)
+        mm.redo_action.triggered.connect(self.config_manager.redo)
         # Click-to-Toggle: single action controls both tree delegates
         mm.click_toggle_action.triggered.connect(
             lambda checked: (

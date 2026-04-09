@@ -409,7 +409,7 @@ GUI: "Install Claude CLI" menu action (Docker Container menu)
 |----------|-------------|--------|
 | Runtime Install (Claude) | `container_ops_ui.deploy_llm_to_container()` → `ClaudeInstaller.deploy_runtime(FULL)` | **ACTIVE** |
 | Runtime Install (Git) | `container_ops_ui.deploy_git_to_container()` → `GitInstaller.deploy_runtime(FULL)` | **ACTIVE** |
-| Image Bake | `compose.generate_dockerfile_with_llm()` → `ClaudeInstaller.get_dockerfile_snippets()` | **SHELVED** — defined but never called from production |
+| Image Bake | *(removed)* | Shelved code deleted in house-cleaning refactor |
 
 ### Extending for Other Extension Installers
 
