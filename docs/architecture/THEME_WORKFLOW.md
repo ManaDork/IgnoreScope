@@ -165,6 +165,7 @@ ui.selected                  # delegate selection overlay
 
 | What | File | How It Reads Theme |
 |------|------|--------------------|
+| Palette override | `gui/__init__.py` | `QPalette.Highlight` set to `#6366F1` (Active + Inactive) after `setStyle("Fusion")` |
 | Theme loader | `gui/style_engine.py` | `_load_consolidated_theme()` — validates, deep-merges scope |
 | QSS builder | `gui/style_engine.py` | `build_stylesheet()` — reads `base.ui`, `config_panel` |
 | Gradient resolver | `gui/style_engine.py` | `_resolve_gradient_color()` — palette → ui → hex fallback |

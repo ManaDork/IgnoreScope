@@ -430,7 +430,25 @@ IF node is selected:
 
 ---
 
-## 8. EXCEPTION Legacy Mapping
+## 8. Focus & Selection Suppression
+
+Three mechanisms work together to prevent Windows accent color bleed on tree selection:
+
+### QPalette.Highlight Override
+
+`gui/__init__.py` overrides `QPalette.Highlight` for both `Active` and `Inactive` color groups to `#6366F1` (indigo) immediately after `setStyle("Fusion")`. This prevents the Windows system accent color from leaking through any Qt widget that reads the palette highlight role.
+
+### QSS Branch Indicator Transparency
+
+`gui/style_engine.py` sets `background: transparent` on `QTreeView::branch`, `QTreeView::branch:selected`, and `QTreeView::branch:hover`. Without these rules, the expand/collapse arrow column paints the palette highlight color behind selected/hovered rows.
+
+### Focus Rect Suppression
+
+`gui/delegates.py` — `TreeStyleDelegate.paint()` unconditionally clears `QStyle.StateFlag.State_HasFocus` from the option state before any painting. This prevents Qt from drawing a dotted focus rectangle over tree items. The suppression applies to all columns (name, checkboxes, symbols).
+
+---
+
+## 9. EXCEPTION Legacy Mapping
 
 ### Why EXCEPTION Was Eliminated
 
