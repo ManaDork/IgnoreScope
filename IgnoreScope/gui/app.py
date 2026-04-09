@@ -265,9 +265,10 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         scope_splitter.setObjectName("scopeSplitter")
         scope_splitter.addWidget(self.scope_config_container)
         scope_splitter.addWidget(self.container_root_panel)
-        scope_splitter.setStretchFactor(0, 3)  # tree: 75%
-        scope_splitter.setStretchFactor(1, 1)  # panel: 25%
+        scope_splitter.setChildrenCollapsible(False)
+        self.scope_config_container.setMinimumHeight(80)
         scope_layout.addWidget(scope_splitter)
+        self._scope_splitter = scope_splitter
         self.scope_dock.setWidget(scope_widget)
 
     # ── Default Layout Sizes (pixels) ────────────────────────
