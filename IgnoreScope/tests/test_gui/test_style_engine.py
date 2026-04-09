@@ -4,7 +4,9 @@ Verifies GradientClass, FontStyleClass, StateStyleClass dataclasses
 and StyleGui singleton API (build_gradient, palette_color, etc.).
 """
 
+import json
 import pytest
+from pathlib import Path
 from PyQt6.QtGui import QColor
 
 from IgnoreScope.gui.style_engine import (
@@ -51,6 +53,14 @@ def reset_singleton():
 def sg() -> StyleGui:
     """Get a fresh StyleGui instance."""
     return StyleGui.instance()
+
+
+@pytest.fixture
+def theme_data() -> dict:
+    """Load raw theme JSON for expected-value assertions."""
+    theme_path = StyleGui._find_theme_file()
+    with open(theme_path) as f:
+        return json.load(f)
 
 
 # ===========================================================================
@@ -148,30 +158,35 @@ class TestStyleGuiAPI:
         b = StyleGui.instance()
         assert a is b
 
-    def test_palette_color(self, sg):
-        assert sg.palette_color("accent_blue") == "#6366F1"
-        assert sg.palette_color("base_0") == "#1C1C27"
+    def test_palette_color(self, sg, theme_data):
+        pal = theme_data["base"]["palette"]
+        assert sg.palette_color("accent_blue") == pal["accent_blue"]
+        assert sg.palette_color("base_0") == pal["base_0"]
 
-    def test_ui_color(self, sg):
-        assert sg.ui_color("window_bg") == "#1C1C27"
-        assert sg.ui_color("accent_primary") == "#CE42EC"
+    def test_ui_color(self, sg, theme_data):
+        ui = theme_data["base"]["ui"]
+        assert sg.ui_color("window_bg") == ui["window_bg"]
+        assert sg.ui_color("accent_primary") == ui["accent_primary"]
 
-    def test_selection_color(self, sg):
+    def test_selection_color(self, sg, theme_data):
         c = sg.selection_color()
-        assert hex_of(c) == "#6366f1"
-        assert c.alpha() == 100
+        expected = theme_data["base"]["delegate"]["selection_color"].lower()
+        assert hex_of(c) == expected
+        assert c.alpha() == theme_data["base"]["delegate"]["selection_alpha"]
 
-    def test_hover_color(self, sg):
+    def test_hover_color(self, sg, theme_data):
         c = sg.hover_color()
-        assert hex_of(c) == "#333a52"
-        assert c.alpha() == 60
+        expected = theme_data["base"]["delegate"]["hover_color"].lower()
+        assert hex_of(c) == expected
+        assert c.alpha() == theme_data["base"]["delegate"]["hover_alpha"]
 
-    def test_build_stylesheet(self, sg):
+    def test_build_stylesheet(self, sg, theme_data):
         """build_stylesheet returns a non-empty string with theme values."""
+        ui = theme_data["base"]["ui"]
         css = sg.build_stylesheet()
         assert len(css) > 100
-        assert "#1C1C27" in css  # window_bg
-        assert "#CE42EC" in css  # accent_primary
+        assert ui["window_bg"] in css
+        assert ui["accent_primary"] in css
 
 
 class TestBuildGradient:
@@ -303,15 +318,18 @@ class TestResolveGradientColor:
     def test_hex_passthrough(self, sg):
         assert sg._resolve_gradient_color("#BDA4FF") == "#BDA4FF"
 
-    def test_palette_lookup(self, sg):
-        assert sg._resolve_gradient_color("base_0") == "#1C1C27"
+    def test_palette_lookup(self, sg, theme_data):
+        pal = theme_data["base"]["palette"]
+        assert sg._resolve_gradient_color("base_0") == pal["base_0"]
 
-    def test_ui_lookup(self, sg):
-        assert sg._resolve_gradient_color("surface_bg") == "#3D2C5C"
+    def test_ui_lookup(self, sg, theme_data):
+        ui = theme_data["base"]["ui"]
+        assert sg._resolve_gradient_color("surface_bg") == ui["surface_bg"]
 
-    def test_unknown_fallback(self, sg):
+    def test_unknown_fallback(self, sg, theme_data):
+        pal = theme_data["base"]["palette"]
         result = sg._resolve_gradient_color("nonexistent_var")
-        assert result == "#1C1C27"  # falls back to base_0
+        assert result == pal["base_0"]  # falls back to base_0
 
 
 class TestBuildWidgetGradient:
@@ -344,21 +362,24 @@ class TestBuildWidgetGradient:
         assert grad.finalStop().x() == 1000
         assert grad.finalStop().y() == 15
 
-    def test_stop_colors_resolved(self, sg):
+    def test_stop_colors_resolved(self, sg, theme_data):
         """Gradient stop colors resolve from theme variables."""
+        pal = theme_data["base"]["palette"]
         grad = sg.build_widget_gradient("main_window", 800, 600)
         stops = grad.stops()
         # 3-stop: grad_top → grad_mid → grad_bottom
-        assert_color(stops[0][1], "#4F5971", "stop 0 = top blue-gray")
-        assert_color(stops[1][1], "#353A4C", "stop 1 = mid dark")
-        assert_color(stops[2][1], "#1C1C27", "stop 2 = bottom near-black")
+        mw_stops = theme_data["gradients"]["main_window"]["stops"]
+        assert_color(stops[0][1], pal[mw_stops[0]["color"]], "stop 0")
+        assert_color(stops[1][1], pal[mw_stops[1]["color"]], "stop 1")
+        assert_color(stops[2][1], pal[mw_stops[2]["color"]], "stop 2")
 
 
 class TestRowGradientOpacity:
     """Test row_gradient_opacity property."""
 
-    def test_reads_from_theme(self, sg):
-        assert sg.row_gradient_opacity == 217
+    def test_reads_from_theme(self, sg, theme_data):
+        expected = theme_data["base"]["delegate"]["row_gradient_opacity"]
+        assert sg.row_gradient_opacity == expected
 
     def test_default_when_missing(self):
         """Default is 255 if key absent."""

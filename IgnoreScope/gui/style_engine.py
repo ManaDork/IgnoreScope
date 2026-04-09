@@ -203,11 +203,11 @@ class StyleGui:
 
     @staticmethod
     def _find_theme_file() -> Path:
-        """Find *_theme.json in gui directory."""
-        gui_dir = Path(__file__).parent
-        candidates = list(gui_dir.glob("*_theme.json"))
+        """Find *_theme.json in themes directory."""
+        themes_dir = Path(__file__).resolve().parent.parent / "themes"
+        candidates = list(themes_dir.glob("*_theme.json"))
         if not candidates:
-            raise FileNotFoundError("No *_theme.json found in gui/")
+            raise FileNotFoundError("No *_theme.json found in themes/")
         return candidates[0]
 
     @classmethod
@@ -662,6 +662,7 @@ QDockWidget {{
 QDockWidget::title {{
     background-color: {surface_bg};
     color: {accent_primary};
+    font-weight: bold;
     padding: 6px;
     border: 1px solid {border};
 }}
