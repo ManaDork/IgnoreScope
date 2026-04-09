@@ -9,7 +9,7 @@ Phase 1 of Fusion Custom Title Bar feature.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QSize
 from PyQt6.QtWidgets import (
     QWidget,
     QHBoxLayout,
@@ -73,11 +73,9 @@ class GradientHeaderBar(GradientBackgroundMixin, QWidget):
         return round(BASE_HEADER_HEIGHT * scale)
 
     def sizeHint(self):
-        from PyQt6.QtCore import QSize
         return QSize(super().sizeHint().width(), self.header_height)
 
     def minimumSizeHint(self):
-        from PyQt6.QtCore import QSize
         return QSize(0, self.header_height)
 
     def resizeEvent(self, event):
@@ -137,3 +135,4 @@ class GradientHeaderBar(GradientBackgroundMixin, QWidget):
 
     def contextMenuEvent(self, event: QContextMenuEvent):
         self.contextMenuRequested.emit(event.globalPos())
+        super().contextMenuEvent(event)
