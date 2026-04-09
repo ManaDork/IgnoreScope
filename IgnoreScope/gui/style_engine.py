@@ -504,6 +504,18 @@ QTreeView::item:selected {{
     background: none;
 }}
 
+QTreeView::branch {{
+    background: transparent;
+}}
+
+QTreeView::branch:selected {{
+    background: transparent;
+}}
+
+QTreeView::branch:hover {{
+    background: transparent;
+}}
+
 /* Header sections */
 QHeaderView::section {{
     background-color: {surface_bg};

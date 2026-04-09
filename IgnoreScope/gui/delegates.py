@@ -218,9 +218,8 @@ class TreeStyleDelegate(GradientDelegate):
         if col_idx < len(self._config.columns):
             col_def = self._config.columns[col_idx]
 
-        # Suppress focus rect on symbol columns — prevents white square artifact
-        if col_def is not None and col_def.symbol_type is not None:
-            option.state &= ~QStyle.StateFlag.State_HasFocus
+        # Suppress focus rect on all columns — prevents white square artifact
+        option.state &= ~QStyle.StateFlag.State_HasFocus
 
         # Layer 1: gradient background
         if style is not None and style.gradient is not None:
