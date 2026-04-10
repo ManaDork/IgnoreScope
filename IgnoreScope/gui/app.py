@@ -194,7 +194,7 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self.file_ops_handler = FileOperationsHandler(self)
         self.container_ops = ContainerOperations(self)
 
-        self._system_tray = SystemTrayManager(self)
+        # self._system_tray = SystemTrayManager(self)  # Phase 2 pending — see .claude/TODOs/SYS_TRAY.md
         self._connect_signals()
         self._restore_layout()
 
@@ -320,18 +320,11 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         # File menu
         mm.open_project_action.triggered.connect(cm.open_project_dialog)
         mm.save_config_action.triggered.connect(cm.save_config)
-        mm.shut_down_action.triggered.connect(self._system_tray.quit_app)
+        mm.shut_down_action.triggered.connect(self.close)  # Phase 2: reconnect to self._system_tray.quit_app
 
         # Edit menu — Undo/Redo
         mm.undo_action.triggered.connect(self.config_manager.undo)
         mm.redo_action.triggered.connect(self.config_manager.redo)
-        # Click-to-Toggle: single action controls both tree delegates
-        mm.click_toggle_action.triggered.connect(
-            lambda checked: (
-                setattr(self._local_host._delegate, 'click_toggle_enabled', checked),
-                setattr(self._scope_view._delegate, 'click_toggle_enabled', checked),
-            ),
-        )
         mm.show_hidden_action.triggered.connect(
             lambda checked: setattr(self._mount_data_tree, 'show_hidden', checked)
         )
@@ -399,12 +392,12 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self._scope_view.startContainerRequested.connect(co.start_container)
         self._scope_view.stopContainerRequested.connect(co.stop_container)
 
-        # Push checkbox toggle (check→push, uncheck→remove) — both panels
+        # Push toggle (context menus → push/remove via docker cp) — both panels
         self._scope_view._model.pushToggleRequested.connect(
-            self._on_push_checkbox_toggle
+            self._on_push_toggle
         )
         self._local_host._model.pushToggleRequested.connect(
-            self._on_push_checkbox_toggle
+            self._on_push_toggle
         )
 
         # Selection sync: left panel node → right panel expand
@@ -431,10 +424,10 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
             dock.setVisible(True)
         self._arrange_default_layout()
 
-    # ── Push Checkbox Handler ────────────────────────────────
+    # ── Push Toggle Handler ──────────────────────────────────
 
-    def _on_push_checkbox_toggle(self, path: Path, checked: bool) -> None:
-        """Route Push checkbox: check→push, uncheck→remove."""
+    def _on_push_toggle(self, path: Path, checked: bool) -> None:
+        """Route push toggle from context menus: push or remove via docker cp."""
         if checked:
             self.file_ops_handler.on_push(path)
         else:
@@ -520,12 +513,8 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
     # ── Window Close ─────────────────────────────────────────
 
     def closeEvent(self, event: QCloseEvent):
-        """Minimize to tray on close; fall back to full exit if no tray."""
+        """Exit directly — systray background mode disabled pending Phase 2 (see .claude/TODOs/SYS_TRAY.md)."""
         self._save_layout()
-        if self._system_tray.is_tray_visible():
-            self.hide()
-            event.ignore()
-        else:
-            if self.host_project_root:
-                self.config_manager._cleanup_placeholder()
-            event.accept()
+        if self.host_project_root:
+            self.config_manager._cleanup_placeholder()
+        event.accept()

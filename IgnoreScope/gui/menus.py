@@ -86,11 +86,6 @@ class MenuManager:
 
         edit_menu.addSeparator()
 
-        self.click_toggle_action = QAction("Enable Click-to-Toggle", self._app)
-        self.click_toggle_action.setCheckable(True)
-        self.click_toggle_action.setChecked(False)
-        edit_menu.addAction(self.click_toggle_action)
-
         self.show_hidden_action = QAction("Display Hidden Items", self._app)
         self.show_hidden_action.setCheckable(True)
         self.show_hidden_action.setChecked(False)

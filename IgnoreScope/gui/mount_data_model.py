@@ -33,15 +33,13 @@ class MountDataTreeModel(QAbstractItemModel):
 
     Handles:
     - Column layout from TreeDisplayConfig.columns
-    - Checkbox checked state from MountDataTree raw sets (is_in_raw_set)
-    - Checkbox enabled state from tree predicates (can_check_mounted, etc.)
     - NodeStateRole for delegate access to frozen CORE NodeState
     - Lazy loading delegation to MountDataNode
     - Signal forwarding from tree.stateChanged
 
     Signals:
         stateChanged: Forwarded from tree — used for app-level handlers.
-        pushToggleRequested(object, bool): Emitted when Push checkbox toggled
+        pushToggleRequested(object, bool): Emitted by context menus for push/remove
             (requires docker cp — handled by FileOperationsHandler).
     """
 
@@ -167,16 +165,6 @@ class MountDataTreeModel(QAbstractItemModel):
                 return name
             return None
 
-        if role == Qt.ItemDataRole.CheckStateRole:
-            if not col_def.checkable:
-                return None
-            if col_def.files_only and not node.is_file:
-                return None
-            if col_def.folders_only and node.is_file:
-                return None
-            in_set = self._tree.is_in_raw_set(col_def.check_field, node.path)
-            return Qt.CheckState.Checked if in_set else Qt.CheckState.Unchecked
-
         if role == NodeStateRole:
             return self._tree.get_node_state(node.path)
 
@@ -188,84 +176,12 @@ class MountDataTreeModel(QAbstractItemModel):
 
         return None
 
-    def setData(
-        self, index: QModelIndex, value: Any,
-        role: int = Qt.ItemDataRole.EditRole,
-    ) -> bool:
-        """Handle checkbox clicks.
-
-        Mount/mask/reveal: delegates to tree.toggle_<field>().
-        Push: emits pushToggleRequested signal (requires docker cp).
-        """
-        if not index.isValid():
-            return False
-        if role != Qt.ItemDataRole.CheckStateRole:
-            return False
-
-        node: MountDataNode = index.internalPointer()
-        if node is None:
-            return False
-
-        col_idx = index.column()
-        if col_idx >= len(self._config.columns):
-            return False
-
-        col_def = self._config.columns[col_idx]
-        if not col_def.checkable:
-            return False
-
-        checked = value == Qt.CheckState.Checked
-
-        # Push column: signal controller (involves docker cp)
-        if col_def.check_field == "pushed":
-            self.pushToggleRequested.emit(node.path, checked)
-            return True
-
-        # Mount/mask/reveal: tree handles cascade + recompute
-        toggle = getattr(self._tree, f"toggle_{col_def.check_field}", None)
-        if toggle:
-            toggle(node.path, checked)
-            return True
-        # tree.stateChanged → _on_tree_changed → dataChanged (no manual emit)
-
-        return False
-
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-
-        node: MountDataNode = index.internalPointer()
-        if node is None:
+        if index.internalPointer() is None:
             return Qt.ItemFlag.NoItemFlags
-
-        col_idx = index.column()
-        col_def = self._config.columns[col_idx]
-        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-
-        if not col_def.checkable:
-            return flags
-
-        # files_only guard — folders don't get checkbox
-        if col_def.files_only and not node.is_file:
-            return flags
-        # folders_only guard — files don't get checkbox
-        if col_def.folders_only and node.is_file:
-            return flags
-
-        flags |= Qt.ItemFlag.ItemIsUserCheckable
-
-        # Enable condition check (safe getattr with None fallback)
-        if col_def.enable_condition:
-            predicate = getattr(self._tree, col_def.enable_condition, None)
-            if predicate is not None and not predicate(node.path):
-                # Allow unchecking: only disable if item is NOT currently checked
-                is_checked = self._tree.is_in_raw_set(
-                    col_def.check_field, node.path
-                )
-                if not is_checked:
-                    flags &= ~Qt.ItemFlag.ItemIsEnabled
-
-        return flags
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
     def headerData(
         self, section: int, orientation: Qt.Orientation,

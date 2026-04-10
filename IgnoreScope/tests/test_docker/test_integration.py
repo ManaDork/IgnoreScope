@@ -13,6 +13,7 @@ Test matrix:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -473,6 +474,356 @@ class TestMountRootMasking:
 
         finally:
             cmd_remove(temp_project, test_container_name, confirm=True, remove_images=True)
+
+
+# =============================================================================
+# Container security probe (mandatory pre-release)
+# =============================================================================
+
+class TestContainerProbe:
+    """Full container security probe — mandatory before release.
+
+    Builds a container via IgnoreScope framework, deploys container_probe.py,
+    executes all 8 probe sections inside the container, and asserts on
+    security-critical results.
+
+    Run with: pytest -v -m docker IgnoreScope/tests/test_docker/test_integration.py -k TestContainerProbe
+    """
+
+    # -----------------------------------------------------------------
+    # Expected volume mask check results (matrix coverage)
+    #
+    #   Pattern            | Host Content          | Expected Inside Container
+    #   -------------------|-----------------------|---------------------------
+    #   api/       (mask)  | files at depth        | empty/submount (masked)
+    #   build/     (mask)  | files deeply nested   | empty/submount (masked)
+    #   vendor/    (mask)  | files, no reveal      | empty/submount (masked)
+    #   !api/public/       | client.py             | visible (revealed)
+    #   !build/out/release | release.bin           | visible (revealed)
+    # -----------------------------------------------------------------
+    EXPECTED_MASKED = {"src/api", "src/build", "src/vendor"}
+    EXPECTED_REVEALED = {"src/api/public", "src/build/out/release"}
+
+    @pytest.fixture(scope="class")
+    def probe_project(self, tmp_path_factory) -> Path:
+        """Class-scoped temp project covering the full mask/reveal matrix.
+
+        Structure:
+            src/
+                main.py                              (visible — not masked)
+                api/                                 (MASK 1: shallow, has children)
+                    internal/
+                        secret.py
+                    public/                          (REVEAL 1: inside shallow mask)
+                        client.py
+                build/                               (MASK 2: deep nesting)
+                    artifacts/
+                        cache/
+                            build.log
+                            out/
+                                release/             (REVEAL 2: deep inside deep mask)
+                                    release.bin
+                vendor/                              (MASK 3: pure mask, no reveal)
+                    third_party/
+                        license.txt
+        """
+        project = tmp_path_factory.mktemp("probe_project")
+
+        src = project / "src"
+        src.mkdir()
+        (src / "main.py").write_text("print('hello')\n")
+
+        # --- Mask 1: api/ (shallow) with reveal at api/public/ ---
+        api = src / "api"
+        api.mkdir()
+        internal = api / "internal"
+        internal.mkdir()
+        (internal / "secret.py").write_text("API_KEY = 'xxx'\n")
+        public = api / "public"
+        public.mkdir()
+        (public / "client.py").write_text("def fetch(): pass\n")
+
+        # --- Mask 2: build/ (deep nesting) with reveal at build/out/release/ ---
+        build = src / "build"
+        build.mkdir()
+        cache = build / "artifacts" / "cache"
+        cache.mkdir(parents=True)
+        (cache / "build.log").write_text("compile output\n")
+        release = build / "out" / "release"
+        release.mkdir(parents=True)
+        (release / "release.bin").write_bytes(b"\x00" * 64)
+
+        # --- Mask 3: vendor/ (pure mask, no reveal) ---
+        vendor = src / "vendor"
+        vendor.mkdir()
+        tp = vendor / "third_party"
+        tp.mkdir()
+        (tp / "license.txt").write_text("MIT\n")
+
+        return project
+
+    @pytest.fixture(scope="class")
+    def probe_container_name(self) -> str:
+        """Class-scoped unique container name."""
+        import uuid
+        return f"isd-probe-{uuid.uuid4().hex[:8]}"
+
+    @pytest.fixture(scope="class")
+    def probe_report(self, docker_available, probe_project, probe_container_name):
+        """Build container, deploy and run probe, return parsed JSON report.
+
+        Creates an IgnoreScope container with the full mask/reveal matrix:
+          - src/ mounted
+          - src/api/ masked, src/api/public/ revealed
+          - src/build/ masked, src/build/out/release/ revealed (deep nesting)
+          - src/vendor/ masked (pure mask, no reveal)
+
+        Then copies container_probe.py in and executes it.
+        """
+        if not docker_available:
+            pytest.skip("Docker not available")
+
+        from IgnoreScope.core.config import ScopeDockerConfig
+        from IgnoreScope.cli.commands import cmd_create, cmd_remove
+        from IgnoreScope.docker.names import build_docker_name
+
+        # Full matrix: 3 masks, 2 reveals covering shallow, deep, and pure-mask
+        probe_specs = [MountSpecPath(
+            mount_root=probe_project / "src",
+            patterns=[
+                "api/",                   # Mask 1: shallow
+                "!api/public/",           # Reveal 1: inside shallow mask
+                "build/",                 # Mask 2: deep nesting
+                "!build/out/release/",    # Reveal 2: deep inside deep mask
+                "vendor/",                # Mask 3: pure mask, no reveal
+            ],
+        )]
+
+        config = ScopeDockerConfig(
+            mount_specs=probe_specs,
+            scope_name=probe_container_name,
+            host_project_root=probe_project,
+        )
+
+        # Docker container name is {project}__{scope}, not scope_name alone
+        docker_name = build_docker_name(probe_project, probe_container_name)
+        # Container workdir = container_root/project_name (mirrors generate_dockerfile)
+        container_workdir = f"{config.container_root}/{probe_project.name}"
+
+        try:
+            # Phase 1: Create container
+            success, msg = cmd_create(probe_project, config)
+            assert success, f"Container create failed: {msg}"
+
+            # Phase 2: Start container
+            start = subprocess.run(
+                ['docker', 'start', docker_name],
+                capture_output=True, text=True,
+            )
+            assert start.returncode == 0, f"Container start failed: {start.stderr}"
+
+            # Phase 3: Deploy scope config into container for volume mask probe
+            scope_dir = probe_project / ".ignore_scope"
+            if scope_dir.exists():
+                subprocess.run(
+                    ['docker', 'cp',
+                     str(scope_dir),
+                     f'{docker_name}:{container_workdir}/.ignore_scope'],
+                    capture_output=True, text=True, check=True,
+                )
+
+            # Phase 4: Deploy probe script
+            probe_script = str(
+                Path(__file__).resolve().parents[3] / "scripts" / "container_probe.py"
+            )
+            cp = subprocess.run(
+                ['docker', 'cp', probe_script,
+                 f'{docker_name}:/tmp/container_probe.py'],
+                capture_output=True, text=True,
+            )
+            assert cp.returncode == 0, f"docker cp probe failed: {cp.stderr}"
+
+            # Phase 5: Execute probe inside container (cwd = workdir for volume mask discovery)
+            exec_result = subprocess.run(
+                ['docker', 'exec', '-w', container_workdir,
+                 docker_name,
+                 'python3', '/tmp/container_probe.py'],
+                capture_output=True, text=True, timeout=60,
+            )
+
+            # Phase 6: Parse JSON report from stdout
+            stdout = exec_result.stdout
+            marker = "=== Report ==="
+            idx = stdout.find(marker)
+            assert idx != -1, (
+                f"Probe output missing report marker.\n"
+                f"stdout: {stdout[:500]}\nstderr: {exec_result.stderr[:500]}"
+            )
+
+            json_str = stdout[idx + len(marker):]
+            decoder = json.JSONDecoder()
+            report, _ = decoder.raw_decode(json_str.strip())
+
+            yield report
+
+        finally:
+            cmd_remove(
+                probe_project, probe_container_name,
+                confirm=True, remove_images=True,
+            )
+
+    # -----------------------------------------------------------------
+    # Security assertions — each probe section gets its own test
+    # -----------------------------------------------------------------
+
+    def test_confirms_container_identity(self, probe_report):
+        """Probe must confirm it is running inside a container."""
+        identity = probe_report["identity"]
+        assert identity["is_container"] is True, "Probe did not detect container environment"
+
+    def test_mount_escape_vectors_blocked(self, probe_report):
+        """All mount escape vectors must be blocked or errored."""
+        escape = probe_report["mount_escape"]
+
+        # mount(2) syscall — must be denied
+        if "mount_syscall" in escape:
+            assert escape["mount_syscall"].get("blocked", True), \
+                "mount(2) syscall should be blocked"
+
+        # unshare mount namespace — must be denied
+        if "unshare_mount_ns" in escape:
+            assert escape["unshare_mount_ns"].get("blocked", True), \
+                "unshare -m should be blocked"
+
+        # hardlink across device boundary — must fail
+        if "hardlink_escape" in escape:
+            assert escape["hardlink_escape"].get("blocked", True), \
+                "Cross-device hardlink should be blocked"
+
+    def test_docker_socket_not_accessible(self, probe_report):
+        """Docker socket must not be connectable from inside the container."""
+        escape = probe_report["mount_escape"]
+        docker_sock = escape.get("docker_socket", {})
+        # Socket either doesn't exist or isn't connectable
+        if docker_sock.get("exists"):
+            assert docker_sock.get("connectable") is not True, \
+                "Docker socket is accessible — container breakout risk"
+
+    def test_critical_capabilities_denied(self, probe_report):
+        """Security-critical Linux capabilities must NOT be granted."""
+        caps = probe_report["capabilities"]
+        granted_names = {e["capability"] for e in caps.get("granted", [])}
+
+        must_deny = [
+            "CAP_SYS_ADMIN",    # mount/namespace escape
+            "CAP_SYS_PTRACE",   # process attach
+            "CAP_SYS_MODULE",   # kernel module loading
+            "CAP_SYS_RAWIO",    # raw I/O port access
+        ]
+        for cap in must_deny:
+            assert cap not in granted_names, f"{cap} must be denied"
+
+    def test_proc_masks_enforced(self, probe_report):
+        """Docker default /proc masks must be in place."""
+        proc = probe_report["proc_masks"]
+        masked = proc.get("masked", {})
+
+        valid_mechanisms = {"char_device_null", "empty_tmpfs", "permission_denied"}
+        for path, info in masked.items():
+            if info.get("exists"):
+                mechanism = info.get("mechanism", "")
+                assert mechanism in valid_mechanisms, \
+                    f"{path} not properly masked (mechanism={mechanism})"
+
+    # -----------------------------------------------------------------
+    # Volume mask matrix — individual condition tests
+    # -----------------------------------------------------------------
+
+    def _get_volume_checks(self, probe_report) -> dict[str, dict]:
+        """Helper: extract volume mask checks keyed by path."""
+        masks = probe_report["volume_masks"]
+        if "error" in masks:
+            pytest.fail(f"Volume mask probe error: {masks['error']}")
+        return {c["path"]: c for c in masks["checks"]}
+
+    def test_volume_mask_matrix_coverage(self, probe_report):
+        """Probe must check every expected masked and revealed path."""
+        checks = self._get_volume_checks(probe_report)
+        checked_paths = set(checks.keys())
+
+        for path in self.EXPECTED_MASKED:
+            assert path in checked_paths, f"Missing masked check for '{path}'"
+        for path in self.EXPECTED_REVEALED:
+            assert path in checked_paths, f"Missing revealed check for '{path}'"
+
+        expected_total = len(self.EXPECTED_MASKED) + len(self.EXPECTED_REVEALED)
+        assert len(checks) == expected_total, (
+            f"Expected {expected_total} checks, got {len(checks)}: {list(checks.keys())}"
+        )
+
+    def test_masked_shallow_hidden(self, probe_report):
+        """Mask 1: api/ (shallow) — content must be hidden by volume overlay."""
+        checks = self._get_volume_checks(probe_report)
+        check = checks["src/api"]
+        assert check["expected"] == "masked"
+        assert check["pass"] is True, (
+            f"api/ mask leak: actual={check['actual']}, "
+            f"file_count={check.get('file_count', 'N/A')}"
+        )
+
+    def test_masked_deep_hidden(self, probe_report):
+        """Mask 2: build/ (deep nesting) — deeply nested content must be hidden."""
+        checks = self._get_volume_checks(probe_report)
+        check = checks["src/build"]
+        assert check["expected"] == "masked"
+        assert check["pass"] is True, (
+            f"build/ mask leak: actual={check['actual']}, "
+            f"file_count={check.get('file_count', 'N/A')}"
+        )
+
+    def test_masked_pure_no_reveal(self, probe_report):
+        """Mask 3: vendor/ (pure mask, no reveal) — must be fully hidden."""
+        checks = self._get_volume_checks(probe_report)
+        check = checks["src/vendor"]
+        assert check["expected"] == "masked"
+        assert check["pass"] is True, (
+            f"vendor/ mask leak: actual={check['actual']}, "
+            f"file_count={check.get('file_count', 'N/A')}"
+        )
+
+    def test_revealed_shallow_visible(self, probe_report):
+        """Reveal 1: api/public/ — punch-through must expose content."""
+        checks = self._get_volume_checks(probe_report)
+        check = checks["src/api/public"]
+        assert check["expected"] == "revealed"
+        assert check["pass"] is True, f"api/public/ not visible: actual={check['actual']}"
+        assert check.get("entry_count", 0) > 0, "Revealed path has no entries"
+
+    def test_revealed_deep_visible(self, probe_report):
+        """Reveal 2: build/out/release/ — deep punch-through must expose content."""
+        checks = self._get_volume_checks(probe_report)
+        check = checks["src/build/out/release"]
+        assert check["expected"] == "revealed"
+        assert check["pass"] is True, (
+            f"build/out/release/ not visible: actual={check['actual']}"
+        )
+        assert check.get("entry_count", 0) > 0, "Revealed path has no entries"
+
+    def test_volume_masks_summary(self, probe_report):
+        """Overall summary: all checks must pass (no leaks)."""
+        masks = probe_report["volume_masks"]
+        if "error" in masks:
+            pytest.fail(f"Volume mask probe error: {masks['error']}")
+
+        summary = masks["summary"]
+        expected_total = len(self.EXPECTED_MASKED) + len(self.EXPECTED_REVEALED)
+        assert summary["total"] == expected_total, (
+            f"Expected {expected_total} checks, got {summary['total']}"
+        )
+        assert summary["all_enforced"], (
+            f"Volume mask leaks: {summary['failed']}/{summary['total']} failed — "
+            f"checks: {masks['checks']}"
+        )
 
 
 # =============================================================================
