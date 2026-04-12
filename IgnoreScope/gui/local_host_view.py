@@ -31,10 +31,6 @@ from .display_config import LocalHostDisplayConfig
 from .view_helpers import configure_tree_view, apply_header_config
 
 
-# Column indices matching LocalHostDisplayConfig.columns order
-_COL_PUSH = 4
-
-
 class LocalHostView(QWidget):
     """Left panel: folder configuration with Mount/Mask/Reveal columns.
 
