@@ -702,6 +702,22 @@ Key fields: `header`, `width`, `check_field`, `files_only`, `folders_only`, `sym
 
 ---
 
+### Project Root Header
+
+The `QHeaderView` band atop the `localHostTree` QTreeView in `LocalHostView`. Provides its own RMB context menu (`_show_header_context_menu`) distinct from the node-level RMB. Targets `host_project_root` only — the folder configured as the project root.
+
+**Mount/Unmount conditions:**
+- `is_in_raw_set("mounted", root)` — True → show "Unmount root"
+- `can_mount(root)` — True (no overlap with existing specs) → show "Mount root"
+- Neither condition met → menu is empty, not shown
+
+**Contrast with tree node RMB:** Node RMB checks both `is_in_raw_set` and `can_mount` per selected node; header RMB targets only the project root.
+
+**Domains:** Presentation (LocalHostView header interaction)  
+**See:** `local_host_view.py → _show_header_context_menu`, `GUI_LAYOUT_SPECS.md § Module Ownership Map`
+
+---
+
 ## Historical Note
 
 Prior to v2.0, the codebase used "shadow/light" terminology. Unified to "masked/revealed." All production APIs use unified terms. Documentation cleanup complete (CC-6).

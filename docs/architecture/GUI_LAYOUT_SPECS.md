@@ -312,7 +312,12 @@ See `GUI_STATE_STYLES.md` Section 8 for full legacy correspondence table.
 > Wraps MountDataTree + TreeDisplayConfig as a QAbstractItemModel for QTreeView. Translates Qt model API (index, data, flags, setData) to tree operations. Does NOT own state, compute visibility, or render — it's a pass-through adapter.
 
 **`local_host_view.py`** — Left Panel (Folder Configuration)
-> Sets up the QTreeView inside the Folder Configuration dock: assigns MountDataTreeModel + StyleDelegate(LocalHostDisplayConfig), configures header columns, and provides RMB context menu. Does NOT own the data model, manage state, or load configs.
+> Sets up the QTreeView inside the Folder Configuration dock: assigns MountDataTreeModel + StyleDelegate(LocalHostDisplayConfig), configures header columns, and provides two RMB surfaces:
+>
+> - **Project Root Header RMB** (`_show_header_context_menu`) — targets `host_project_root` only. Offers Mount/Unmount using `is_in_raw_set` + `can_mount` guard. Does not appear if no valid action is possible.
+> - **Tree Node RMB** (`_show_context_menu`) — targets selected node(s). Mount visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs).
+>
+> Does NOT own the data model, manage state, or load configs.
 
 **`scope_view.py`** — Right Panel (Scope Configuration)
 > Sets up the QTreeView inside the Scope Configuration dock: assigns MountDataTreeModel + StyleDelegate(ScopeDisplayConfig), configures header columns, and provides file operations RMB menu. Does NOT own the data model, execute push/pull commands, or manage state.

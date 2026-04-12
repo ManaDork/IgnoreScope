@@ -135,13 +135,14 @@ class LocalHostView(QWidget):
 
         menu = QMenu(self)
         is_mounted = self._tree.is_in_raw_set("mounted", root)
-        label = f"Unmount {root.name}" if is_mounted else f"Mount {root.name}"
-        mount_action = QAction(label, menu)
-        mount_action.triggered.connect(
-            lambda: self._tree.toggle_mounted(root, not is_mounted),
-        )
-        menu.addAction(mount_action)
-        menu.exec(self._tree_view.header().mapToGlobal(pos))
+        if is_mounted:
+            a = menu.addAction(f"Unmount {root.name}")
+            a.triggered.connect(lambda: self._tree.toggle_mounted(root, False))
+        elif self._tree.can_mount(root):
+            a = menu.addAction(f"Mount {root.name}")
+            a.triggered.connect(lambda: self._tree.toggle_mounted(root, True))
+        if menu.actions():
+            menu.exec(self._tree_view.header().mapToGlobal(pos))
 
     # ── Context Menu ──────────────────────────────────────────────
 
@@ -199,7 +200,7 @@ class LocalHostView(QWidget):
             if is_mounted:
                 a = menu.addAction(f"Unmount {path.name}")
                 a.triggered.connect(lambda: self._tree.toggle_mounted(path, False))
-            elif self._tree.can_check_mounted(path):
+            elif self._tree.can_mount(path):
                 a = menu.addAction(f"Mount {path.name}")
                 a.triggered.connect(lambda: self._tree.toggle_mounted(path, True))
 
