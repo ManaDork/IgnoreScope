@@ -20,7 +20,7 @@ IgnoreScope is a Docker container management tool that uses volume layering to s
 
 ### GUI
 - **Config panel collapse/expand** — min/max pin pattern for reliable dock sizing
-- **Dead code removal** — Undo/Redo menu enabled, unused extensions and compose module removed
+- **Dead code removal** — unused extensions and compose module removed (Undo/Redo disabled pending Phase 5)
 - **Focus suppression** — unconditional focus rect clearing + QPalette.Highlight override
 
 ### Infrastructure
