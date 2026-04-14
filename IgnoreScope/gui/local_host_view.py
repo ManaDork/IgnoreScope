@@ -223,10 +223,13 @@ class LocalHostView(QWidget):
                     a = menu.addAction(f"Mask {path.name}")
                     a.triggered.connect(lambda: self._tree.add_mask(path))
 
-                # Reveal: shown only when reveal pattern exists (no creation of new reveals yet)
+                # Reveal: allowed when masked (by self or ancestor) and no reveal pattern yet
                 if has_reveal_pattern:
                     a = menu.addAction(f"Unreveal {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_reveal(path))
+                elif state.masked and rel:
+                    a = menu.addAction(f"Reveal {path.name}")
+                    a.triggered.connect(lambda: self._tree.add_reveal(path))
 
             menu.addSeparator()
 
