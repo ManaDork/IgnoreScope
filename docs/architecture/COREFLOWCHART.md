@@ -390,8 +390,8 @@ The production pipeline for installing the Claude Code CLI into a running contai
 The CLI connects to Anthropic's cloud API — no local model is installed.
 
 ```
-GUI: "Install Claude CLI" menu action (Docker Container menu)
-  └─ container_ops_ui.py :: deploy_llm_to_container()
+GUI: "Install Claude CLI" menu action (Extensions > Claude menu)
+  └─ container_ops.py :: deploy_llm_to_container()
        └─ DeployWorker(QThread)
             └─ ClaudeInstaller.deploy_runtime(method=FULL)
                  ├─ exec_in_container: apt-get install curl ca-certificates
