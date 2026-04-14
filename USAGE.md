@@ -10,14 +10,15 @@ For installation and prerequisites, see [README.md](README.md).
 
 ```
  _____________________________________________________________________________
-| File  Edit  + New Scope  Container  Launch  View                            |
+| File  Edit  + New Scope  Container  Extensions  View                       |
 |_____________________________________________________________________________|
 |  A  MENU BAR                                                                |
 |                                                                             |
-|  File: Open Location, Export     Launch: Terminal, Claude CLI              |
-|  Edit: Add Sibling, Container Root Name                                    |
+|  File: Open Location, Export                                               |
+|  Edit: Add Sibling, Container Root Name, Terminal Preference               |
 |  + New Scope: Quick scope creation                                         |
-|  Container: Create, Update, Recreate, Install Extensions, Remove           |
+|  Container: Create, Update, Recreate, Launch Container in Terminal, Remove |
+|  Extensions: Claude (Install, Launch, Clipboard), Git (Install)            |
 |  View: Panels, Themes, Options                                             |
 |____________________________________._______________________________________ |
 |                                    |                                        |
@@ -180,7 +181,7 @@ ignorescope-docker create --project E:\MyProject
 Install the Claude Code CLI inside the running container.
 
 **GUI:**
-- `Container > Install Claude CLI`
+- `Extensions > Claude > Install Claude CLI`
 - Confirm the installation
 - Wait for download and installation (installs via `curl`, requires internet)
 
@@ -197,7 +198,7 @@ docker exec -it <container_name> bash -c "curl -fsSL https://claude.ai/install.s
 Install Git inside the running container.
 
 **GUI:**
-- `Container > Install Git`
+- `Extensions > Git > Install Git`
 - Confirm the installation
 
 **CLI:**
@@ -228,11 +229,11 @@ ignorescope-docker install-git --container dev
 Launch an interactive shell inside the container.
 
 **GUI:**
-- `Launch > Launch Container in Terminal` — opens a terminal window with `docker exec`
-- `Launch > Launch Claude CLI` — opens Claude Code inside the container
-- `Launch > Copy Claude CLI Command` — copies the launch command to clipboard
+- `Container > Launch Container in Terminal` — opens a terminal window with `docker exec`
+- `Extensions > Claude > Launch Claude CLI` — opens Claude Code inside the container
+- `Extensions > Claude > Clipboard: Launch Claude CLI` — copies the launch command to clipboard
 
-**Terminal preference:** `View > Terminal:` submenu lets you choose CMD, PowerShell, or pwsh.
+**Terminal preference:** `Edit > Terminal:` submenu lets you choose CMD, PowerShell, or pwsh.
 
 ---
 

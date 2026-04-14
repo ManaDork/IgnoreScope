@@ -1,6 +1,6 @@
 """MenuBar Structure.
 
-Builds the QMenuBar with File, Edit, Scopes, Container, Launch, and View
+Builds the QMenuBar with File, Edit, Scopes, Container, Extensions, and View
 menus. Creates QActions with keyboard shortcuts and the View menu's dock
 toggleViewActions. Provides dynamic state methods for scope list, container
 menu states, and recent projects.
@@ -118,6 +118,47 @@ class MenuManager:
         self.rename_container_root_action.setToolTip("No project loaded")
         edit_menu.addAction(self.rename_container_root_action)
 
+        edit_menu.addSeparator()
+
+        # ── Terminal Preference Submenu (in Edit) ─────────────
+        TERMINALS = [
+            ("cmd",        "CMD",                "cmd.exe"),
+            ("powershell", "PowerShell",         "powershell.exe"),
+            ("pwsh",       "pwsh (PowerShell 7)", "pwsh.exe"),
+        ]
+
+        saved_pref = self._settings.value("terminal_preference", "cmd")
+        # Detect available terminals
+        available = []
+        for key, label, exe in TERMINALS:
+            # cmd and powershell are always present on Windows
+            if key in ("cmd", "powershell") or shutil.which(exe):
+                available.append((key, label))
+
+        # Validate saved preference against available terminals
+        available_keys = [k for k, _ in available]
+        if saved_pref not in available_keys:
+            saved_pref = "cmd"
+            self._settings.setValue("terminal_preference", saved_pref)
+
+        saved_label = next(l for k, l in available if k == saved_pref)
+        self.terminal_menu = QMenu(f"Terminal: {saved_label}", self._app)
+        edit_menu.addMenu(self.terminal_menu)
+
+        self._terminal_action_group = QActionGroup(self._app)
+        self._terminal_action_group.setExclusive(True)
+
+        for key, label in available:
+            action = QAction(label, self._app)
+            action.setCheckable(True)
+            action.setData(key)
+            if key == saved_pref:
+                action.setChecked(True)
+            self._terminal_action_group.addAction(action)
+            self.terminal_menu.addAction(action)
+
+        self._terminal_action_group.triggered.connect(self._on_terminal_changed)
+
         # ── Scopes ────────────────────────────────────────────
 
         self.scopes_menu = menu_bar.addMenu("+ New Scope")
@@ -172,74 +213,45 @@ class MenuManager:
 
         docker_menu.addSeparator()
 
-        self.deploy_llm_action = QAction("Install Claude CLI", self._app)
-        self.deploy_llm_action.setEnabled(False)
-        self.deploy_llm_action.setToolTip("No running container")
-        docker_menu.addAction(self.deploy_llm_action)
-
-        self.deploy_git_action = QAction("Install Git", self._app)
-        self.deploy_git_action.setEnabled(False)
-        self.deploy_git_action.setToolTip("No running container")
-        docker_menu.addAction(self.deploy_git_action)
-
-        # ── Launch ────────────────────────────────────────────
-
-        launch_menu = menu_bar.addMenu("Launch")
-        launch_menu.setToolTipsVisible(True)
-
         self.launch_terminal_action = QAction("Launch Container in Terminal", self._app)
         self.launch_terminal_action.setEnabled(False)
         self.launch_terminal_action.setToolTip("No running container")
-        launch_menu.addAction(self.launch_terminal_action)
+        docker_menu.addAction(self.launch_terminal_action)
+
+        # ── Extensions ────────────────────────────────────────
+
+        self.extensions_menu = menu_bar.addMenu("Extensions")
+        self.extensions_menu.setToolTipsVisible(True)
+
+        # Claude subsection
+        claude_menu = QMenu("Claude", self._app)
+
+        self.deploy_llm_action = QAction("Install Claude CLI", self._app)
+        self.deploy_llm_action.setEnabled(False)
+        self.deploy_llm_action.setToolTip("No running container")
+        claude_menu.addAction(self.deploy_llm_action)
 
         self.launch_llm_action = QAction("Launch Claude CLI", self._app)
         self.launch_llm_action.setEnabled(False)
         self.launch_llm_action.setToolTip("No running container")
-        launch_menu.addAction(self.launch_llm_action)
+        claude_menu.addAction(self.launch_llm_action)
 
         self.copy_llm_command_action = QAction("Clipboard: Launch Claude CLI", self._app)
         self.copy_llm_command_action.setEnabled(False)
         self.copy_llm_command_action.setToolTip("No running container")
-        launch_menu.addAction(self.copy_llm_command_action)
+        claude_menu.addAction(self.copy_llm_command_action)
 
-        # ── Terminal Preference Submenu ───────────────────────
-        TERMINALS = [
-            ("cmd",        "CMD",                "cmd.exe"),
-            ("powershell", "PowerShell",         "powershell.exe"),
-            ("pwsh",       "pwsh (PowerShell 7)", "pwsh.exe"),
-        ]
+        self.extensions_menu.addMenu(claude_menu)
 
-        saved_pref = self._settings.value("terminal_preference", "cmd")
-        # Detect available terminals
-        available = []
-        for key, label, exe in TERMINALS:
-            # cmd and powershell are always present on Windows
-            if key in ("cmd", "powershell") or shutil.which(exe):
-                available.append((key, label))
+        # Git subsection
+        git_menu = QMenu("Git", self._app)
 
-        # Validate saved preference against available terminals
-        available_keys = [k for k, _ in available]
-        if saved_pref not in available_keys:
-            saved_pref = "cmd"
-            self._settings.setValue("terminal_preference", saved_pref)
+        self.deploy_git_action = QAction("Install Git", self._app)
+        self.deploy_git_action.setEnabled(False)
+        self.deploy_git_action.setToolTip("No running container")
+        git_menu.addAction(self.deploy_git_action)
 
-        saved_label = next(l for k, l in available if k == saved_pref)
-        self.terminal_menu = QMenu(f"Terminal: {saved_label}", self._app)
-        launch_menu.addMenu(self.terminal_menu)
-
-        self._terminal_action_group = QActionGroup(self._app)
-        self._terminal_action_group.setExclusive(True)
-
-        for key, label in available:
-            action = QAction(label, self._app)
-            action.setCheckable(True)
-            action.setData(key)
-            if key == saved_pref:
-                action.setChecked(True)
-            self._terminal_action_group.addAction(action)
-            self.terminal_menu.addAction(action)
-
-        self._terminal_action_group.triggered.connect(self._on_terminal_changed)
+        self.extensions_menu.addMenu(git_menu)
 
         # ── View ──────────────────────────────────────────────
 
