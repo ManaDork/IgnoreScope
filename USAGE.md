@@ -10,13 +10,15 @@ For installation and prerequisites, see [README.md](README.md).
 
 ```
  _____________________________________________________________________________
-| File  Edit  Scopes v  Docker Container  Container Extensions  View  Tools   |
+| File  Edit  + New Scope  Container  Launch  View                            |
 |_____________________________________________________________________________|
 |  A  MENU BAR                                                                |
 |                                                                             |
-|  File: Open Project, Save       Docker Container: Create, Update, Recreate  |
-|  Scopes: New, Switch, Remove    Container Extensions: Claude CLI, Git       |
-|  Edit: Undo, Redo               Tools: Terminal, Claude CLI, Export         |
+|  File: Open Location, Export     Launch: Terminal, Claude CLI              |
+|  Edit: Add Sibling, Container Root Name                                    |
+|  + New Scope: Quick scope creation                                         |
+|  Container: Create, Update, Recreate, Install Extensions, Remove           |
+|  View: Panels, Themes, Options                                             |
 |____________________________________._______________________________________ |
 |                                    |                                        |
 |  B  LOCAL HOST CONFIGURATION       |  C  SCOPE CONFIGURATION                |
@@ -80,7 +82,7 @@ For installation and prerequisites, see [README.md](README.md).
 A project is any directory on your host machine that you want to manage with IgnoreScope.
 
 **GUI:**
-- `File > Open Location of Project` (`Ctrl+O`)
+- `File > Open Project Location` (`Ctrl+O`)
 - Select the root folder of your project
 - The project appears in the Local Host Configuration panel (left)
 
@@ -101,9 +103,9 @@ ignorescope-docker create --project E:\MyProject
 A scope is a named container configuration. One project can have multiple scopes (e.g., `dev`, `prod`, `test`).
 
 **GUI:**
-- Click `+ New Scope` in the menu bar
+- Click the `+ New Scope` menu button in the menu bar
 - Enter a name (e.g., `dev`)
-- The scope appears in the menu bar dropdown
+- The scope is created and becomes active immediately
 
 **CLI:**
 ```bash
@@ -120,8 +122,9 @@ ignorescope-docker create --project E:\MyProject
 Mounting makes a host directory visible inside the container via a bind mount.
 
 **GUI:**
-- In the Local Host Configuration tree (left panel), check the **Mount** checkbox next to a folder
-- To mount the project root, check the top-level folder
+- In the Local Host Configuration tree (left panel), right-click a folder
+- Select **Mount** (shows only when folder is not yet mounted)
+- To mount the project root, RMB on the top-level folder and select **Mount**
 
 **What happens:** The host directory is bind-mounted at the corresponding path inside the container (e.g., `E:\MyProject\src` maps to `/{container_root}/MyProject/src`).
 
@@ -132,7 +135,8 @@ Mounting makes a host directory visible inside the container via a bind mount.
 Masking hides a mounted directory from the container using an empty named Docker volume overlay.
 
 **GUI:**
-- Check the **Mask** checkbox next to a mounted folder
+- Right-click a mounted folder in the Local Host Configuration tree
+- Select **Mask** (shows only for mounted folders without existing masks)
 - The folder and its contents become hidden inside the container
 - The mask volume starts empty — original content is invisible
 
@@ -147,7 +151,8 @@ Masking hides a mounted directory from the container using an empty named Docker
 Revealing creates a bind mount that re-exposes a specific subdirectory within a masked area.
 
 **GUI:**
-- Check the **Reveal** checkbox on a folder inside a masked directory
+- Right-click a folder inside a masked directory in the Local Host Configuration tree
+- Select **Reveal** (shows only for masked folders without existing reveals)
 - That folder's host content becomes visible again in the container
 
 **Use case:** Mask `src/vendor/`, then reveal `src/vendor/my-fork/` to expose only your custom fork while hiding third-party packages.
@@ -159,7 +164,7 @@ Revealing creates a bind mount that re-exposes a specific subdirectory within a 
 Once your mount/mask/reveal configuration is set, create the Docker container.
 
 **GUI:**
-- `Docker Container > Create Container`
+- `Container > Create Container`
 - Wait for the build to complete (first build may take a minute)
 - Status bar and Scope Configuration panel update to show the running container
 
@@ -175,7 +180,7 @@ ignorescope-docker create --project E:\MyProject
 Install the Claude Code CLI inside the running container.
 
 **GUI:**
-- `Container Extensions > Install Claude CLI`
+- `Container > Install Claude CLI`
 - Confirm the installation
 - Wait for download and installation (installs via `curl`, requires internet)
 
@@ -192,7 +197,7 @@ docker exec -it <container_name> bash -c "curl -fsSL https://claude.ai/install.s
 Install Git inside the running container.
 
 **GUI:**
-- `Container Extensions > Install Git`
+- `Container > Install Git`
 - Confirm the installation
 
 **CLI:**
@@ -211,8 +216,8 @@ ignorescope-docker install-git --container dev
 **Recreate** destroys everything (container + volumes) and rebuilds from scratch. All runtime installs and mask volume data are lost.
 
 **GUI:**
-- `Docker Container > Update Container` — safe, retains data
-- `Docker Container > Recreate Container` — destructive, confirms before proceeding
+- `Container > Update Container` — safe, retains data
+- `Container > Recreate Container` — destructive, confirms before proceeding
 
 **Note:** After a recreate, you will need to re-install extensions (Claude CLI, Git).
 
@@ -223,11 +228,11 @@ ignorescope-docker install-git --container dev
 Launch an interactive shell inside the container.
 
 **GUI:**
-- `Tools > Launch Container in Terminal` — opens a terminal window with `docker exec`
-- `Tools > Launch Claude CLI` — opens Claude Code inside the container
-- `Tools > Clipboard: Launch Claude CLI` — copies the launch command to clipboard
+- `Launch > Launch Container in Terminal` — opens a terminal window with `docker exec`
+- `Launch > Launch Claude CLI` — opens Claude Code inside the container
+- `Launch > Copy Claude CLI Command` — copies the launch command to clipboard
 
-**Terminal preference:** `Tools > Terminal:` submenu lets you choose CMD, PowerShell, or pwsh.
+**Terminal preference:** `View > Terminal:` submenu lets you choose CMD, PowerShell, or pwsh.
 
 ---
 
@@ -236,7 +241,8 @@ Launch an interactive shell inside the container.
 Push transfers tracked files from the host into the container via `docker cp`. Pushed files can be modified during transfer via filters.
 
 **GUI:**
-- In the Local Host Configuration tree, check the **Pushed** checkbox (circle icon) next to a file
+- In the Local Host Configuration tree, right-click a file
+- Select **Push to Container** (shows only when file is not yet pushed)
 - The file is immediately pushed to the container
 - Pushed files are tracked in the configuration for repeat push/pull operations
 
@@ -286,7 +292,7 @@ ignorescope-docker pull --container dev config.ini
 Remove the Docker container and its volumes. Configuration files on disk are preserved.
 
 **GUI:**
-- `Docker Container > Remove Container`
+- `Container > Remove Container`
 - Confirm when prompted
 
 **CLI:**
@@ -302,7 +308,8 @@ ignorescope-docker remove --container dev --yes  # skip confirmation
 Remove the scope's configuration files from disk. The Docker container must be removed first.
 
 **GUI:**
-- `Scopes > Remove Scope Config`
+- Right-click the scope name in the scope menu or status bar
+- Select **Remove Scope Config**
 - Only available when the Docker container has been removed
 
 **Note:** This deletes `.ignore_scope/{scope_name}/` and its configuration JSON.
