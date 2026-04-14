@@ -213,9 +213,9 @@ class LocalHostView(QWidget):
                 has_mask_pattern = rel and f"{rel}/" in ms.patterns
                 has_reveal_pattern = rel and f"!{rel}/" in ms.patterns
 
-                # Mask: allowed when mounted AND not masked.
-                # (masked and revealed are mutually exclusive per NodeState invariant)
-                can_mask = state.mounted and not state.masked
+                # Mask: allowed when mounted AND not already masked or revealed
+                # masked and revealed are now mutually exclusive (invariant enforced in NodeState)
+                can_mask = state.mounted and not state.masked and not state.revealed
                 if has_mask_pattern:
                     a = menu.addAction(f"Unmask {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_mask(path))
@@ -223,14 +223,10 @@ class LocalHostView(QWidget):
                     a = menu.addAction(f"Mask {path.name}")
                     a.triggered.connect(lambda: self._tree.add_mask(path))
 
-                # Reveal: allowed when masked (by self or ancestor).
-                # If masked=True, revealed=False is guaranteed by invariant.
+                # Reveal: shown only when reveal pattern exists (no creation of new reveals yet)
                 if has_reveal_pattern:
                     a = menu.addAction(f"Unreveal {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_reveal(path))
-                elif state.masked and rel:
-                    a = menu.addAction(f"Reveal {path.name}")
-                    a.triggered.connect(lambda: self._tree.add_reveal(path))
 
             menu.addSeparator()
 

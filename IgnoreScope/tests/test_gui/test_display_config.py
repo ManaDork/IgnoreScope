@@ -100,7 +100,7 @@ class TestFolderTruthTable:
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_PUSHED_ANCESTOR"
 
     def test_folder_revealed(self):
-        ns = NodeState(visibility="accessible", revealed=True, masked=True, mounted=True)
+        ns = NodeState(visibility="accessible", revealed=True, masked=False, mounted=True)
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_REVEALED"
 
     def test_folder_masked_revealed(self):
@@ -160,7 +160,7 @@ class TestFileTruthTable:
         assert resolve_tree_state(ns, is_folder=False) == "FILE_MASKED"
 
     def test_file_revealed(self):
-        ns = NodeState(visibility="accessible", revealed=True, masked=True, mounted=True, pushed=False)
+        ns = NodeState(visibility="accessible", revealed=True, masked=False, mounted=True, pushed=False)
         assert resolve_tree_state(ns, is_folder=False) == "FILE_REVEALED"
 
     def test_file_pushed(self):
