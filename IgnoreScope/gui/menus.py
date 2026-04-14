@@ -4,6 +4,14 @@ Builds the QMenuBar with File, Edit, Scopes, Container, Extensions, and View
 menus. Creates QActions with keyboard shortcuts and the View menu's dock
 toggleViewActions. Provides dynamic state methods for scope list, container
 menu states, and recent projects.
+
+Menu Structure:
+  File: Open project, recent projects, export, shutdown
+  Edit: Undo/Redo, Display Hidden, Terminal preference
+  Scopes: Scope selection and management (dynamic)
+  Container: Create/Update/Recreate/Remove, Launch Terminal, Add Sibling, Container Root Name
+  Extensions: Optional extensions (Claude CLI, Git)
+  View: Dock visibility, layout reset
 """
 
 from __future__ import annotations
@@ -108,18 +116,6 @@ class MenuManager:
 
         edit_menu.addSeparator()
 
-        self.add_sibling_action = QAction("Add Sibling...", self._app)
-        self.add_sibling_action.setEnabled(False)
-        self.add_sibling_action.setToolTip("No project loaded")
-        edit_menu.addAction(self.add_sibling_action)
-
-        self.rename_container_root_action = QAction("Container Root Name...", self._app)
-        self.rename_container_root_action.setEnabled(False)
-        self.rename_container_root_action.setToolTip("No project loaded")
-        edit_menu.addAction(self.rename_container_root_action)
-
-        edit_menu.addSeparator()
-
         # ── Terminal Preference Submenu (in Edit) ─────────────
         TERMINALS = [
             ("cmd",        "CMD",                "cmd.exe"),
@@ -217,6 +213,18 @@ class MenuManager:
         self.launch_terminal_action.setEnabled(False)
         self.launch_terminal_action.setToolTip("No running container")
         docker_menu.addAction(self.launch_terminal_action)
+
+        docker_menu.addSeparator()
+
+        self.add_sibling_action = QAction("Add Sibling...", self._app)
+        self.add_sibling_action.setEnabled(False)
+        self.add_sibling_action.setToolTip("No project loaded")
+        docker_menu.addAction(self.add_sibling_action)
+
+        self.rename_container_root_action = QAction("Container Root Name...", self._app)
+        self.rename_container_root_action.setEnabled(False)
+        self.rename_container_root_action.setToolTip("No project loaded")
+        docker_menu.addAction(self.rename_container_root_action)
 
         # ── Extensions ────────────────────────────────────────
 

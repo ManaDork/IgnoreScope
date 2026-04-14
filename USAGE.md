@@ -15,9 +15,9 @@ For installation and prerequisites, see [README.md](README.md).
 |  A  MENU BAR                                                                |
 |                                                                             |
 |  File: Open Location, Export                                               |
-|  Edit: Add Sibling, Container Root Name, Terminal Preference               |
+|  Edit: Terminal Preference                                                  |
 |  + New Scope: Quick scope creation                                         |
-|  Container: Create, Update, Recreate, Launch Container in Terminal, Remove |
+|  Container: Create, Update, Recreate, Remove, Launch Terminal, Config      |
 |  Extensions: Claude (Install, Launch, Clipboard), Git (Install)            |
 |  View: Panels, Themes, Options                                             |
 |____________________________________._______________________________________ |
