@@ -210,9 +210,11 @@ class LocalHostView(QWidget):
                 has_mask_pattern = rel and f"{rel}/" in ms.patterns
                 has_reveal_pattern = rel and f"!{rel}/" in ms.patterns
 
-                # Mask: allowed when mounted AND not already masked or revealed
-                # masked and revealed are now mutually exclusive (invariant enforced in NodeState)
-                can_mask = state.mounted and not state.masked and not state.revealed
+                # Mask: allowed when mounted AND not already masked
+                # Use has_reveal_pattern instead of state.revealed to allow nesting:
+                # nodes revealed by ancestor (has_reveal_pattern=False, state.revealed=True)
+                # can be masked (creating mask-within-reveal per architecture)
+                can_mask = state.mounted and not state.masked and not has_reveal_pattern
                 if has_mask_pattern:
                     a = menu.addAction(f"Unmask {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_mask(path))
@@ -220,11 +222,12 @@ class LocalHostView(QWidget):
                     a = menu.addAction(f"Mask {path.name}")
                     a.triggered.connect(lambda: self._tree.add_mask(path))
 
-                # Reveal: allowed when masked (by self or ancestor) and no reveal pattern yet
+                # Reveal: allowed when masked by ancestor (not own pattern) and no reveal pattern yet
+                # Don't offer Reveal on folder with own mask pattern — use Unmask instead
                 if has_reveal_pattern:
                     a = menu.addAction(f"Unreveal {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_reveal(path))
-                elif state.masked and rel:
+                elif state.masked and rel and not has_mask_pattern:
                     a = menu.addAction(f"Reveal {path.name}")
                     a.triggered.connect(lambda: self._tree.add_reveal(path))
 

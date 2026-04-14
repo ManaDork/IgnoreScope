@@ -456,53 +456,34 @@ class MountDataTree(QObject):
 
     # ── Pattern Operations (RMB actions) ───────────────────────────
 
-    def add_mask(self, path: Path) -> bool:
-        """Add mask pattern (vendor/) via RMB and recompute."""
+    def _apply_pattern_operation(self, path: Path, prefix: str, add: bool) -> bool:
+        """Shared body for add/remove mask/reveal operations."""
         self.aboutToMutate.emit()
         ms = self._find_owning_spec(path)
         if ms is None:
             return False
         rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
-        if not ms.add_pattern(f"{rel}/"):
+        operation = ms.add_pattern if add else ms.remove_pattern
+        if not operation(f"{prefix}{rel}/"):
             return False
         self._recompute_states()
         return True
+
+    def add_mask(self, path: Path) -> bool:
+        """Add mask pattern (vendor/) via RMB and recompute."""
+        return self._apply_pattern_operation(path, "", add=True)
 
     def remove_mask(self, path: Path) -> bool:
         """Remove mask pattern (vendor/) and recompute."""
-        self.aboutToMutate.emit()
-        ms = self._find_owning_spec(path)
-        if ms is None:
-            return False
-        rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
-        if not ms.remove_pattern(f"{rel}/"):
-            return False
-        self._recompute_states()
-        return True
+        return self._apply_pattern_operation(path, "", add=False)
 
     def add_reveal(self, path: Path) -> bool:
         """Add reveal pattern (!vendor/) via RMB and recompute."""
-        self.aboutToMutate.emit()
-        ms = self._find_owning_spec(path)
-        if ms is None:
-            return False
-        rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
-        if not ms.add_pattern(f"!{rel}/"):
-            return False
-        self._recompute_states()
-        return True
+        return self._apply_pattern_operation(path, "!", add=True)
 
     def remove_reveal(self, path: Path) -> bool:
         """Remove reveal pattern (!vendor/) and recompute."""
-        self.aboutToMutate.emit()
-        ms = self._find_owning_spec(path)
-        if ms is None:
-            return False
-        rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
-        if not ms.remove_pattern(f"!{rel}/"):
-            return False
-        self._recompute_states()
-        return True
+        return self._apply_pattern_operation(path, "!", add=False)
 
     def restore_mount_specs(self, specs_data: list[dict]) -> None:
         """Restore mount_specs from serialized dicts (undo/redo).

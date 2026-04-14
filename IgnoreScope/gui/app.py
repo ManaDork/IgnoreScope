@@ -341,17 +341,6 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self._mount_data_tree.aboutToMutate.connect(
             self.config_manager.snapshot
         )
-        # Ctrl+Z / Ctrl+Y keyboard shortcuts for undo/redo
-        from PyQt6.QtGui import QShortcut, QKeySequence
-        QShortcut(QKeySequence.StandardKey.Undo, self).activated.connect(
-            self.config_manager.undo
-        )
-        QShortcut(QKeySequence.StandardKey.Redo, self).activated.connect(
-            self.config_manager.redo
-        )
-        QShortcut(QKeySequence("Ctrl+Shift+Z"), self).activated.connect(
-            self.config_manager.redo
-        )
         self._mount_data_tree.structureChanged.connect(
             lambda: mm.show_hidden_action.setChecked(self._mount_data_tree.show_hidden)
         )
