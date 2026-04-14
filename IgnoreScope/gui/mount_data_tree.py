@@ -420,6 +420,13 @@ class MountDataTree(QObject):
                 return False
         return True
 
+    def can_mount(self, path: Path) -> bool:
+        """Mount is valid only if path has no overlap with existing mounts (either direction)."""
+        for ms in self._mount_specs:
+            if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
+                return False
+        return True
+
     def can_push(self, path: Path) -> bool:
         """Push enabled when file is not already pushed."""
         return not self.is_pushed(path)

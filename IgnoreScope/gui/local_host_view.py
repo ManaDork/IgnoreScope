@@ -31,10 +31,6 @@ from .display_config import LocalHostDisplayConfig
 from .view_helpers import configure_tree_view, apply_header_config
 
 
-# Column indices matching LocalHostDisplayConfig.columns order
-_COL_PUSH = 4
-
-
 class LocalHostView(QWidget):
     """Left panel: folder configuration with Mount/Mask/Reveal columns.
 
@@ -135,13 +131,14 @@ class LocalHostView(QWidget):
 
         menu = QMenu(self)
         is_mounted = self._tree.is_in_raw_set("mounted", root)
-        label = f"Unmount {root.name}" if is_mounted else f"Mount {root.name}"
-        mount_action = QAction(label, menu)
-        mount_action.triggered.connect(
-            lambda: self._tree.toggle_mounted(root, not is_mounted),
-        )
-        menu.addAction(mount_action)
-        menu.exec(self._tree_view.header().mapToGlobal(pos))
+        if is_mounted:
+            a = menu.addAction(f"Unmount {root.name}")
+            a.triggered.connect(lambda: self._tree.toggle_mounted(root, False))
+        elif self._tree.can_mount(root):
+            a = menu.addAction(f"Mount {root.name}")
+            a.triggered.connect(lambda: self._tree.toggle_mounted(root, True))
+        if menu.actions():
+            menu.exec(self._tree_view.header().mapToGlobal(pos))
 
     # ── Context Menu ──────────────────────────────────────────────
 
@@ -199,7 +196,7 @@ class LocalHostView(QWidget):
             if is_mounted:
                 a = menu.addAction(f"Unmount {path.name}")
                 a.triggered.connect(lambda: self._tree.toggle_mounted(path, False))
-            elif self._tree.can_check_mounted(path):
+            elif self._tree.can_mount(path):
                 a = menu.addAction(f"Mount {path.name}")
                 a.triggered.connect(lambda: self._tree.toggle_mounted(path, True))
 
@@ -213,9 +210,9 @@ class LocalHostView(QWidget):
                 has_mask_pattern = rel and f"{rel}/" in ms.patterns
                 has_reveal_pattern = rel and f"!{rel}/" in ms.patterns
 
-                # Mask: allowed when (mounted AND not masked) OR (revealed)
-                # Can't mask below a mask unless there's a reveal above
-                can_mask = state.mounted and (not state.masked or state.revealed)
+                # Mask: allowed when mounted AND not already masked or revealed
+                # masked and revealed are now mutually exclusive (invariant enforced in NodeState)
+                can_mask = state.mounted and not state.masked and not state.revealed
                 if has_mask_pattern:
                     a = menu.addAction(f"Unmask {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_mask(path))
@@ -223,11 +220,11 @@ class LocalHostView(QWidget):
                     a = menu.addAction(f"Mask {path.name}")
                     a.triggered.connect(lambda: self._tree.add_mask(path))
 
-                # Reveal: allowed when masked (by self or ancestor)
+                # Reveal: allowed when masked (by self or ancestor) and no reveal pattern yet
                 if has_reveal_pattern:
                     a = menu.addAction(f"Unreveal {path.name}")
                     a.triggered.connect(lambda: self._tree.remove_reveal(path))
-                elif state.masked and not state.revealed and rel:
+                elif state.masked and rel:
                     a = menu.addAction(f"Reveal {path.name}")
                     a.triggered.connect(lambda: self._tree.add_reveal(path))
 

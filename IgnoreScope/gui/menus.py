@@ -1,9 +1,9 @@
 """MenuBar Structure.
 
-Builds the QMenuBar with File, Edit, Scopes, Docker Container, View, and
-Tools menus. Creates QActions with keyboard shortcuts and the View menu's
-dock toggleViewActions. Provides dynamic state methods for scope list,
-docker menu states, and recent projects.
+Builds the QMenuBar with File, Edit, Scopes, Container, Launch, and View
+menus. Creates QActions with keyboard shortcuts and the View menu's dock
+toggleViewActions. Provides dynamic state methods for scope list, container
+menu states, and recent projects.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ class MenuManager:
     Dynamic methods:
         update_scope_list() — rebuild Scopes menu from disk
         update_scope_checkmarks(name) — set checkmark on active scope
-        update_docker_menu_states() — enable/disable Docker items
+        update_docker_menu_states() — enable/disable container items
         add_to_recent(path) — add path to Open Recent submenu
     """
 
@@ -52,6 +52,7 @@ class MenuManager:
         # ── File ──────────────────────────────────────────────
 
         file_menu = menu_bar.addMenu("File")
+        file_menu.setToolTipsVisible(True)
 
         self.open_project_action = QAction("Open Location of Project", self._app)  #"Open Project..."
         self.open_project_action.setShortcut("Ctrl+O")
@@ -64,7 +65,20 @@ class MenuManager:
         self.save_config_action = QAction("Save Configuration", self._app)
         self.save_config_action.setShortcut("Ctrl+S")
         self.save_config_action.setEnabled(False)
+        self.save_config_action.setToolTip("No project loaded")
         file_menu.addAction(self.save_config_action)
+
+        file_menu.addSeparator()
+
+        self.open_config_location_action = QAction("Open Config Location", self._app)
+        self.open_config_location_action.setEnabled(False)
+        self.open_config_location_action.setToolTip("No project loaded")
+        file_menu.addAction(self.open_config_location_action)
+
+        self.export_structure_action = QAction("Export Container Structure...", self._app)
+        self.export_structure_action.setEnabled(False)
+        self.export_structure_action.setToolTip("No project loaded")
+        file_menu.addAction(self.export_structure_action)
 
         file_menu.addSeparator()
 
@@ -75,6 +89,7 @@ class MenuManager:
         # ── Edit ──────────────────────────────────────────────
 
         edit_menu = menu_bar.addMenu("Edit")
+        edit_menu.setToolTipsVisible(True)
 
         self.undo_action = QAction("Undo", self._app)
         self.undo_action.setShortcut("Ctrl+Z")
@@ -86,19 +101,27 @@ class MenuManager:
 
         edit_menu.addSeparator()
 
-        self.click_toggle_action = QAction("Enable Click-to-Toggle", self._app)
-        self.click_toggle_action.setCheckable(True)
-        self.click_toggle_action.setChecked(False)
-        edit_menu.addAction(self.click_toggle_action)
-
         self.show_hidden_action = QAction("Display Hidden Items", self._app)
         self.show_hidden_action.setCheckable(True)
         self.show_hidden_action.setChecked(False)
         edit_menu.addAction(self.show_hidden_action)
 
+        edit_menu.addSeparator()
+
+        self.add_sibling_action = QAction("Add Sibling...", self._app)
+        self.add_sibling_action.setEnabled(False)
+        self.add_sibling_action.setToolTip("No project loaded")
+        edit_menu.addAction(self.add_sibling_action)
+
+        self.rename_container_root_action = QAction("Container Root Name...", self._app)
+        self.rename_container_root_action.setEnabled(False)
+        self.rename_container_root_action.setToolTip("No project loaded")
+        edit_menu.addAction(self.rename_container_root_action)
+
         # ── Scopes ────────────────────────────────────────────
 
         self.scopes_menu = menu_bar.addMenu("+ New Scope")
+        self.scopes_menu.setToolTipsVisible(True)
         self.scopes_menu.menuAction().setVisible(False)
 
         # Direct-action button for when no scopes exist.
@@ -120,84 +143,64 @@ class MenuManager:
         self.remove_scope_config_action.setEnabled(False)
         self.scopes_menu.addAction(self.remove_scope_config_action)
 
-        # ── Docker Container ──────────────────────────────────
+        # ── Container ─────────────────────────────────────────
 
-        docker_menu = menu_bar.addMenu("Docker Container")
+        docker_menu = menu_bar.addMenu("Container")
+        docker_menu.setToolTipsVisible(True)
 
         self.create_container_action = QAction("Create Container", self._app)
         self.create_container_action.setEnabled(False)
+        self.create_container_action.setToolTip("No project loaded")
         docker_menu.addAction(self.create_container_action)
 
         self.update_container_action = QAction("Update Container", self._app)
         self.update_container_action.setEnabled(False)
+        self.update_container_action.setToolTip("No running container")
         docker_menu.addAction(self.update_container_action)
 
         self.recreate_container_action = QAction("Recreate Container", self._app)
         self.recreate_container_action.setEnabled(False)
+        self.recreate_container_action.setToolTip("No running container")
         docker_menu.addAction(self.recreate_container_action)
 
         docker_menu.addSeparator()
 
         self.remove_container_action = QAction("Remove Container", self._app)
         self.remove_container_action.setEnabled(False)
+        self.remove_container_action.setToolTip("No running container")
         docker_menu.addAction(self.remove_container_action)
 
-        # ── Container Extensions ───────────────────────────────
-
-        extensions_menu = menu_bar.addMenu("Container Extensions")
+        docker_menu.addSeparator()
 
         self.deploy_llm_action = QAction("Install Claude CLI", self._app)
         self.deploy_llm_action.setEnabled(False)
-        extensions_menu.addAction(self.deploy_llm_action)
+        self.deploy_llm_action.setToolTip("No running container")
+        docker_menu.addAction(self.deploy_llm_action)
 
         self.deploy_git_action = QAction("Install Git", self._app)
         self.deploy_git_action.setEnabled(False)
-        extensions_menu.addAction(self.deploy_git_action)
+        self.deploy_git_action.setToolTip("No running container")
+        docker_menu.addAction(self.deploy_git_action)
 
-        # ── View ──────────────────────────────────────────────
+        # ── Launch ────────────────────────────────────────────
 
-        view_menu = menu_bar.addMenu("View")
-
-        for key in ('local_host', 'scope'):
-            dock = dock_widgets[key]
-            view_menu.addAction(dock.toggleViewAction())
-
-        view_menu.addSeparator()
-
-        self.reset_layout_action = QAction("Reset Layout", self._app)
-        view_menu.addAction(self.reset_layout_action)
-
-        # ── Tools ─────────────────────────────────────────────
-
-        tools_menu = menu_bar.addMenu("Tools")
-
-        self.add_sibling_action = QAction("Add Sibling...", self._app)
-        self.add_sibling_action.setEnabled(False)
-        tools_menu.addAction(self.add_sibling_action)
-
-        self.rename_container_root_action = QAction("Rename Container Root...", self._app)
-        self.rename_container_root_action.setEnabled(False)
-        tools_menu.addAction(self.rename_container_root_action)
-
-        tools_menu.addSeparator()
-
-        self.open_config_location_action = QAction("Open Config Location", self._app)
-        self.open_config_location_action.setEnabled(False)
-        tools_menu.addAction(self.open_config_location_action)
-
-        tools_menu.addSeparator()
+        launch_menu = menu_bar.addMenu("Launch")
+        launch_menu.setToolTipsVisible(True)
 
         self.launch_terminal_action = QAction("Launch Container in Terminal", self._app)
         self.launch_terminal_action.setEnabled(False)
-        tools_menu.addAction(self.launch_terminal_action)
+        self.launch_terminal_action.setToolTip("No running container")
+        launch_menu.addAction(self.launch_terminal_action)
 
         self.launch_llm_action = QAction("Launch Claude CLI", self._app)
         self.launch_llm_action.setEnabled(False)
-        tools_menu.addAction(self.launch_llm_action)
+        self.launch_llm_action.setToolTip("No running container")
+        launch_menu.addAction(self.launch_llm_action)
 
         self.copy_llm_command_action = QAction("Clipboard: Launch Claude CLI", self._app)
         self.copy_llm_command_action.setEnabled(False)
-        tools_menu.addAction(self.copy_llm_command_action)
+        self.copy_llm_command_action.setToolTip("No running container")
+        launch_menu.addAction(self.copy_llm_command_action)
 
         # ── Terminal Preference Submenu ───────────────────────
         TERMINALS = [
@@ -222,7 +225,7 @@ class MenuManager:
 
         saved_label = next(l for k, l in available if k == saved_pref)
         self.terminal_menu = QMenu(f"Terminal: {saved_label}", self._app)
-        tools_menu.addMenu(self.terminal_menu)
+        launch_menu.addMenu(self.terminal_menu)
 
         self._terminal_action_group = QActionGroup(self._app)
         self._terminal_action_group.setExclusive(True)
@@ -238,11 +241,19 @@ class MenuManager:
 
         self._terminal_action_group.triggered.connect(self._on_terminal_changed)
 
-        tools_menu.addSeparator()
+        # ── View ──────────────────────────────────────────────
 
-        self.export_structure_action = QAction("Export Container Structure...", self._app)
-        self.export_structure_action.setEnabled(False)
-        tools_menu.addAction(self.export_structure_action)
+        view_menu = menu_bar.addMenu("View")
+        view_menu.setToolTipsVisible(True)
+
+        for key in ('local_host', 'scope'):
+            dock = dock_widgets[key]
+            view_menu.addAction(dock.toggleViewAction())
+
+        view_menu.addSeparator()
+
+        self.reset_layout_action = QAction("Reset Layout", self._app)
+        view_menu.addAction(self.reset_layout_action)
 
         # Load recent projects
         self._load_recent_menu()
@@ -318,7 +329,7 @@ class MenuManager:
         self.scopes_menu.setTitle(active_scope)
 
     def update_docker_menu_states(self) -> None:
-        """Enable/disable Docker and Tools menu items based on current state.
+        """Enable/disable container and launch menu items based on current state.
 
         Two-signal detection:
           has_config = config dir exists on disk (fast filesystem check)
@@ -339,11 +350,29 @@ class MenuManager:
         is_placeholder = self._app._current_scope == PLACEHOLDER_SCOPE
 
         # Project-dependent actions (always need a project)
+        save_config_tip = "Save the current scope configuration to disk" if has_project else "No project loaded"
         self.save_config_action.setEnabled(has_project)
-        self.export_structure_action.setEnabled(has_project)
+        self.save_config_action.setToolTip(save_config_tip)
+
+        open_config_tip = "Open the folder containing this scope's config" if has_project else "No project loaded"
         self.open_config_location_action.setEnabled(has_project)
-        self.add_sibling_action.setEnabled(has_project and not is_placeholder)
-        self.rename_container_root_action.setEnabled(has_project and not is_placeholder)
+        self.open_config_location_action.setToolTip(open_config_tip)
+
+        export_tip = "Export the container folder structure to a file" if has_project else "No project loaded"
+        self.export_structure_action.setEnabled(has_project)
+        self.export_structure_action.setToolTip(export_tip)
+
+        add_sibling_enabled = has_project and not is_placeholder
+        add_sibling_tip = "Add a sibling node at the same level in the tree" if add_sibling_enabled \
+                         else ("No project loaded" if not has_project else "Select a scope first")
+        self.add_sibling_action.setEnabled(add_sibling_enabled)
+        self.add_sibling_action.setToolTip(add_sibling_tip)
+
+        rename_root_enabled = has_project and not is_placeholder
+        rename_root_tip = "Rename the container root node" if rename_root_enabled \
+                         else ("No project loaded" if not has_project else "Select a scope first")
+        self.rename_container_root_action.setEnabled(rename_root_enabled)
+        self.rename_container_root_action.setToolTip(rename_root_tip)
 
         # Two-signal detection
         has_config = False
@@ -361,21 +390,51 @@ class MenuManager:
                 has_docker_container = container_exists(docker_name)
 
         # Create: enabled when project exists, not placeholder, no Docker container
-        self.create_container_action.setEnabled(
-            has_project and not is_placeholder and not has_docker_container
-        )
+        create_enabled = has_project and not is_placeholder and not has_docker_container
+        if create_enabled:
+            create_tip = "Create a new Docker container for this scope"
+        elif not has_project:
+            create_tip = "No project loaded"
+        elif is_placeholder:
+            create_tip = "Select a scope first"
+        else:
+            create_tip = "Container already exists — use Update or Recreate"
+        self.create_container_action.setEnabled(create_enabled)
+        self.create_container_action.setToolTip(create_tip)
 
         # Update/Recreate/Remove: enabled only when Docker container exists
+        update_tip = "Rebuild the container image without removing it" if has_docker_container else "No running container"
         self.update_container_action.setEnabled(has_docker_container)
-        self.recreate_container_action.setEnabled(has_docker_container)
-        self.remove_container_action.setEnabled(has_docker_container)
+        self.update_container_action.setToolTip(update_tip)
 
-        # Deploy/Terminal/LLM/Extensions: need a Docker container
+        recreate_tip = "Remove and recreate the container from scratch" if has_docker_container else "No running container"
+        self.recreate_container_action.setEnabled(has_docker_container)
+        self.recreate_container_action.setToolTip(recreate_tip)
+
+        remove_tip = "Permanently remove the Docker container" if has_docker_container else "No running container"
+        self.remove_container_action.setEnabled(has_docker_container)
+        self.remove_container_action.setToolTip(remove_tip)
+
+        # Deploy/Terminal/LLM: need a Docker container
+        deploy_llm_tip = "Install Claude CLI into the running container" if has_docker_container else "No running container"
         self.deploy_llm_action.setEnabled(has_docker_container)
+        self.deploy_llm_action.setToolTip(deploy_llm_tip)
+
+        deploy_git_tip = "Install Git into the running container" if has_docker_container else "No running container"
         self.deploy_git_action.setEnabled(has_docker_container)
+        self.deploy_git_action.setToolTip(deploy_git_tip)
+
+        launch_terminal_tip = "Open a terminal session inside the container" if has_docker_container else "No running container"
         self.launch_terminal_action.setEnabled(has_docker_container)
+        self.launch_terminal_action.setToolTip(launch_terminal_tip)
+
+        launch_llm_tip = "Launch Claude CLI inside the container" if has_docker_container else "No running container"
         self.launch_llm_action.setEnabled(has_docker_container)
+        self.launch_llm_action.setToolTip(launch_llm_tip)
+
+        copy_llm_tip = "Copy the Claude CLI launch command to clipboard" if has_docker_container else "No running container"
         self.copy_llm_command_action.setEnabled(has_docker_container)
+        self.copy_llm_command_action.setToolTip(copy_llm_tip)
 
     def update_project_loaded_states(self, loaded: bool) -> None:
         """Enable/disable items that require a loaded project."""

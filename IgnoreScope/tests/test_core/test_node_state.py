@@ -113,16 +113,17 @@ class TestNodeStateDataclass:
             ns.mounted = True  # type: ignore[misc]
 
     def test_custom_fields(self):
+        # masked=True (mask takes precedence over reveal per invariant)
         ns = NodeState(
             mounted=True,
             masked=True,
-            revealed=True,
+            revealed=False,
             pushed=False,
             container_orphaned=False,
-            visibility="accessible",
+            visibility="restricted",
         )
         assert ns.mounted is True
-        assert ns.visibility == "accessible"
+        assert ns.visibility == "restricted"
 
     def test_equality(self):
         a = NodeState(mounted=True, visibility="accessible")
@@ -259,7 +260,8 @@ class TestComputeNodeState:
             pushed_files=set(),
         )
         assert ns.mounted is True
-        assert ns.masked is True
+        # Path is under reveal pattern (!api/public/) — reveal takes precedence
+        assert ns.masked is False
         assert ns.revealed is True
         assert ns.visibility == "accessible"
 
@@ -384,7 +386,8 @@ class TestComputeNodeState:
         ms = MountSpecPath(mount_root=src, patterns=["api/", "!api/public/"])
         ns = compute_node_state(path=child, mount_specs=[ms], pushed_files=set())
         assert ns.mounted is True
-        assert ns.masked is True
+        # Path is under reveal pattern (!api/public/) — reveal takes precedence
+        assert ns.masked is False
         assert ns.revealed is True
         assert ns.visibility == "accessible"
 
@@ -661,8 +664,8 @@ class TestFindPathsWithDirectVisibleChildren:
         public = api / "public"
 
         states = {
-            api: NodeState(mounted=True, masked=True, visibility="restricted"),
-            public: NodeState(mounted=True, masked=True, revealed=True, visibility="accessible"),
+            api: NodeState(mounted=True, masked=True, revealed=False, visibility="restricted"),
+            public: NodeState(mounted=True, masked=False, revealed=True, visibility="accessible"),
         }
 
         result = find_paths_with_direct_visible_children(states)
@@ -687,9 +690,9 @@ class TestFindPathsWithDirectVisibleChildren:
         public = internal / "public"
 
         states = {
-            api: NodeState(mounted=True, masked=True, visibility="restricted"),
-            internal: NodeState(mounted=True, masked=True, visibility="restricted"),
-            public: NodeState(mounted=True, masked=True, revealed=True, visibility="accessible"),
+            api: NodeState(mounted=True, masked=True, revealed=False, visibility="restricted"),
+            internal: NodeState(mounted=True, masked=True, revealed=False, visibility="restricted"),
+            public: NodeState(mounted=True, masked=False, revealed=True, visibility="accessible"),
         }
 
         result = find_paths_with_direct_visible_children(states)
@@ -828,7 +831,8 @@ class TestComputeNodeStateFromSpecs:
         api = src / "vendor" / "public" / "api"
         ns = compute_node_state(api, [ms], set())
         assert ns.visibility == "accessible"
-        assert ns.masked is True
+        # Path is under reveal pattern (!vendor/public/) — reveal takes precedence
+        assert ns.masked is False
         assert ns.revealed is True
 
     def test_masked_folder_itself(self, tmp_path: Path):
@@ -1249,4 +1253,81 @@ class TestTruthTableRegression:
         config.mirrored = False
         result = apply_node_states_from_scope(config, [src, vendor, public])
         assert result[vendor].visibility == "restricted"  # no upgrade
+
+
+# ──────────────────────────────────────────────
+# NS-0: NodeState mutual exclusivity validation
+# ──────────────────────────────────────────────
+
+
+class TestNodeStateMutualExclusivity:
+    """Tests for NodeState masked/revealed mutual exclusivity invariant."""
+
+    def test_both_masked_and_revealed_raises_error(self):
+        """Invariant: masked and revealed cannot both be True."""
+        with pytest.raises(ValueError, match="invariant violation"):
+            NodeState(masked=True, revealed=True)
+
+    def test_masked_only_allowed(self):
+        """masked=True, revealed=False is allowed."""
+        state = NodeState(mounted=True, masked=True, revealed=False)
+        assert state.masked is True
+        assert state.revealed is False
+
+    def test_revealed_only_allowed(self):
+        """revealed=True, masked=False is allowed."""
+        state = NodeState(mounted=True, masked=False, revealed=True)
+        assert state.masked is False
+        assert state.revealed is True
+
+    def test_both_false_allowed(self):
+        """Both False is allowed (unmasked, unrevealed node)."""
+        state = NodeState(mounted=True, masked=False, revealed=False)
+        assert state.masked is False
+        assert state.revealed is False
+
+    @pytest.mark.parametrize(
+        "masked,revealed,should_raise",
+        [
+            (True, True, True),  # Invalid: both true
+            (True, False, False),  # Valid: masked only
+            (False, True, False),  # Valid: revealed only
+            (False, False, False),  # Valid: neither
+        ],
+        ids=[
+            "both_true_raises",
+            "masked_only_ok",
+            "revealed_only_ok",
+            "both_false_ok",
+        ],
+    )
+    def test_mutual_exclusivity_parametrized(self, masked, revealed, should_raise):
+        """Parametrized test for all masked/revealed combinations."""
+        if should_raise:
+            with pytest.raises(ValueError):
+                NodeState(masked=masked, revealed=revealed)
+        else:
+            state = NodeState(masked=masked, revealed=revealed)
+            assert state.masked is masked
+            assert state.revealed is revealed
+
+    def test_masked_true_with_other_flags(self):
+        """masked=True with other flags in various combinations."""
+        # masked + mounted + pushed (all valid)
+        state = NodeState(mounted=True, masked=True, pushed=True, revealed=False)
+        assert state.masked is True
+
+        # masked + container_orphaned
+        state = NodeState(masked=True, container_orphaned=True, revealed=False)
+        assert state.masked is True
+
+    def test_revealed_true_with_other_flags(self):
+        """revealed=True with other flags in various combinations."""
+        # revealed + mounted + pushed
+        state = NodeState(mounted=True, revealed=True, pushed=True, masked=False)
+        assert state.revealed is True
+
+        # revealed + container_only
+        state = NodeState(revealed=True, container_only=True, masked=False)
+        assert state.revealed is True
 

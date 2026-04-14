@@ -32,10 +32,6 @@ from .display_config import ScopeDisplayConfig
 from .view_helpers import configure_tree_view, apply_header_config
 
 
-# Column index matching ScopeDisplayConfig.columns order
-_COL_PUSH = 1
-
-
 def _query_container_state(
     host_project_root: Optional[Path], scope_name: str,
 ) -> tuple[str, bool]:

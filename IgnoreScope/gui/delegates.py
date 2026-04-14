@@ -17,8 +17,8 @@ Config-parameterized delegates — state derivation via resolve_tree_state().
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QModelIndex, QEvent, QRect
-from PyQt6.QtGui import QBrush, QColor, QPalette, QFontMetrics
+from PyQt6.QtCore import Qt, QModelIndex
+from PyQt6.QtGui import QBrush, QColor, QPalette
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from .display_config import TreeDisplayConfig, ColumnDef, resolve_tree_state
@@ -120,11 +120,10 @@ class TreeStyleDelegate(GradientDelegate):
     Resolves visual state from NodeStateRole via resolve_tree_state(),
     then looks up StateStyleClass in config.state_styles.
 
-    Paint order (4-layer):
+    Paint order (3-layer):
       1. Gradient background (full-row width via header().length())
       2. Selection/hover overlay (semi-transparent)
       3. Text via super().paint() (backgroundBrush cleared)
-      4. Custom symbols on columns with symbol_type
     """
 
     def __init__(
@@ -133,15 +132,6 @@ class TreeStyleDelegate(GradientDelegate):
         super().__init__(parent)
         self._config = config
         self._sg = StyleGui.instance()
-        self._click_toggle_enabled: bool = False
-
-    @property
-    def click_toggle_enabled(self) -> bool:
-        return self._click_toggle_enabled
-
-    @click_toggle_enabled.setter
-    def click_toggle_enabled(self, value: bool) -> None:
-        self._click_toggle_enabled = value
 
     # ── Style Resolution ──────────────────────────────────────────
 
@@ -173,15 +163,6 @@ class TreeStyleDelegate(GradientDelegate):
             style = self._resolve_style(index)
         if style is not None:
             self._apply_text_style(option, style, self._config)
-
-        # Suppress native checkbox for custom symbol columns
-        col_idx = index.column()
-        if col_idx < len(self._config.columns):
-            col_def = self._config.columns[col_idx]
-            if col_def.symbol_type is not None:
-                option.features &= (
-                    ~QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator
-                )
 
         # Our 4-layer paint system owns all visual state.
         # Strip selection/hover so PE_PanelItemViewItem doesn't paint
@@ -242,143 +223,6 @@ class TreeStyleDelegate(GradientDelegate):
         super().paint(painter, option, index)
         self._cached_style = None
 
-        # Layer 4: custom symbols
-        if col_def is not None and col_def.symbol_type is not None:
-            self._paint_symbol(painter, option, index, col_def)
-
-    # ── Symbols ───────────────────────────────────────────────────
-
-    def _paint_symbol(
-        self,
-        painter,
-        option: QStyleOptionViewItem,
-        index: QModelIndex,
-        col_def: ColumnDef,
-    ) -> None:
-        """Dispatch symbol painting based on column symbol_type."""
-        check_state = index.data(Qt.ItemDataRole.CheckStateRole)
-
-        if col_def.symbol_type == "check":
-            if check_state == Qt.CheckState.Checked:
-                color = QColor(self._sg.palette_color("frost_3"))
-                self._draw_centered_symbol(
-                    painter, option.rect, color, "\u2713", font_bump=1,
-                )
-
-        elif col_def.symbol_type == "pushed_status":
-            is_file = index.data(NodeIsFileRole)
-            if not is_file:
-                return  # folders: blank cell
-            if check_state == Qt.CheckState.Checked:
-                color = QColor(self._sg.palette_color("frost_3"))
-                self._draw_centered_symbol(
-                    painter, option.rect, color, "\u25CF",
-                )
-            else:
-                color = QColor(self._sg.palette_color("snow_storm_0"))
-                self._draw_centered_symbol(
-                    painter, option.rect, color, "\u25CB",
-                )
-
-    @staticmethod
-    def _draw_centered_symbol(
-        painter, rect: QRect, color: QColor, symbol: str, font_bump: int = 0,
-    ) -> None:
-        """Draw a centered unicode symbol in the given rect."""
-        painter.save()
-        painter.setPen(color)
-        font = painter.font()
-        if font_bump:
-            font.setPointSize(font.pointSize() + font_bump)
-            painter.setFont(font)
-        fm = QFontMetrics(font)
-        text_w = fm.horizontalAdvance(symbol)
-        text_h = fm.ascent()
-        x = rect.x() + (rect.width() - text_w) // 2
-        y = rect.y() + (rect.height() + text_h) // 2 - fm.descent()
-        painter.drawText(x, y, symbol)
-        painter.restore()
-
-    # ── Editor Event (Click Toggle) ───────────────────────────────
-
-    def editorEvent(self, event, model, option, index) -> bool:
-        """Handle clicks on suppressed checkbox columns.
-
-        Multi-select aware: if the clicked item is part of an active
-        selection, the toggled state is applied to ALL selected items
-        in the same column via model.begin_batch()/end_batch().
-        """
-        if not index.isValid():
-            return False
-        col_idx = index.column()
-        if col_idx >= len(self._config.columns):
-            return super().editorEvent(event, model, option, index)
-
-        col_def = self._config.columns[col_idx]
-        if not col_def.checkable:
-            return super().editorEvent(event, model, option, index)
-
-        # pushed_status is file-only — block folder clicks
-        if col_def.symbol_type == "pushed_status":
-            is_file = index.data(NodeIsFileRole)
-            if not is_file:
-                return False
-
-        # Block left-click press on checkable columns — prevents native visual artifact
-        if (event.type() == QEvent.Type.MouseButtonPress
-                and event.button() == Qt.MouseButton.LeftButton):
-            return True
-
-        if (event.type() != QEvent.Type.MouseButtonRelease
-                or event.button() != Qt.MouseButton.LeftButton):
-            return super().editorEvent(event, model, option, index)
-
-        # Gate: consume click without toggling when disabled
-        if not self._click_toggle_enabled:
-            return True
-
-        flags = model.flags(index)
-        if not (flags & Qt.ItemFlag.ItemIsUserCheckable):
-            return False
-        if not (flags & Qt.ItemFlag.ItemIsEnabled):
-            return False
-
-        current = index.data(Qt.ItemDataRole.CheckStateRole)
-        if current is None:
-            return False
-
-        new_state = (
-            Qt.CheckState.Unchecked
-            if current == Qt.CheckState.Checked
-            else Qt.CheckState.Checked
-        )
-
-        # ── Multi-select batch toggle ─────────────────────────
-        view = self.parent()
-        if view is not None and hasattr(view, "selectionModel"):
-            selected = view.selectionModel().selectedRows(col_idx)
-            if len(selected) > 1 and any(
-                idx.row() == index.row()
-                and idx.parent() == index.parent()
-                for idx in selected
-            ):
-                model.begin_batch()
-                try:
-                    for sel_idx in selected:
-                        sel_flags = model.flags(sel_idx)
-                        if not (sel_flags & Qt.ItemFlag.ItemIsUserCheckable):
-                            continue
-                        if not (sel_flags & Qt.ItemFlag.ItemIsEnabled):
-                            continue
-                        model.setData(
-                            sel_idx, new_state,
-                            Qt.ItemDataRole.CheckStateRole,
-                        )
-                finally:
-                    model.end_batch()
-                return True
-
-        return model.setData(index, new_state, Qt.ItemDataRole.CheckStateRole)
 
 
 # ── HistoryDelegate ──────────────────────────────────────────────
