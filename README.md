@@ -94,6 +94,13 @@ See [USAGE.md](USAGE.md) for the full step-by-step workflow guide.
 - **Mutual exclusivity fix** — masked folders no longer show both "Unmask" and "Reveal" options
 - **Nesting support** — folders revealed by ancestor can now be masked (architecture-compliant)
 
+### Menu Reorganization (v0.4.1)
+- **Extensions menu** — new top-level menu separates optional extensions (Claude CLI, Git) from Docker core
+- **Terminal preference moved** — terminal shell selection now in Edit menu (persistent user setting)
+- **Container menu refined** — groups lifecycle ops (create/update/recreate/remove) + launch terminal + scope config (add sibling, container root name)
+- **Launch menu removed** — terminal-related actions consolidated into Container and Edit menus
+- **Clearer UI hierarchy** — visual distinction between required Docker operations and optional extensions
+
 ### Previous: v0.3
 - **Glassmorphism theme** — single consolidated `glassmorphism_v1_theme.json` drives all colors, gradients, and fonts
 - **Widget gradient backgrounds** — JSON-driven panel gradients for docks, status bar, config panel
