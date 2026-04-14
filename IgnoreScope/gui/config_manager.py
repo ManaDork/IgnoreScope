@@ -11,9 +11,13 @@ IS NOT: Docker container operations (→ container_ops_ui.py)
 from __future__ import annotations
 
 import json
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QDialog, QFileDialog, QMessageBox
 
 from ..core.config import (
@@ -28,7 +32,15 @@ if TYPE_CHECKING:
     from .app import IgnoreScopeApp
 
 
-class ConfigManager:
+@dataclass
+class FullConfigSnapshot:
+    """Full config state captured before a mutation (undo point)."""
+    mount_specs: list[dict]
+    pushed_files: set[Path]
+    timestamp: datetime = field(default_factory=datetime.now)
+
+
+class ConfigManager(QObject):
     """Manages configuration and project loading for IgnoreScopeApp.
 
     Handles:
@@ -39,50 +51,65 @@ class ConfigManager:
     - Export structure
     """
 
+    # Phase 2: emitted after undo/redo so SessionHistory panel can update cursor
+    undoPerformed = pyqtSignal()
+    redoPerformed = pyqtSignal()
+
     MAX_UNDO = 10
 
     def __init__(self, app: 'IgnoreScopeApp'):
+        super().__init__()
         self._app = app
-        from collections import deque
-        self._undo_stack: deque[list[dict]] = deque(maxlen=self.MAX_UNDO)
-        self._redo_stack: deque[list[dict]] = deque(maxlen=self.MAX_UNDO)
+        self._undo_stack: deque[FullConfigSnapshot] = deque(maxlen=self.MAX_UNDO)
+        self._redo_stack: deque[FullConfigSnapshot] = deque(maxlen=self.MAX_UNDO)
 
     # ── Undo / Redo ────────────────────────────────────────────────
 
-    def snapshot(self) -> None:
-        """Snapshot current mount_specs before a mutation (undo point)."""
+    def _capture_current_state(self) -> list[dict]:
+        """Serialize current mount_specs to dict list."""
         tree = self._app._mount_data_tree
         host_root = tree._host_project_root or Path()
-        snapshot = [ms.to_dict(host_root) for ms in tree._mount_specs]
-        self._undo_stack.append(snapshot)
+        return [ms.to_dict(host_root) for ms in tree._mount_specs]
+
+    def _restore_pushed_files(self, pushed_files: set[Path]) -> None:
+        """Restore pushed files set after undo/redo."""
+        self._app._mount_data_tree._pushed_files = pushed_files
+
+    def snapshot(self) -> None:
+        """Snapshot full config state before a mutation (undo point)."""
+        tree = self._app._mount_data_tree
+        self._undo_stack.append(FullConfigSnapshot(
+            mount_specs=self._capture_current_state(),
+            pushed_files=set(tree._pushed_files),
+        ))
         self._redo_stack.clear()
 
     def undo(self) -> bool:
-        """Restore previous mount_specs state. Returns True if undone."""
+        """Restore previous config state. Returns True if undone."""
         if not self._undo_stack:
             return False
         tree = self._app._mount_data_tree
-        host_root = tree._host_project_root or Path()
-        # Save current state for redo
-        current = [ms.to_dict(host_root) for ms in tree._mount_specs]
-        self._redo_stack.append(current)
-        # Restore previous
+        self._redo_stack.append(FullConfigSnapshot(
+            mount_specs=self._capture_current_state(),
+            pushed_files=set(tree._pushed_files),
+        ))
         prev = self._undo_stack.pop()
-        tree.restore_mount_specs(prev)
+        tree.restore_mount_specs(prev.mount_specs)
+        self._restore_pushed_files(prev.pushed_files)
         return True
 
     def redo(self) -> bool:
-        """Re-apply undone mount_specs state. Returns True if redone."""
+        """Re-apply undone config state. Returns True if redone."""
         if not self._redo_stack:
             return False
         tree = self._app._mount_data_tree
-        host_root = tree._host_project_root or Path()
-        # Save current state for undo
-        current = [ms.to_dict(host_root) for ms in tree._mount_specs]
-        self._undo_stack.append(current)
-        # Restore next
+        self._undo_stack.append(FullConfigSnapshot(
+            mount_specs=self._capture_current_state(),
+            pushed_files=set(tree._pushed_files),
+        ))
         next_state = self._redo_stack.pop()
-        tree.restore_mount_specs(next_state)
+        tree.restore_mount_specs(next_state.mount_specs)
+        self._restore_pushed_files(next_state.pushed_files)
         return True
 
     def clear_undo(self) -> None:
