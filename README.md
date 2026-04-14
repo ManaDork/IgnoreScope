@@ -4,30 +4,6 @@
 
 IgnoreScope is a Docker container management tool that uses volume layering to selectively hide directories from your project while allowing individual files to be pushed or pulled at runtime via `docker cp`. It provides both a CLI and a PyQt6 GUI with a glassmorphism-styled theme system for managing scoped container configurations across multiple projects.
 
-## What's New in v0.3
-
-### Theme & Visual System
-- **Glassmorphism theme** — single consolidated `glassmorphism_v1_theme.json` drives all colors, gradients, and fonts
-- **Widget gradient backgrounds** — JSON-driven panel gradients for docks, status bar, config panel
-- **Formulaic gradient derivation** — `derive_gradient()` and `derive_file_style()` replace hand-built state definitions
-- **Categorical color system** — state classification with deep navy + vivid accent palette
-- **Tree highlight fix** — suppress Windows accent bleed in branch indicators, focus rects, and palette
-
-### Core Architecture
-- **Visibility refactor** — pure STATE values (`accessible`, `restricted`, `virtual`) replacing mixed boolean flags
-- **New folder states** — `FOLDER_MOUNTED`, `FOLDER_MOUNTED_REVEALED`, `FOLDER_MIRRORED`, `FOLDER_MIRRORED_REVEALED`
-- **O(1) state resolution** — replaces O(n*states) gradient matching
-
-### GUI
-- **Config panel collapse/expand** — min/max pin pattern for reliable dock sizing
-- **Dead code removal** — unused extensions and compose module removed (Undo/Redo disabled pending Phase 5)
-- **Focus suppression** — unconditional focus rect clearing + QPalette.Highlight override
-
-### Infrastructure
-- **GitHub-primary VCS** — architecture docs moved to `docs/architecture/`, local configs gitignored
-- **New architecture doc** — `THEME_WORKFLOW.md` for color sampling and theme application
-- **Expanded test coverage** — style engine, display config, and node state test suites
-
 ## Prerequisites
 
 ### Docker Desktop
@@ -105,6 +81,30 @@ ignorescope-docker remove --yes
 ```
 
 See [USAGE.md](USAGE.md) for the full step-by-step workflow guide.
+
+## What's New in v0.4
+
+### Undo/Redo System (Phase 1)
+- **Full state capture** — snapshots now include mount_specs + pushed_files (not just mount_specs)
+- **Keyboard shortcuts** — Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z for undo/redo (menu-integrated)
+- **Signal infrastructure** — undoPerformed / redoPerformed signals for future UI integration (Phase 2)
+- **DRY refactoring** — consolidated pattern operations, extracted state capture helper (~60 LOC saved)
+
+### RMB Menu Logic Refinement
+- **Mutual exclusivity fix** — masked folders no longer show both "Unmask" and "Reveal" options
+- **Nesting support** — folders revealed by ancestor can now be masked (architecture-compliant)
+
+### Previous: v0.3
+- **Glassmorphism theme** — single consolidated `glassmorphism_v1_theme.json` drives all colors, gradients, and fonts
+- **Widget gradient backgrounds** — JSON-driven panel gradients for docks, status bar, config panel
+- **Formulaic gradient derivation** — `derive_gradient()` and `derive_file_style()` replace hand-built state definitions
+- **Categorical color system** — state classification with deep navy + vivid accent palette
+- **Tree highlight fix** — suppress Windows accent bleed in branch indicators, focus rects, and palette
+- **Visibility refactor** — pure STATE values (`accessible`, `restricted`, `virtual`) replacing mixed boolean flags
+- **New folder states** — `FOLDER_MOUNTED`, `FOLDER_MOUNTED_REVEALED`, `FOLDER_MIRRORED`, `FOLDER_MIRRORED_REVEALED`
+- **O(1) state resolution** — replaces O(n*states) gradient matching
+- **Config panel collapse/expand** — min/max pin pattern for reliable dock sizing
+- **GitHub-primary VCS** — architecture docs moved to `docs/architecture/`, local configs gitignored
 
 ## License
 
