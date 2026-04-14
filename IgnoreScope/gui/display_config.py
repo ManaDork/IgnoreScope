@@ -12,8 +12,7 @@ Does NOT store state, render UI, or interact with CORE.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from .style_engine import FontStyleClass, GradientClass, StateStyleClass, StyleGui
 
@@ -29,13 +28,6 @@ class ColumnDef:
     header: str
     visible: bool = True
     width: int | str = "stretch"
-    checkable: bool = False
-    check_field: Optional[str] = None
-    enable_condition: Optional[str] = None
-    cascade_on_uncheck: list[str] = field(default_factory=list)
-    files_only: bool = False
-    folders_only: bool = False
-    symbol_type: Optional[str] = None
 
 
 # ------------------------------------------------------------------
