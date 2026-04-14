@@ -95,6 +95,29 @@ class NodeState:
     has_pushed_descendant: bool = False
     has_direct_visible_child: bool = False
 
+    def __post_init__(self) -> None:
+        """Validate mutual exclusivity of masked and revealed flags.
+
+        A node cannot be simultaneously masked and revealed at the self-level.
+        These flags represent mutually exclusive states:
+        - masked=True: Node is hidden by a mask pattern (e.g., vendor/)
+        - revealed=True: Node is revealed within a masked area (e.g., !vendor/public/)
+
+        Note: Patterns can coexist in the pattern list (e.g., vendor/ + !vendor/public/),
+        but the node's primary state must be exclusive. If both patterns exist for a node,
+        the state recomputation logic determines which flag is true based on priority
+        (mask takes precedence over reveal).
+
+        Raises:
+            ValueError: If both masked=True and revealed=True
+        """
+        if self.masked and self.revealed:
+            raise ValueError(
+                "NodeState invariant violation: "
+                "masked and revealed cannot both be True. "
+                "A node cannot be simultaneously masked and revealed at the self-level."
+            )
+
 
 def find_container_orphaned_paths(
     pushed_files: set[Path],
@@ -230,6 +253,13 @@ def compute_node_state(
             is_mount_root = (path == ms.mount_root)
             is_masked = ms.is_masked(path)
             is_revealed = ms.is_unmasked(path)
+
+            # Apply mutual exclusivity: reveal takes precedence over mask
+            # (gitignore semantics: last match wins).
+            # If both patterns match, the node is revealed (not masked).
+            if is_masked and is_revealed:
+                is_masked = False
+
             break  # path belongs to first matching mount
 
     is_pushed = path in pushed_files
