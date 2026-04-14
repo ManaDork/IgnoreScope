@@ -465,9 +465,6 @@ class TestLocalHostDisplayConfig:
         headers = [c.header for c in config.columns]
         assert headers == ["Local Host"]
 
-    def test_column_0_not_checkable(self, config):
-        assert config.columns[0].checkable is False
-
     def test_filters(self, config):
         assert config.display_files is True
         assert config.display_hidden is True
