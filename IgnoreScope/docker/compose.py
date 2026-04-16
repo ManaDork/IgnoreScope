@@ -76,6 +76,7 @@ def generate_compose_with_masks(
     docker_volume_name: str = "",
     container_root: str = DEFAULT_CONTAINER_ROOT,
     isolation_volume_names: list[str] | None = None,
+    ports: list[str] | None = None,
 ) -> str:
     """Generate docker-compose.yml from pre-computed hierarchy data.
 
@@ -95,6 +96,7 @@ def generate_compose_with_masks(
         docker_volume_name: Explicit volume name (overrides auto-derived)
         container_root: Container root path (default: /workspace)
         isolation_volume_names: Named isolation volumes (Layer 4) for the volumes section
+        ports: List of port mappings (e.g., ["3900:3900", "8080:8080"])
 
     Returns:
         docker-compose.yml content as string
@@ -158,6 +160,15 @@ def generate_compose_with_masks(
         f"    working_dir: {path_prefix}",
         "    stdin_open: true",
         "    tty: true",
+    ])
+
+    # Add ports if specified
+    if ports:
+        lines.append("    ports:")
+        for port in ports:
+            lines.append(f"      - \"{port}\"")
+
+    lines.extend([
         "",
         "volumes:",
         f"  {volume_name}:",

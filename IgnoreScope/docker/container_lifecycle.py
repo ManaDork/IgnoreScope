@@ -289,6 +289,7 @@ def execute_create(
             container_root=config.container_root,
             project_name=host_project_root.name,
             isolation_volume_names=hierarchy.isolation_volume_names,
+            ports=config.ports if config.ports else None,
         )
     except Exception as e:
         return OpResult(success=False, message=f"Failed to generate docker-compose.yml: {e}")
@@ -496,6 +497,7 @@ def execute_update(
             container_root=config.container_root,
             project_name=host_project_root.name,
             isolation_volume_names=new_hierarchy.isolation_volume_names,
+            ports=config.ports if config.ports else None,
         )
     except Exception as e:
         return OpResult(success=False, message=f"Failed to generate docker-compose.yml: {e}")

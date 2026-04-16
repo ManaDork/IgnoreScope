@@ -121,6 +121,7 @@ class ScopeDockerConfig(LocalMountConfig):
         container_root: Container root path (default: /workspace)
         siblings: List of external directories mounted as container siblings
         extensions: List of installed extension configs with isolation volume tracking
+        ports: List of port mappings for docker-compose (e.g., ["3900:3900", "8080:8080"])
     """
 
     container_files: set[Path] = field(default_factory=set)
@@ -131,6 +132,7 @@ class ScopeDockerConfig(LocalMountConfig):
     container_root: str = ""
     siblings: list[SiblingMount] = field(default_factory=list)
     extensions: list[ExtensionConfig] = field(default_factory=list)
+    ports: list[str] = field(default_factory=list)
     show_hidden: bool = False
 
     def __post_init__(self):
@@ -170,6 +172,10 @@ class ScopeDockerConfig(LocalMountConfig):
             'show_hidden': self.show_hidden,
             'local': base_dict,
         }
+
+        # Only include ports if configured
+        if self.ports:
+            result['ports'] = self.ports
 
         # Serialize container_root as relative ../traversal/mount_name
         if self.host_container_root and root:
@@ -253,6 +259,7 @@ class ScopeDockerConfig(LocalMountConfig):
             container_root=container_root,
             siblings=siblings,
             extensions=extensions,
+            ports=data.get('ports', []),
             show_hidden=data.get('show_hidden', False),
         )
 
