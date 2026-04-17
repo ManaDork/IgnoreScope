@@ -87,7 +87,7 @@ See [USAGE.md](USAGE.md) for the full step-by-step workflow guide.
 ### Undo/Redo System (Phase 1)
 - **Full state capture** — snapshots now include mount_specs + pushed_files (not just mount_specs)
 - **Keyboard shortcuts** — Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z for undo/redo (menu-integrated)
-- **Signal infrastructure** — undoPerformed / redoPerformed signals for future UI integration (Phase 2)
+- **Signal infrastructure** — undoPerformed / redoPerformed signals reserved for UI integration (Phase 2 — deferred to backlog)
 - **DRY refactoring** — consolidated pattern operations, extracted state capture helper (~60 LOC saved)
 
 ### RMB Menu Logic Refinement
