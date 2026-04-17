@@ -1093,7 +1093,7 @@ class TestIsolationVolumes:
     """Verify Layer 4 isolation volume computation."""
 
     def test_isolation_paths_produce_volumes(self, tmp_path: Path):
-        """isolation_paths → entries in ordered_volumes + isolation_volume_names."""
+        """isolation_paths → entries in isolation_volume_entries + isolation_volume_names."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1105,17 +1105,17 @@ class TestIsolationVolumes:
             isolation_paths=[("Claude Code", "/root/.local")],
         )
 
-        # Isolation volume appears in ordered_volumes
-        iso_entries = [v for v in hierarchy.ordered_volumes if "iso_" in v]
-        assert len(iso_entries) == 1
-        assert ":/root/.local" in iso_entries[0]
+        # L4 lives in its own list, separate from ordered_volumes (L1-L3 + siblings)
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
 
         # Name tracked in isolation_volume_names
         assert len(hierarchy.isolation_volume_names) == 1
         assert hierarchy.isolation_volume_names[0].startswith("iso_")
 
-    def test_isolation_after_all_layers(self, tmp_path: Path):
-        """Isolation volumes appear after Layer 1-3 entries."""
+    def test_isolation_separate_from_ordered_volumes(self, tmp_path: Path):
+        """L4 entries are stored separately from L1-L3 + siblings."""
         src = tmp_path / "src"
         api = src / "api"
         public = api / "public"
@@ -1129,11 +1129,12 @@ class TestIsolationVolumes:
             isolation_paths=[("Git", "/usr/bin")],
         )
 
-        # L1 mount + L2 mask + L3 reveal + L4 isolation = 4 entries
-        assert len(hierarchy.ordered_volumes) == 4
-        # Isolation is last
-        assert "iso_" in hierarchy.ordered_volumes[-1]
-        assert ":/usr/bin" in hierarchy.ordered_volumes[-1]
+        # L1 mount + L2 mask + L3 reveal = 3 entries in ordered_volumes
+        assert len(hierarchy.ordered_volumes) == 3
+        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
+        # L4 is in isolation_volume_entries
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/usr/bin" in hierarchy.isolation_volume_entries[0]
 
     def test_multiple_isolation_paths(self, tmp_path: Path):
         """Multiple isolation paths from different extensions."""
@@ -1152,10 +1153,9 @@ class TestIsolationVolumes:
         )
 
         assert len(hierarchy.isolation_volume_names) == 2
-        iso_entries = [v for v in hierarchy.ordered_volumes if "iso_" in v]
-        assert len(iso_entries) == 2
-        assert any("/root/.local" in v for v in iso_entries)
-        assert any("/usr/local/lib/p4-mcp-server" in v for v in iso_entries)
+        assert len(hierarchy.isolation_volume_entries) == 2
+        assert any("/root/.local" in v for v in hierarchy.isolation_volume_entries)
+        assert any("/usr/local/lib/p4-mcp-server" in v for v in hierarchy.isolation_volume_entries)
 
     def test_no_isolation_paths_empty_list(self, tmp_path: Path):
         """No isolation_paths → isolation_volume_names stays empty."""
@@ -1193,7 +1193,7 @@ class TestIsolationVolumes:
         assert "\\" not in name
 
     def test_isolation_with_siblings(self, tmp_path: Path):
-        """Isolation volumes appear after sibling volumes."""
+        """Isolation volumes are separate from sibling volumes."""
         src = tmp_path / "src"
         sibling = _make_sibling(
             host_path=Path("C:/Libs"),
@@ -1211,9 +1211,11 @@ class TestIsolationVolumes:
             isolation_paths=[("Claude Code", "/root/.local")],
         )
 
-        # primary mount + sibling mount + isolation = 3
-        assert len(hierarchy.ordered_volumes) == 3
-        # Isolation is last
-        assert "iso_" in hierarchy.ordered_volumes[-1]
+        # primary mount + sibling mount = 2 entries in ordered_volumes
+        assert len(hierarchy.ordered_volumes) == 2
+        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
+        # L4 is tracked separately
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
 
 

@@ -35,6 +35,7 @@ def _make_config(scope_name: str = "test-container", tmp_path: Path | None = Non
 def _make_hierarchy(
     mask_volume_names: list[str],
     isolation_volume_names: list[str] | None = None,
+    isolation_volume_entries: list[str] | None = None,
 ):
     """Create a minimal ContainerHierarchy mock with specified volume names."""
     from IgnoreScope.core.hierarchy import ContainerHierarchy
@@ -42,6 +43,7 @@ def _make_hierarchy(
     h = ContainerHierarchy()
     h.mask_volume_names = list(mask_volume_names)
     h.isolation_volume_names = list(isolation_volume_names or [])
+    h.isolation_volume_entries = list(isolation_volume_entries or [])
     h.ordered_volumes = []
     h.revealed_parents = set()
     h.validation_errors = []
@@ -257,14 +259,15 @@ class TestComposeIsolationVolumes:
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
-            ordered_volumes=["iso_claude_root_local:/root/.local"],
+            ordered_volumes=[],
             mask_volume_names=[],
             host_project_root=tmp_path,
             docker_container_name="test-container",
+            isolation_volume_entries=["iso_claude_root_local:/root/.local"],
             isolation_volume_names=["iso_claude_root_local"],
         )
 
-        # Volume appears in services.volumes (from ordered_volumes)
+        # Volume appears in services.volumes (from isolation_volume_entries)
         assert "iso_claude_root_local:/root/.local" in compose
         # Volume declared in top-level volumes section
         lines = compose.split("\n")
@@ -291,13 +294,11 @@ class TestComposeIsolationVolumes:
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
-            ordered_volumes=[
-                "mask_src_api:/workspace/src/api",
-                "iso_claude_root_local:/root/.local",
-            ],
+            ordered_volumes=["mask_src_api:/workspace/src/api"],
             mask_volume_names=["mask_src_api"],
             host_project_root=tmp_path,
             docker_container_name="test-container",
+            isolation_volume_entries=["iso_claude_root_local:/root/.local"],
             isolation_volume_names=["iso_claude_root_local"],
         )
 

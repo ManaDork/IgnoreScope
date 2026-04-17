@@ -49,8 +49,9 @@ class ContainerHierarchy:
     hierarchy, computed from mount_specs and pushed files.
 
     Attributes:
-        ordered_volumes: Volume entries in correct layering order for docker-compose.yml
+        ordered_volumes: Layer 1-3 + sibling volume entries (project content) for docker-compose.yml
         mask_volume_names: Named mask volumes for compose volumes section
+        isolation_volume_entries: Layer 4 volume entries (container-owned, delivery-mode-independent)
         isolation_volume_names: Named isolation volumes for compose volumes section (Layer 4)
         revealed_parents: Container paths needing mkdir -p before docker cp (pushed files)
         validation_errors: Configuration problems found during computation
@@ -58,11 +59,16 @@ class ContainerHierarchy:
         masked_paths: All hidden container paths (for UI/debugging)
     """
 
-    # For docker-compose.yml generation
+    # For docker-compose.yml generation — Layer 1-3 + siblings (project content only)
+    # L4 isolation entries live in isolation_volume_entries; callers skip ordered_volumes
+    # in Isolation container mode while still emitting L4.
     ordered_volumes: list[str] = field(default_factory=list)
 
     # Named mask volumes declared in docker-compose.yml volumes section
     mask_volume_names: list[str] = field(default_factory=list)
+
+    # Layer 4 volume entries (e.g. "iso_foo_root_local:/root/.local")
+    isolation_volume_entries: list[str] = field(default_factory=list)
 
     # Named isolation volumes declared in docker-compose.yml volumes section (Layer 4)
     isolation_volume_names: list[str] = field(default_factory=list)
@@ -387,7 +393,7 @@ def compute_container_hierarchy(
     """Compute complete container hierarchy from configuration.
 
     Single function computing ALL hierarchy logic. Used by:
-    - compose.py: uses ordered_volumes, mask_volume_names, isolation_volume_names
+    - compose.py: uses ordered_volumes, mask_volume_names, isolation_volume_entries, isolation_volume_names
     - validation: checks validation_errors
     - file_ops.py: uses revealed_parents
     - Future UI: uses visible_paths, masked_paths
@@ -438,11 +444,13 @@ def compute_container_hierarchy(
             for err in s_errs:
                 hierarchy.validation_errors.append(f"[{sibling.container_path}] {err}")
 
-    # Layer 4: Isolation volumes (persistent, container-owned, final overlay)
+    # Layer 4: Isolation volumes (persistent, container-owned, final overlay).
+    # Kept separate from ordered_volumes so Isolation container mode can skip
+    # project-content volumes while still emitting L4.
     if isolation_paths:
         for ext_name, container_path in isolation_paths:
             vol_name = f"iso_{sanitize_volume_name(ext_name)}_{sanitize_volume_name(container_path.strip('/').replace('/', '_'))}"
-            hierarchy.ordered_volumes.append(f"{vol_name}:{container_path}")
+            hierarchy.isolation_volume_entries.append(f"{vol_name}:{container_path}")
             hierarchy.isolation_volume_names.append(vol_name)
 
     return hierarchy
