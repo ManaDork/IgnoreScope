@@ -229,6 +229,32 @@ PHASE 6: COMPOSE DOCKER
     during create — NOT a compose artifact.
 
 
+PHASE 6a: CONTAINER MODE BRANCH (create only)
+──────────────────────────────────────────────────────────────
+
+    Compose emission and container lifecycle read config.container_mode
+    and select mode-specific outputs:
+
+    Hybrid ─────── compose YAML emits bind mounts + mask/reveal volumes
+                   as described in Phase 6. Lifecycle does not run an
+                   init step — content is live-linked from the host.
+
+    Isolation ──── compose YAML emits auth volume + isolation volumes
+                   only (project-content volumes are skipped). Lifecycle
+                   runs an init step after `compose up`:
+                     • init_source == "cp"    → walk the scope's visible
+                                                 set and docker cp each
+                                                 entry into the container.
+                                                 Symlinks/junctions get a
+                                                 mkdir stub only (contents
+                                                 not traversed).
+                     • init_source == "clone" → docker exec git clone
+                                                 (Phase 3+, not shipped)
+
+    Both modes share the `pushed_files` replay and extension reconciliation
+    steps that follow. See glossary → "Container Mode Terms" for vocabulary.
+
+
 PHASE 7: USER ACTION (GUI → CORE)
 ──────────────────────────────────────────────────────────────
 

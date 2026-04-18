@@ -189,3 +189,18 @@ Visibility is pure **STATE** — what the container sees. The 3 state values map
 | `"virtual"` | `visibility.virtual` | Structural intermediate or container-only node |
 
 METHOD flags (`is_masked`, `is_revealed`, `is_mount_root`, etc.) drive the P3/P4 accent positions in the gradient, selecting from `config.*`, `inherited.*`, `virtual.*`, and `ancestor.*` keys.
+
+---
+
+## Container Mode Color Mapping
+
+The Project Root Header tints to indicate the active scope's `container_mode` (see glossary → Container Mode Terms). The mapping reuses existing theme keys — no new variables are introduced.
+
+| Mode | Theme Key | Rationale |
+|------|-----------|-----------|
+| `"Hybrid"`    | `config.mount`         | Consistent with mount-checkbox coloring — Hybrid IS the mount-driven mode. |
+| `"Isolation"` | `visibility.virtual`   | Consistent with container-only / virtual content tinting — Isolation content lives only in the container. |
+
+Semantic overload note: `visibility.virtual` already tints container-only files and mirrored intermediate directories. Extending it to the Isolation header cue keeps the "lives only in the container" palette consistent across node-level and scope-level cues.
+
+Selector mechanism is an implementation detail left to the GUI zone — the Blueprint only specifies the mode→key mapping above.
