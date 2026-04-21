@@ -441,6 +441,119 @@ def cmd_install_p4_mcp(
     return True, msg
 
 
+def cmd_add_mount(
+    host_project_root: Path,
+    scope_name: str,
+    path: Path,
+    delivery: str = "bind",
+) -> tuple[bool, str]:
+    """Add a mount spec (bind or detached delivery) to a scope config.
+
+    Mirrors the GUI Mount / Virtual Mount RMB gestures. Loads the scope
+    config, appends a MountSpecPath via the appropriate LocalMountConfig
+    API, and persists the result. Overlap with an existing mount spec
+    rejects with a non-zero exit code. Does not create or mutate the
+    container — a subsequent create/update is required for the change to
+    take effect.
+
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+        path: Host path to mount (absolute)
+        delivery: "bind" (default — live bind mount) or "detached"
+                  (content cp'd at container create)
+
+    Returns:
+        Tuple of (success, message)
+    """
+    if delivery not in ("bind", "detached"):
+        return False, f"Invalid --delivery value: {delivery!r} (expected 'bind' or 'detached')"
+
+    mount_path = path if path.is_absolute() else (host_project_root / path).resolve()
+    if not mount_path.exists():
+        return False, f"Path does not exist: {mount_path}"
+
+    try:
+        config = load_config(host_project_root, scope_name)
+    except Exception as e:
+        return False, f"Failed to load config: {e}"
+
+    added = (
+        config.add_virtual_mount(mount_path)
+        if delivery == "detached"
+        else config.add_mount(mount_path)
+    )
+    if not added:
+        return False, (
+            f"Mount rejected: {mount_path} overlaps an existing mount spec "
+            f"(duplicate, ancestor, or descendant)"
+        )
+
+    save_config(config)
+    label = "Virtual Mount" if delivery == "detached" else "Mount"
+    return True, f"{label} added: {mount_path} (delivery={delivery})"
+
+
+def cmd_convert(
+    host_project_root: Path,
+    scope_name: str,
+    path: Path,
+    target: str,
+) -> tuple[bool, str]:
+    """Convert a mount spec's delivery mode in-place.
+
+    Mirrors the GUI Convert to Mount / Convert to Virtual Mount RMB
+    gestures — a direct ``MountSpecPath.delivery`` flip with no
+    pattern rewrites. When a container exists, the user is warned
+    that a subsequent recreate is required; this command does NOT
+    implicitly recreate (explicit create/update is a separate step).
+
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+        path: Host path that must exact-match an existing mount_root
+        target: "bind" or "detached"
+
+    Returns:
+        Tuple of (success, message)
+    """
+    if target not in ("bind", "detached"):
+        return False, f"Invalid --to value: {target!r} (expected 'bind' or 'detached')"
+
+    mount_path = path if path.is_absolute() else (host_project_root / path).resolve()
+
+    try:
+        config = load_config(host_project_root, scope_name)
+    except Exception as e:
+        return False, f"Failed to load config: {e}"
+
+    existing = next(
+        (ms for ms in config.mount_specs if ms.mount_root == mount_path),
+        None,
+    )
+    if existing is None:
+        return False, f"No mount spec found for path: {mount_path}"
+    if existing.delivery == target:
+        return True, f"Already at delivery={target}: {mount_path} (no-op)"
+
+    flipped = config.convert_delivery(mount_path, target)
+    if not flipped:
+        return False, f"Failed to convert delivery for: {mount_path}"
+
+    save_config(config)
+
+    docker_name = build_docker_name(host_project_root, scope_name)
+    recreate_note = ""
+    if container_exists(docker_name):
+        recreate_note = (
+            "\nNote: container exists — run `create` (or GUI Recreate) to "
+            "apply the new delivery mode."
+        )
+    return True, (
+        f"Delivery converted to {target}: {mount_path}{recreate_note}"
+    )
+
+
 def cmd_remove(
     host_project_root: Path,
     scope_name: str,

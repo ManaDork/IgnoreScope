@@ -14,6 +14,7 @@ from .commands import (
     cmd_create, cmd_push, cmd_pull, cmd_remove,
     cmd_install_git, cmd_install_p4_mcp,
     cmd_list, cmd_status, cmd_cp,
+    cmd_add_mount, cmd_convert,
 )
 
 
@@ -456,6 +457,77 @@ def cmd_status_wrapper(host_project_root: Path, args: list[str]) -> None:
     sys.exit(0 if success else 1)
 
 
+def _parse_flag_value(args: list[str], flag: str) -> str | None:
+    """Extract ``--flag value`` or ``--flag=value`` from args. Returns None if absent."""
+    for i, arg in enumerate(args):
+        if arg == flag and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith(f"{flag}="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _collect_positional(args: list[str], start: int = 2) -> list[str]:
+    """Collect non-flag positional args, skipping ``--flag value`` pairs."""
+    positional: list[str] = []
+    skip_next = False
+    for i, arg in enumerate(args[start:], start=start):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("--"):
+            if "=" not in arg and i + 1 < len(args):
+                skip_next = True
+            continue
+        positional.append(arg)
+    return positional
+
+
+def cmd_add_mount_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for add-mount command.
+
+    Usage: python -m IgnoreScope add-mount <path> [--container NAME]
+                                                   [--delivery bind|detached]
+    """
+    scope_name = _parse_container_arg(args)
+    delivery = _parse_flag_value(args, "--delivery") or "bind"
+
+    positional = _collect_positional(args)
+    if not positional:
+        print("[ERROR] Usage: python -m IgnoreScope add-mount [--container NAME] "
+              "[--delivery bind|detached] <path>")
+        sys.exit(1)
+
+    path = Path(positional[0])
+    success, msg = cmd_add_mount(host_project_root, scope_name, path, delivery)
+    print(f"[{'OK' if success else 'ERROR'}] {msg}")
+    sys.exit(0 if success else 1)
+
+
+def cmd_convert_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for convert command.
+
+    Usage: python -m IgnoreScope convert <path> --to {bind,detached}
+                                         [--container NAME]
+    """
+    scope_name = _parse_container_arg(args)
+    target = _parse_flag_value(args, "--to")
+    if target is None:
+        print("[ERROR] --to {bind,detached} is required")
+        sys.exit(1)
+
+    positional = _collect_positional(args)
+    if not positional:
+        print("[ERROR] Usage: python -m IgnoreScope convert [--container NAME] "
+              "<path> --to {bind,detached}")
+        sys.exit(1)
+
+    path = Path(positional[0])
+    success, msg = cmd_convert(host_project_root, scope_name, path, target)
+    print(f"[{'OK' if success else 'ERROR'}] {msg}")
+    sys.exit(0 if success else 1)
+
+
 def cmd_cp_wrapper(host_project_root: Path, args: list[str]) -> None:
     """Wrapper for cp command."""
     scope_name = _parse_container_arg(args)
@@ -508,6 +580,10 @@ Usage:
     python -m IgnoreScope install-p4-mcp [--project PATH] [--container NAME] [--devenv-mount PATH]
                                          [--project-dir DIR] [--scope-dir DIR]
                                          [--p4port HOST] [--p4user USER] [--p4client WS]
+    python -m IgnoreScope add-mount [--project PATH] [--container NAME]
+                                    [--delivery bind|detached] <path>
+    python -m IgnoreScope convert [--project PATH] [--container NAME]
+                                  <path> --to {bind,detached}
 
 Commands:
     gui             Launch graphical configuration editor (PyQt6)
@@ -520,6 +596,8 @@ Commands:
     remove          Remove container and volumes
     install-git     Install Git into a running container
     install-p4-mcp  Install P4 MCP Server from devenv mount
+    add-mount       Add a mount spec (bind or detached delivery)
+    convert         Flip a mount spec's delivery (bind <-> detached)
 
 Options:
     --project PATH     Project root directory (default: current directory)
@@ -531,6 +609,8 @@ Options:
     --name NAME       Git user.name (with --configure)
     --email EMAIL     Git user.email (with --configure)
     --devenv-mount PATH  Container devenv mount path for install-p4-mcp (default: /devenv)
+    --delivery MODE    Mount delivery mode for add-mount (bind or detached; default: bind)
+    --to MODE          Target delivery mode for convert (bind or detached; required)
 
   Config Deploy Options (optional — deploys default config files after binary install):
     --project-dir DIR   Container project root (e.g. /MyProject)
