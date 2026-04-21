@@ -14,7 +14,9 @@ Uses OpResult for standardized returns.
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+import stat
+from pathlib import Path, PurePosixPath
 
 from ..core.config import (
     CONFIG_FILENAME,
@@ -33,6 +35,8 @@ from .container_ops import (
     remove_container_compose,
     ensure_container_running,
     ensure_container_directories,
+    exec_in_container,
+    push_file_to_container,
     container_exists,
     volume_exists,
     remove_volume,
@@ -40,6 +44,147 @@ from .container_ops import (
 from .compose import generate_compose_with_masks, generate_dockerfile
 from .names import DockerNames, build_docker_name
 from ..utils.strings import sanitize_volume_name
+
+
+_EMPTY_MOUNT_SPECS_WARNING = (
+    "Detached init: no mount_specs — container has only extensions + auth. "
+    "Add mount_specs or push files manually."
+)
+
+
+def _is_reparse_point(p: Path) -> bool:
+    """True for POSIX symlinks OR Windows reparse points (junctions, mount points)."""
+    try:
+        if p.is_symlink():
+            return True
+    except OSError:
+        return False
+    if os.name == "nt":
+        try:
+            st = os.lstat(p)
+            attrs = getattr(st, "st_file_attributes", 0)
+            return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        except (OSError, AttributeError):
+            return False
+    return False
+
+
+def _detached_init(
+    docker_name: str,
+    config: ScopeDockerConfig,
+) -> OpResult:
+    """Populate detached mount_specs via docker cp + rm.
+
+    For each ``delivery == "detached"`` spec in ``config.mount_specs``:
+      1. cp the mount_root into its container path.
+      2. cp each reveal pattern (negated) target into its container path.
+      3. rm -rf each mask pattern target inside the container.
+      4. Symlinks / Windows reparse points get a mkdir stub; traversal stops
+         at the link so the target is never cp'd.
+
+    Caller is responsible for only invoking this when at least one spec has
+    ``delivery == "detached"`` (see dispatch site for bind-only skip). An
+    empty ``mount_specs`` list returns a no-op success; this should not
+    happen in practice but is handled defensively.
+
+    Args:
+        docker_name: Resolved Docker container name.
+        config: ScopeDockerConfig with mount_specs already validated.
+
+    Returns:
+        OpResult with per-spec details aggregated under ``details``.
+    """
+    from ..core.hierarchy import to_container_path
+
+    if not config.mount_specs:
+        return OpResult(
+            success=True,
+            message="Detached init: no mount_specs",
+            details=[_EMPTY_MOUNT_SPECS_WARNING],
+        )
+
+    detached_specs = [ms for ms in config.mount_specs if ms.delivery == "detached"]
+    if not detached_specs:
+        return OpResult(success=True, message="Detached init: no detached specs")
+
+    running_ok, running_msg = ensure_container_running(docker_name)
+    if not running_ok:
+        return OpResult(
+            success=False,
+            message=f"Container not running: {running_msg}",
+            error=OpError.CONTAINER_NOT_RUNNING,
+        )
+
+    cp_pairs: list[tuple[Path, str]] = []
+    rm_container_paths: list[str] = []
+
+    for ms in detached_specs:
+        # L1 equivalent: the mount_root itself is cp'd.
+        cp_pairs.append((
+            ms.mount_root,
+            to_container_path(ms.mount_root, config.container_root, config.host_container_root),
+        ))
+        for pattern in ms.patterns:
+            is_exception = pattern.startswith("!")
+            folder = pattern.lstrip("!").rstrip("/")
+            if folder.endswith("/**"):
+                folder = folder[:-3]
+            elif folder.endswith("/*"):
+                folder = folder[:-2]
+            if not folder:
+                continue
+            abs_path = ms.mount_root / folder
+            cpath = to_container_path(abs_path, config.container_root, config.host_container_root)
+            if is_exception:
+                # Reveal → included in cp walk.
+                cp_pairs.append((abs_path, cpath))
+            else:
+                # Mask → post-cp rm inside the container.
+                rm_container_paths.append(cpath)
+
+    # mkdir -p parents so cp targets exist before we copy into them.
+    parents: set[str] = set()
+    for _, cpath in cp_pairs:
+        parent_dir = str(PurePosixPath(cpath).parent)
+        if parent_dir and parent_dir != config.container_root and parent_dir != "/":
+            parents.add(parent_dir)
+    if parents:
+        dir_ok, dir_msg = ensure_container_directories(docker_name, sorted(parents))
+        if not dir_ok:
+            return OpResult(
+                success=False,
+                message=f"Failed to create container directories: {dir_msg}",
+                error=OpError.VALIDATION_FAILED,
+            )
+
+    details: list[str] = []
+    n_ok = 0
+    for host_path, cpath in cp_pairs:
+        if _is_reparse_point(host_path):
+            ensure_container_directories(docker_name, [cpath])
+            details.append(f"skipped symlink (stub created): {host_path} -> {cpath}")
+            continue
+        ok, msg = push_file_to_container(docker_name, host_path, cpath)
+        if ok:
+            n_ok += 1
+        else:
+            details.append(f"cp failed: {host_path} -> {cpath}: {msg}")
+
+    # Apply masks by removing their container paths after the cp walk.
+    for cpath in rm_container_paths:
+        ok, _stdout, stderr = exec_in_container(docker_name, ["rm", "-rf", cpath])
+        if ok:
+            details.append(f"masked: rm -rf {cpath}")
+        else:
+            details.append(
+                f"mask rm failed: {cpath}: {stderr or 'Unknown error'}"
+            )
+
+    return OpResult(
+        success=True,
+        message=f"Detached init: {n_ok}/{len(cp_pairs)} pairs cp'd",
+        details=details,
+    )
 
 
 def _collect_isolation_paths(config: ScopeDockerConfig) -> list[tuple[str, str]] | None:
@@ -335,6 +480,15 @@ def execute_create(
     except Exception as e:
         return OpResult(success=False, message=f"Container creation error: {e}")
 
+    # Detached init: deliver content for any mount_spec with delivery="detached"
+    # via docker cp. Bind-only scopes skip this entirely.
+    detached_details: list[str] = []
+    if any(ms.delivery == "detached" for ms in config.mount_specs):
+        init_result = _detached_init(docker_name, config)
+        if not init_result.success:
+            return init_result
+        detached_details = init_result.details or []
+
     # Pre-create directories for pushed files in mask volumes
     if hierarchy.revealed_parents:
         running_ok, running_msg = ensure_container_running(docker_name)
@@ -359,12 +513,15 @@ def execute_create(
         return OpResult(success=False, message=f"Failed to save config: {e}")
 
     result_msg = f"Container created: {docker_name}\nConfig saved to {output_dir / CONFIG_FILENAME}"
+    if detached_details:
+        result_msg += f"\n{len(detached_details)} detached init note(s)"
     if reconcile_result and reconcile_result.details:
         result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
 
     return OpResult(
         success=True,
         message=result_msg,
+        details=detached_details,
     )
 
 
@@ -538,6 +695,14 @@ def execute_update(
     except Exception as e:
         return OpResult(success=False, message=f"Container creation error: {e}")
 
+    # ── Phase 8a: Detached init (docker cp + mask rm) for any detached specs ──
+    detached_details: list[str] = []
+    if any(ms.delivery == "detached" for ms in config.mount_specs):
+        init_result = _detached_init(docker_name, config)
+        if not init_result.success:
+            return init_result
+        detached_details = init_result.details or []
+
     # ── Phase 9: Prune orphan volumes (non-fatal) ──
     prune_details = []
     for orphan in sorted(orphan_volumes):
@@ -574,12 +739,18 @@ def execute_update(
     result_msg = f"Container updated: {docker_name}"
     if orphan_volumes:
         result_msg += f"\nPruned {len(orphan_volumes)} orphan volume(s)"
+    if detached_details:
+        result_msg += f"\n{len(detached_details)} detached init note(s)"
     if reconcile_result and reconcile_result.details:
         result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
     return OpResult(
         success=True,
         message=result_msg,
-        details=prune_details + (reconcile_result.details if reconcile_result else []),
+        details=(
+            prune_details
+            + detached_details
+            + (reconcile_result.details if reconcile_result else [])
+        ),
     )
 
 
