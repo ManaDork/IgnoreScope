@@ -27,6 +27,8 @@ from .cli.interactive import (
     cmd_list_wrapper,
     cmd_status_wrapper,
     cmd_cp_wrapper,
+    cmd_add_mount_wrapper,
+    cmd_convert_wrapper,
     print_usage,
 )
 
@@ -85,6 +87,10 @@ def main() -> None:
             cmd_install_git_wrapper(host_project_root, sys.argv)
         elif command == 'install-p4-mcp':
             cmd_install_p4_mcp_wrapper(host_project_root, sys.argv)
+        elif command == 'add-mount':
+            cmd_add_mount_wrapper(host_project_root, sys.argv)
+        elif command == 'convert':
+            cmd_convert_wrapper(host_project_root, sys.argv)
         else:
             print(f"Unknown command: {command}\n")
             print_usage()

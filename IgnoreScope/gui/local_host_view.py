@@ -172,15 +172,23 @@ class LocalHostView(QWidget):
     # ── Header Context Menu ──────────────────────────────────────
 
     def _show_header_context_menu(self, pos: QPoint) -> None:
-        """Header RMB: full 5-gesture state machine scoped to host_project_root."""
+        """Header RMB: full 5-gesture state machine scoped to host_project_root.
+
+        When no gestures apply (e.g., the header path is an ancestor of an
+        existing mount_spec), fall back to a disabled ``No valid actions``
+        entry so the RMB is always discoverable.
+        """
         root = self._tree.host_project_root
         if root is None:
             return
 
         menu = QMenu(self)
         self._add_delivery_gestures(menu, root)
-        if menu.actions():
-            menu.exec(self._tree_view.header().mapToGlobal(pos))
+        if not menu.actions():
+            placeholder = QAction("No valid actions", menu)
+            placeholder.setEnabled(False)
+            menu.addAction(placeholder)
+        menu.exec(self._tree_view.header().mapToGlobal(pos))
 
     def _add_delivery_gestures(self, menu: QMenu, path: Path) -> None:
         """Append the five-gesture delivery state machine to ``menu``.
@@ -273,8 +281,11 @@ class LocalHostView(QWidget):
                 )
                 info.setEnabled(False)
                 menu.addAction(info)
-        if menu.actions():
-            menu.exec(self._tree_view.viewport().mapToGlobal(pos))
+        if not menu.actions():
+            placeholder = QAction("No valid actions", menu)
+            placeholder.setEnabled(False)
+            menu.addAction(placeholder)
+        menu.exec(self._tree_view.viewport().mapToGlobal(pos))
 
     def _build_single_select_menu(
         self, menu: QMenu, node: MountDataNode, index,
