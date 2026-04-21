@@ -314,8 +314,8 @@ See `GUI_STATE_STYLES.md` Section 8 for full legacy correspondence table.
 **`local_host_view.py`** — Left Panel (Folder Configuration)
 > Sets up the QTreeView inside the Folder Configuration dock: assigns MountDataTreeModel + StyleDelegate(LocalHostDisplayConfig), configures header columns, and provides two RMB surfaces:
 >
-> - **Project Root Header RMB** (`_show_header_context_menu`) — targets `host_project_root` only. Offers Mount/Unmount using `is_in_raw_set` + `can_mount` guard. Does not appear if no valid action is possible.
-> - **Tree Node RMB** (`_show_context_menu`) — targets selected node(s). Mount visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs).
+> - **Project Root Header RMB** (`_show_header_context_menu`) — targets `host_project_root` only. Exposes the Mount Delivery five-gesture state machine (see glossary → Mount Delivery Terms): Mount, Virtual Mount, Unmount, Convert to Virtual Mount / Convert to Mount, Remove Virtual Mount, Remove But Keep Children, and container-dependent actions (Remove Folder from Container, Remove Folder Tree from Container) when a container exists. Menu is always non-empty when a scope is loaded — at minimum Mount + Virtual Mount are offered when the root has no mount set.
+> - **Tree Node RMB** (`_show_context_menu`) — targets selected node(s). Same five-gesture state machine as Project Root Header, scoped to the selected path(s). Mount / Virtual Mount visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs). Shift-select supports batch Remove across multiple Virtual Mount entries.
 >
 > Does NOT own the data model, manage state, or load configs.
 
