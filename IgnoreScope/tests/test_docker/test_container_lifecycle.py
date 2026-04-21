@@ -582,3 +582,164 @@ class TestReconcileExtensions:
             reconcile_extensions("test-container", config)
 
         mock_save.assert_not_called()
+
+
+# =============================================================================
+# pushed_files replay — mode-agnostic
+# =============================================================================
+
+
+class TestPushedFilesReplay:
+    """pushed_files replay runs on every create/update when non-empty.
+
+    Delivery-agnostic: bind-only, detached-only, and mixed scopes all replay.
+    """
+
+    def _patches_for_create(self, tmp_path: Path):
+        """Patches sufficient for execute_create to reach the replay block."""
+        from IgnoreScope.core.hierarchy import ContainerHierarchy
+
+        h = ContainerHierarchy()
+        h.mask_volume_names = []
+        h.isolation_volume_names = []
+        h.isolation_volume_entries = []
+        h.ordered_volumes = []
+        h.revealed_parents = set()
+        h.validation_errors = []
+
+        return {
+            "compute_hierarchy": patch(
+                "IgnoreScope.core.hierarchy.compute_container_hierarchy",
+                return_value=h,
+            ),
+            "is_docker_running": patch(
+                "IgnoreScope.docker.container_lifecycle.is_docker_running",
+                return_value=(True, "ok"),
+            ),
+            "generate_compose": patch(
+                "IgnoreScope.docker.container_lifecycle.generate_compose_with_masks",
+                return_value="version: '3'\nservices: {}\n",
+            ),
+            "generate_dockerfile": patch(
+                "IgnoreScope.docker.container_lifecycle.generate_dockerfile",
+                return_value="FROM ubuntu:22.04\n",
+            ),
+            "build_image": patch(
+                "IgnoreScope.docker.container_lifecycle.build_image",
+                return_value=(True, "built"),
+            ),
+            "create_container_compose": patch(
+                "IgnoreScope.docker.container_lifecycle.create_container_compose",
+                return_value=(True, "created", "test-container"),
+            ),
+            "ensure_container_running": patch(
+                "IgnoreScope.docker.container_lifecycle.ensure_container_running",
+                return_value=(True, "running"),
+            ),
+            "ensure_container_directories": patch(
+                "IgnoreScope.docker.container_lifecycle.ensure_container_directories",
+                return_value=(True, "dirs ok"),
+            ),
+            "save_config": patch(
+                "IgnoreScope.docker.container_lifecycle.save_config",
+            ),
+        }
+
+    def _run_create(self, patches, tmp_path, config):
+        from IgnoreScope.docker.container_lifecycle import execute_create
+
+        mocks = {}
+        for name, p in patches.items():
+            mocks[name] = p.start()
+        try:
+            result = execute_create(tmp_path, config)
+        finally:
+            for p in patches.values():
+                p.stop()
+        return result, mocks
+
+    def test_empty_pushed_files_no_batch_call(self, tmp_path: Path):
+        """No pushed_files → execute_push_batch not called."""
+        config = _make_config(tmp_path=tmp_path)
+        config.pushed_files = set()
+
+        patches = self._patches_for_create(tmp_path)
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
+        ) as mock_batch:
+            result, _ = self._run_create(patches, tmp_path, config)
+
+        assert result.success is True
+        mock_batch.assert_not_called()
+
+    def test_bind_delivery_replay_runs(self, tmp_path: Path):
+        """All-bind scope with pushed_files → replay runs (mode-agnostic)."""
+        from IgnoreScope.core.mount_spec_path import MountSpecPath
+
+        src = tmp_path / "src"
+        src.mkdir()
+        pushed = tmp_path / "src" / "config.json"
+        pushed.parent.mkdir(parents=True, exist_ok=True)
+        pushed.write_text("{}")
+
+        config = _make_config(tmp_path=tmp_path)
+        config.mount_specs = [MountSpecPath(mount_root=src, patterns=[], delivery="bind")]
+        config.pushed_files = {pushed}
+
+        patches = self._patches_for_create(tmp_path)
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
+            return_value={pushed: OpResult(success=True, message="pushed")},
+        ) as mock_batch:
+            result, _ = self._run_create(patches, tmp_path, config)
+
+        assert result.success is True
+        mock_batch.assert_called_once()
+
+    def test_detached_delivery_replay_runs(self, tmp_path: Path):
+        """Detached scope with pushed_files → replay runs after detached_init."""
+        from IgnoreScope.core.mount_spec_path import MountSpecPath
+
+        src = tmp_path / "src"
+        src.mkdir()
+        pushed = tmp_path / "src" / "secret.env"
+        pushed.parent.mkdir(parents=True, exist_ok=True)
+        pushed.write_text("X=1")
+
+        config = _make_config(tmp_path=tmp_path)
+        config.mount_specs = [
+            MountSpecPath(mount_root=src, patterns=[], delivery="detached"),
+        ]
+        config.pushed_files = {pushed}
+
+        patches = self._patches_for_create(tmp_path)
+        with patch(
+            "IgnoreScope.docker.container_lifecycle._detached_init",
+            return_value=OpResult(success=True, message="ok", details=[]),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
+            return_value={pushed: OpResult(success=True, message="pushed")},
+        ) as mock_batch:
+            result, _ = self._run_create(patches, tmp_path, config)
+
+        assert result.success is True
+        mock_batch.assert_called_once()
+
+    def test_replay_failure_in_details(self, tmp_path: Path):
+        """Per-file replay failure → aggregated into details, not fatal."""
+        src = tmp_path / "src"
+        src.mkdir()
+        pushed = tmp_path / "src" / "missing.txt"
+
+        config = _make_config(tmp_path=tmp_path)
+        config.pushed_files = {pushed}
+
+        patches = self._patches_for_create(tmp_path)
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
+            return_value={pushed: OpResult(success=False, message="not found")},
+        ):
+            result, _ = self._run_create(patches, tmp_path, config)
+
+        assert result.success is True
+        assert any("pushed_files replay failed" in d for d in result.details)

@@ -42,6 +42,7 @@ from .container_ops import (
     remove_volume,
 )
 from .compose import generate_compose_with_masks, generate_dockerfile
+from .file_ops import execute_push_batch
 from .names import DockerNames, build_docker_name
 from ..utils.strings import sanitize_volume_name
 
@@ -498,6 +499,25 @@ def execute_create(
             )
             # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
+    # Replay pushed_files into the fresh container FS. Mode-agnostic — runs on
+    # every create when pushed_files is non-empty. Uses the canonical
+    # single-file push path. Per-file failures surface in details; not fatal.
+    replay_details: list[str] = []
+    if config.pushed_files:
+        running_ok, _ = ensure_container_running(docker_name)
+        if running_ok:
+            replay_results = execute_push_batch(
+                list(config.pushed_files),
+                docker_name,
+                config.container_root,
+                config.host_container_root,
+            )
+            for host_path, res in replay_results.items():
+                if not res.success:
+                    replay_details.append(
+                        f"pushed_files replay failed: {host_path} — {res.message}"
+                    )
+
     # Reconcile extensions (non-fatal — deploy/verify after container is up)
     reconcile_result = None
     if config.extensions:
@@ -515,13 +535,15 @@ def execute_create(
     result_msg = f"Container created: {docker_name}\nConfig saved to {output_dir / CONFIG_FILENAME}"
     if detached_details:
         result_msg += f"\n{len(detached_details)} detached init note(s)"
+    if replay_details:
+        result_msg += f"\n{len(replay_details)} pushed_files replay note(s)"
     if reconcile_result and reconcile_result.details:
         result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
 
     return OpResult(
         success=True,
         message=result_msg,
-        details=detached_details,
+        details=detached_details + replay_details,
     )
 
 
@@ -722,6 +744,24 @@ def execute_update(
             )
             # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
+    # ── Phase 10a: Replay pushed_files into recreated container ──
+    # Mode-agnostic — runs on every update when pushed_files is non-empty.
+    replay_details: list[str] = []
+    if config.pushed_files:
+        running_ok, _ = ensure_container_running(docker_name)
+        if running_ok:
+            replay_results = execute_push_batch(
+                list(config.pushed_files),
+                docker_name,
+                config.container_root,
+                config.host_container_root,
+            )
+            for host_path, res in replay_results.items():
+                if not res.success:
+                    replay_details.append(
+                        f"pushed_files replay failed: {host_path} — {res.message}"
+                    )
+
     # ── Phase 11: Reconcile extensions (non-fatal) ──
     reconcile_result = None
     if config.extensions:
@@ -741,6 +781,8 @@ def execute_update(
         result_msg += f"\nPruned {len(orphan_volumes)} orphan volume(s)"
     if detached_details:
         result_msg += f"\n{len(detached_details)} detached init note(s)"
+    if replay_details:
+        result_msg += f"\n{len(replay_details)} pushed_files replay note(s)"
     if reconcile_result and reconcile_result.details:
         result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
     return OpResult(
@@ -749,6 +791,7 @@ def execute_update(
         details=(
             prune_details
             + detached_details
+            + replay_details
             + (reconcile_result.details if reconcile_result else [])
         ),
     )
