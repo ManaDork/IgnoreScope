@@ -229,6 +229,44 @@ PHASE 6: COMPOSE DOCKER
     during create — NOT a compose artifact.
 
 
+PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
+──────────────────────────────────────────────────────────────
+
+    Compose emission and container lifecycle branch per MountSpecPath
+    based on `mount_spec.delivery`, NOT on a scope-level mode:
+
+    delivery == "bind" ─── compose YAML emits the Layer 1 bind mount
+                           + mask/reveal layers as described in Phase 6.
+                           Lifecycle runs no init step for this spec —
+                           content is live-linked from the host.
+
+    delivery == "detached" ─ compose YAML emits NO Layer 1 for this
+                             spec (and no L2/L3 project-content volumes
+                             backing it). Lifecycle runs a per-spec
+                             init after `compose up`:
+                               • Walk mount_root's content on the host
+                                 (respecting mask/reveal patterns) and
+                                 `docker cp` into the container.
+                               • Masks (L2 patterns) within this spec
+                                 → `docker exec rm -rf <masked_path>`
+                                 post-cp.
+                               • Reveals (L3 patterns) within this spec
+                                 → included in the cp walk.
+                               • Symlinks/junctions get a mkdir stub;
+                                 contents are not traversed.
+
+    Layer 4 (isolation volumes for extensions — auth, Claude, Git)
+    are emitted regardless of any mount_spec delivery. They are
+    orthogonal to per-spec delivery choice.
+
+    Both deliveries share the `pushed_files` replay and extension
+    reconciliation steps that follow. On container recreate, detached
+    content is ephemeral (writable layer) and must replay every time;
+    bind content re-attaches host state automatically.
+
+    See glossary → "Mount Delivery Terms" for vocabulary.
+
+
 PHASE 7: USER ACTION (GUI → CORE)
 ──────────────────────────────────────────────────────────────
 

@@ -189,3 +189,22 @@ Visibility is pure **STATE** — what the container sees. The 3 state values map
 | `"virtual"` | `visibility.virtual` | Structural intermediate or container-only node |
 
 METHOD flags (`is_masked`, `is_revealed`, `is_mount_root`, etc.) drive the P3/P4 accent positions in the gradient, selecting from `config.*`, `inherited.*`, `virtual.*`, and `ancestor.*` keys.
+
+---
+
+## Mount Delivery Color Mapping
+
+The Project Root Header tints to indicate the active scope's dominant delivery mode across its `mount_specs` (see glossary → Mount Delivery Terms). The mapping reuses existing theme keys — no new variables are introduced.
+
+| Scope's mount_specs delivery mix | Theme Key | Rationale |
+|------|-----------|-----------|
+| All `delivery == "bind"` | `config.mount` | Consistent with mount-checkbox coloring — bind IS the mount-driven mechanism. |
+| All `delivery == "detached"` | `visibility.virtual` | Consistent with container-only / virtual content tinting — detached content lives only in the container. |
+| **Mixed** (some bind, some detached) | **Majority by spec count wins** | Ties resolve to `config.mount`. |
+| Empty scope (no mount_specs) | Default panel-header color | No signal to communicate. |
+
+Semantic overload note: `visibility.virtual` already tints container-only files and mirrored intermediate directories. Extending it to the detached-majority header tint keeps the "lives only in the container" palette consistent across node-level and scope-level cues.
+
+Per-scope header tint is a signal of the scope's overall shape — it does NOT imply every spec has that delivery. For fine-grained per-spec visual cues, refer to per-node styling in `GUI_STATE_STYLES.md`.
+
+Selector mechanism is an implementation detail left to the GUI zone — the Blueprint only specifies the input signal (`delivery` mix) and the output theme key above.

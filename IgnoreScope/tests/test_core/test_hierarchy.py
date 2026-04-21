@@ -1093,7 +1093,7 @@ class TestIsolationVolumes:
     """Verify Layer 4 isolation volume computation."""
 
     def test_isolation_paths_produce_volumes(self, tmp_path: Path):
-        """isolation_paths → entries in ordered_volumes + isolation_volume_names."""
+        """isolation_paths → entries in isolation_volume_entries + isolation_volume_names."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1105,17 +1105,17 @@ class TestIsolationVolumes:
             isolation_paths=[("Claude Code", "/root/.local")],
         )
 
-        # Isolation volume appears in ordered_volumes
-        iso_entries = [v for v in hierarchy.ordered_volumes if "iso_" in v]
-        assert len(iso_entries) == 1
-        assert ":/root/.local" in iso_entries[0]
+        # L4 lives in its own list, separate from ordered_volumes (L1-L3 + siblings)
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
 
         # Name tracked in isolation_volume_names
         assert len(hierarchy.isolation_volume_names) == 1
         assert hierarchy.isolation_volume_names[0].startswith("iso_")
 
-    def test_isolation_after_all_layers(self, tmp_path: Path):
-        """Isolation volumes appear after Layer 1-3 entries."""
+    def test_isolation_separate_from_ordered_volumes(self, tmp_path: Path):
+        """L4 entries are stored separately from L1-L3 + siblings."""
         src = tmp_path / "src"
         api = src / "api"
         public = api / "public"
@@ -1129,11 +1129,12 @@ class TestIsolationVolumes:
             isolation_paths=[("Git", "/usr/bin")],
         )
 
-        # L1 mount + L2 mask + L3 reveal + L4 isolation = 4 entries
-        assert len(hierarchy.ordered_volumes) == 4
-        # Isolation is last
-        assert "iso_" in hierarchy.ordered_volumes[-1]
-        assert ":/usr/bin" in hierarchy.ordered_volumes[-1]
+        # L1 mount + L2 mask + L3 reveal = 3 entries in ordered_volumes
+        assert len(hierarchy.ordered_volumes) == 3
+        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
+        # L4 is in isolation_volume_entries
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/usr/bin" in hierarchy.isolation_volume_entries[0]
 
     def test_multiple_isolation_paths(self, tmp_path: Path):
         """Multiple isolation paths from different extensions."""
@@ -1152,10 +1153,9 @@ class TestIsolationVolumes:
         )
 
         assert len(hierarchy.isolation_volume_names) == 2
-        iso_entries = [v for v in hierarchy.ordered_volumes if "iso_" in v]
-        assert len(iso_entries) == 2
-        assert any("/root/.local" in v for v in iso_entries)
-        assert any("/usr/local/lib/p4-mcp-server" in v for v in iso_entries)
+        assert len(hierarchy.isolation_volume_entries) == 2
+        assert any("/root/.local" in v for v in hierarchy.isolation_volume_entries)
+        assert any("/usr/local/lib/p4-mcp-server" in v for v in hierarchy.isolation_volume_entries)
 
     def test_no_isolation_paths_empty_list(self, tmp_path: Path):
         """No isolation_paths → isolation_volume_names stays empty."""
@@ -1193,7 +1193,7 @@ class TestIsolationVolumes:
         assert "\\" not in name
 
     def test_isolation_with_siblings(self, tmp_path: Path):
-        """Isolation volumes appear after sibling volumes."""
+        """Isolation volumes are separate from sibling volumes."""
         src = tmp_path / "src"
         sibling = _make_sibling(
             host_path=Path("C:/Libs"),
@@ -1211,9 +1211,129 @@ class TestIsolationVolumes:
             isolation_paths=[("Claude Code", "/root/.local")],
         )
 
-        # primary mount + sibling mount + isolation = 3
-        assert len(hierarchy.ordered_volumes) == 3
-        # Isolation is last
-        assert "iso_" in hierarchy.ordered_volumes[-1]
+        # primary mount + sibling mount = 2 entries in ordered_volumes
+        assert len(hierarchy.ordered_volumes) == 2
+        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
+        # L4 is tracked separately
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+
+
+# ──────────────────────────────────────────────
+# TEST: per-spec delivery (bind vs detached) — Task 2.3
+# ──────────────────────────────────────────────
+
+
+class TestPerSpecDelivery:
+    """Detached specs emit no L1/L2/L3 volumes; bind specs behave as before."""
+
+    def test_detached_spec_emits_no_volume_entries(self, tmp_path: Path):
+        """A single detached spec produces an empty ordered_volumes list."""
+        src = tmp_path / "src"
+        detached = MountSpecPath(
+            mount_root=src, patterns=["vendor/"], delivery="detached",
+        )
+
+        entries, masks, visible, hidden = _compute_volume_entries(
+            [detached], "/workspace", tmp_path,
+        )
+        assert entries == []
+        assert masks == []
+        # Tracking still reflects container-side visibility semantics.
+        assert "/workspace/src" in visible
+        assert "/workspace/src/vendor" in hidden
+
+    def test_bind_spec_unchanged_baseline(self, tmp_path: Path):
+        """A pure-bind spec produces the same entries as before delivery existed."""
+        src = tmp_path / "src"
+        bind = MountSpecPath(
+            mount_root=src, patterns=["vendor/", "!vendor/public/"], delivery="bind",
+        )
+
+        entries, masks, _visible, _hidden = _compute_volume_entries(
+            [bind], "/workspace", tmp_path,
+        )
+        assert len(entries) == 3  # L1 bind + L2 mask + L3 reveal
+        assert entries[0].endswith(":/workspace/src")
+        assert any(e.startswith("mask_") for e in entries)
+        assert len(masks) == 1
+
+    def test_mixed_scope_only_bind_spec_emits_volumes(self, tmp_path: Path):
+        """A scope with one bind + one detached spec emits only the bind's volumes."""
+        src = tmp_path / "src"
+        assets = tmp_path / "assets"
+        bind = MountSpecPath(mount_root=src, patterns=[], delivery="bind")
+        detached = MountSpecPath(
+            mount_root=assets, patterns=["cache/"], delivery="detached",
+        )
+
+        entries, masks, visible, hidden = _compute_volume_entries(
+            [bind, detached], "/workspace", tmp_path,
+        )
+        # Only the bind mount_root produces an entry.
+        assert len(entries) == 1
+        assert entries[0].endswith(":/workspace/src")
+        assert masks == []
+        # Both specs contribute to visibility tracking.
+        assert "/workspace/src" in visible
+        assert "/workspace/assets" in visible
+        assert "/workspace/assets/cache" in hidden
+
+    def test_detached_ignores_reveal_pattern_in_compose(self, tmp_path: Path):
+        """Reveal patterns on a detached spec do not produce L3 bind entries."""
+        src = tmp_path / "src"
+        detached = MountSpecPath(
+            mount_root=src,
+            patterns=["vendor/", "!vendor/public/"],
+            delivery="detached",
+        )
+
+        entries, masks, visible, hidden = _compute_volume_entries(
+            [detached], "/workspace", tmp_path,
+        )
+        assert entries == []
+        assert masks == []
+        assert "/workspace/src" in visible
+        assert "/workspace/src/vendor/public" in visible
+        assert "/workspace/src/vendor" in hidden
+
+    def test_l4_still_emitted_for_all_detached_scope(self, tmp_path: Path):
+        """An all-detached scope still emits L4 isolation volumes."""
+        src = tmp_path / "src"
+        detached = MountSpecPath(
+            mount_root=src, patterns=[], delivery="detached",
+        )
+
+        hierarchy = compute_container_hierarchy(
+            container_root="/workspace",
+            mount_specs=[detached],
+            pushed_files=set(),
+            host_project_root=tmp_path,
+            host_container_root=tmp_path,
+            isolation_paths=[("Claude Code", "/root/.local")],
+        )
+        assert hierarchy.ordered_volumes == []
+        assert hierarchy.mask_volume_names == []
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+
+    def test_bind_only_scope_byte_identical_to_legacy_baseline(self, tmp_path: Path):
+        """A scope built without ever mentioning delivery matches bind-by-default output."""
+        src = tmp_path / "src"
+        legacy = MountSpecPath(mount_root=src, patterns=["vendor/"])  # default bind
+        explicit = MountSpecPath(
+            mount_root=src, patterns=["vendor/"], delivery="bind",
+        )
+
+        entries_legacy, masks_legacy, vis_legacy, hid_legacy = _compute_volume_entries(
+            [legacy], "/workspace", tmp_path,
+        )
+        entries_explicit, masks_explicit, vis_explicit, hid_explicit = _compute_volume_entries(
+            [explicit], "/workspace", tmp_path,
+        )
+        assert entries_legacy == entries_explicit
+        assert masks_legacy == masks_explicit
+        assert vis_legacy == vis_explicit
+        assert hid_legacy == hid_explicit
 
 

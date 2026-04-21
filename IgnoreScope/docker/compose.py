@@ -75,6 +75,7 @@ def generate_compose_with_masks(
     docker_image_name: str = "",
     docker_volume_name: str = "",
     container_root: str = DEFAULT_CONTAINER_ROOT,
+    isolation_volume_entries: list[str] | None = None,
     isolation_volume_names: list[str] | None = None,
     ports: list[str] | None = None,
 ) -> str:
@@ -95,6 +96,7 @@ def generate_compose_with_masks(
         docker_image_name: Explicit image name (overrides auto-derived)
         docker_volume_name: Explicit volume name (overrides auto-derived)
         container_root: Container root path (default: /workspace)
+        isolation_volume_entries: Layer 4 volume entries ("name:container_path"); always emitted
         isolation_volume_names: Named isolation volumes (Layer 4) for the volumes section
         ports: List of port mappings (e.g., ["3900:3900", "8080:8080"])
 
@@ -148,11 +150,14 @@ def generate_compose_with_masks(
                 volume = str(mount)
             lines.append(f"      - \"{volume}\"{comment}")
 
-    # Volume layers (pre-computed by hierarchy.py: L1 mounts → L2 masks → L3 reveals → siblings → L4 isolation)
-    if ordered_volumes:
+    # Volume layers: L1-L3 + siblings (ordered_volumes, skipped by caller in Isolation mode)
+    # followed by L4 isolation entries (always emitted regardless of mode).
+    if ordered_volumes or isolation_volume_entries:
         lines.append("")
         lines.append("      # === Volume layers (bind mounts, masks, reveals, isolation) ===")
         for entry in ordered_volumes:
+            lines.append(f"      - \"{entry}\"")
+        for entry in (isolation_volume_entries or []):
             lines.append(f"      - \"{entry}\"")
 
     lines.extend([

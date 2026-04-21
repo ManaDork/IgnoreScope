@@ -149,6 +149,7 @@ class MountDataTree(QObject):
     stateChanged = pyqtSignal()
     structureChanged = pyqtSignal()
     aboutToMutate = pyqtSignal()  # Emitted before mount_specs mutations (undo snapshot)
+    mountSpecsChanged = pyqtSignal()  # Emitted after any mount_specs mutation
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -434,25 +435,101 @@ class MountDataTree(QObject):
     # ── Mount Toggle ───────────────────────────────────────────────
 
     def toggle_mounted(self, path: Path, checked: bool) -> None:
-        """Toggle mount for a path.
+        """Toggle bind mount for a path.
 
-        Add: creates new MountSpecPath with empty patterns.
+        Add: creates new MountSpecPath with delivery="bind".
         Remove: deletes entire MountSpecPath (all patterns lost).
         """
+        self._toggle_mount_with_delivery(path, checked, delivery="bind")
+
+    def toggle_virtual_mounted(self, path: Path, checked: bool) -> None:
+        """Toggle virtual (detached) mount for a path.
+
+        Add: creates new MountSpecPath with delivery="detached".
+        Remove: deletes entire MountSpecPath (all patterns lost).
+        """
+        self._toggle_mount_with_delivery(path, checked, delivery="detached")
+
+    def _toggle_mount_with_delivery(
+        self, path: Path, checked: bool, delivery: str,
+    ) -> None:
+        """Shared toggle body for bind / detached deliveries."""
         self.aboutToMutate.emit()
         from ..core.mount_spec_path import MountSpecPath
         if checked:
-            # Check overlap
             for ms in self._mount_specs:
                 if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
                     return
-            self._mount_specs.append(MountSpecPath(mount_root=path))
+            self._mount_specs.append(
+                MountSpecPath(mount_root=path, delivery=delivery),
+            )
         else:
             self._mount_specs = [
                 ms for ms in self._mount_specs
                 if ms.mount_root != path
             ]
         self._recompute_states()
+        self.mountSpecsChanged.emit()
+
+    def convert_delivery(self, path: Path, target: str) -> bool:
+        """Flip delivery on the matching spec. Returns True if flipped."""
+        self.aboutToMutate.emit()
+        for ms in self._mount_specs:
+            if ms.mount_root == path and ms.delivery != target:
+                ms.delivery = target
+                self._recompute_states()
+                self.mountSpecsChanged.emit()
+                return True
+        return False
+
+    def remove_but_keep_children(self, path: Path) -> bool:
+        """Delegate to LocalMountConfig.remove_but_keep_children semantics.
+
+        Replace the matching spec with N child specs (inheriting delivery).
+        Returns True if replaced, False if no match / no children / not a dir.
+        """
+        from ..core.mount_spec_path import MountSpecPath
+
+        parent = None
+        for ms in self._mount_specs:
+            if ms.mount_root == path:
+                parent = ms
+                break
+        if parent is None or not path.is_dir():
+            return False
+        try:
+            children = sorted(c for c in path.iterdir() if c.is_dir())
+        except OSError:
+            return False
+        if not children:
+            return False
+
+        self.aboutToMutate.emit()
+        new_specs: list[MountSpecPath] = []
+        for child in children:
+            child_rel = str(child.relative_to(parent.mount_root)).replace("\\", "/") + "/"
+            child_patterns: list[str] = []
+            for pat in parent.patterns:
+                stripped = pat.lstrip("!")
+                if stripped.startswith(child_rel):
+                    prefix = "!" if pat.startswith("!") else ""
+                    suffix = stripped[len(child_rel):]
+                    if suffix:
+                        child_patterns.append(f"{prefix}{suffix}")
+            new_specs.append(
+                MountSpecPath(
+                    mount_root=child,
+                    patterns=child_patterns,
+                    delivery=parent.delivery,
+                ),
+            )
+        idx = self._mount_specs.index(parent)
+        self._mount_specs.pop(idx)
+        for offset, ns in enumerate(new_specs):
+            self._mount_specs.insert(idx + offset, ns)
+        self._recompute_states()
+        self.mountSpecsChanged.emit()
+        return True
 
     # ── Pattern Operations (RMB actions) ───────────────────────────
 
@@ -467,6 +544,7 @@ class MountDataTree(QObject):
         if not operation(f"{prefix}{rel}/"):
             return False
         self._recompute_states()
+        self.mountSpecsChanged.emit()
         return True
 
     def add_mask(self, path: Path) -> bool:
@@ -496,6 +574,7 @@ class MountDataTree(QObject):
             MountSpecPath.from_dict(d, host_root) for d in specs_data
         ]
         self._recompute_states()
+        self.mountSpecsChanged.emit()
 
     def _find_owning_spec(self, path: Path):
         """Find the MountSpecPath whose root contains this path."""
@@ -508,11 +587,19 @@ class MountDataTree(QObject):
         """Check membership — used for checkbox state and RMB context.
 
         Args:
-            field_name: One of 'mounted', 'pushed'
+            field_name: One of 'mounted', 'virtual_mounted', 'pushed'
             path: Path to check
         """
         if field_name == 'mounted':
-            return any(ms.mount_root == path for ms in self._mount_specs)
+            return any(
+                ms.mount_root == path and ms.delivery == "bind"
+                for ms in self._mount_specs
+            )
+        elif field_name == 'virtual_mounted':
+            return any(
+                ms.mount_root == path and ms.delivery == "detached"
+                for ms in self._mount_specs
+            )
         elif field_name == 'pushed':
             return path in self._pushed_files
         return False
@@ -635,6 +722,7 @@ class MountDataTree(QObject):
             self._pushed_files.update(sibling.pushed_files)
 
         self._recompute_states()
+        self.mountSpecsChanged.emit()
 
     def build_config(
         self,
@@ -684,3 +772,4 @@ class MountDataTree(QObject):
         self._sibling_nodes.clear()
         self._virtual_nodes.clear()
         self.structureChanged.emit()  # Sync menu checkbox on project switch
+        self.mountSpecsChanged.emit()
