@@ -278,14 +278,10 @@ def execute_create(
     docker_name, image_name, volume_name = _compute_resource_names(host_project_root, scope_name)
 
     # Generate docker-compose.yml
-    # Isolation mode: skip project-content volumes (L1 binds, L2 masks, L3 reveals,
-    # siblings). Content is delivered via `docker cp` at create time (Task 1.3).
-    # L4 isolation volumes and the auth volume are emitted in both modes.
-    is_isolation = config.container_mode == "Isolation"
     try:
         compose_content = generate_compose_with_masks(
-            ordered_volumes=[] if is_isolation else hierarchy.ordered_volumes,
-            mask_volume_names=[] if is_isolation else hierarchy.mask_volume_names,
+            ordered_volumes=hierarchy.ordered_volumes,
+            mask_volume_names=hierarchy.mask_volume_names,
             host_project_root=host_project_root,
             docker_container_name=docker_name,
             docker_image_name=image_name,
@@ -491,11 +487,10 @@ def execute_update(
         return OpResult(success=False, message=f"Compose down error: {e}")
 
     # ── Phase 6: Generate new compose + Dockerfile → write to disk ──
-    is_isolation = config.container_mode == "Isolation"
     try:
         compose_content = generate_compose_with_masks(
-            ordered_volumes=[] if is_isolation else new_hierarchy.ordered_volumes,
-            mask_volume_names=[] if is_isolation else new_hierarchy.mask_volume_names,
+            ordered_volumes=new_hierarchy.ordered_volumes,
+            mask_volume_names=new_hierarchy.mask_volume_names,
             host_project_root=host_project_root,
             docker_container_name=docker_name,
             docker_image_name=image_name,

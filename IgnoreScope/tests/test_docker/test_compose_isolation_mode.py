@@ -1,14 +1,12 @@
-"""Task 1.2: Compose generation for Isolation container mode.
+"""Compose generation: project-content vs L4-only shapes.
 
 Structural assertions verifying that generate_compose_with_masks:
-  - Preserves Hybrid-mode structure (project-content volumes present).
+  - Preserves the full structure when project-content volumes are provided.
   - Omits project-content volumes when caller passes empty project lists
-    (the container_lifecycle path in Isolation mode).
+    (the shape produced by an all-detached scope).
   - Always emits L4 isolation volumes and the auth volume.
 
-Isolation-mode behavior is exercised by passing empty ordered_volumes and
-mask_volume_names (what execute_create / execute_update do when
-config.container_mode == "Isolation"). compose.py itself is mode-agnostic.
+compose.py is a pure formatter — it emits whatever lists it's given.
 """
 
 from __future__ import annotations

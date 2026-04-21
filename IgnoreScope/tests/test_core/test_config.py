@@ -318,42 +318,16 @@ class TestScopeDockerConfig:
         assert len(config.mount_specs) == 1
         assert config.mount_specs[0].patterns == ["api/", "!api/public/"]
 
-    def test_container_mode_defaults_to_hybrid(self):
-        """Default container_mode is Hybrid and init_source is cp."""
+    def test_legacy_container_mode_keys_silently_dropped(self, tmp_path: Path):
+        """v0.4.x configs containing container_mode / init_source load without error."""
         from IgnoreScope.core.config import ScopeDockerConfig
 
-        config = ScopeDockerConfig()
-        assert config.container_mode == "Hybrid"
-        assert config.init_source == "cp"
-
-    def test_container_mode_round_trip_isolation(self, tmp_path: Path):
-        """Isolation + cp fields survive a to_dict/from_dict cycle."""
-        from IgnoreScope.core.config import ScopeDockerConfig
-
-        original = _make_scope_config(
-            host_project_root=tmp_path,
-            scope_name="iso-test",
-            container_mode="Isolation",
-            init_source="cp",
-        )
-
-        data = original.to_dict()
-        assert data["container_mode"] == "Isolation"
-        assert data["init_source"] == "cp"
-
-        restored = ScopeDockerConfig.from_dict(data, tmp_path)
-        assert restored.container_mode == "Isolation"
-        assert restored.init_source == "cp"
-
-    def test_container_mode_backfill_from_v0_4_config(self, tmp_path: Path):
-        """Config missing container_mode/init_source defaults to Hybrid + cp."""
-        from IgnoreScope.core.config import ScopeDockerConfig
-
-        # v0.4-style config dict — no container_mode or init_source keys
         data = {
-            "version": "0.4.0",
+            "version": "0.4.1",
             "scope_name": "legacy",
             "dev_mode": True,
+            "container_mode": "Isolation",
+            "init_source": "cp",
             "local": {
                 "mount_specs": [],
                 "pushed_files": [],
@@ -361,36 +335,14 @@ class TestScopeDockerConfig:
         }
 
         config = ScopeDockerConfig.from_dict(data, tmp_path)
-        assert config.container_mode == "Hybrid"
-        assert config.init_source == "cp"
+        assert not hasattr(config, "container_mode")
+        assert not hasattr(config, "init_source")
         assert config.validate() == []
 
-    def test_init_source_clone_rejected_in_phase_1(self, tmp_path: Path):
-        """init_source='clone' is a Phase 3 feature; validate() flags it."""
-        from IgnoreScope.core.config import ScopeDockerConfig
-
-        config = _make_scope_config(
-            host_project_root=tmp_path,
-            container_mode="Isolation",
-            init_source="clone",
-        )
-
-        errors = config.validate()
-        assert any("Phase 3" in e for e in errors), (
-            f"Expected a Phase 3 rejection message, got: {errors}"
-        )
-
-    def test_invalid_container_mode_flagged(self, tmp_path: Path):
-        """Unknown container_mode value produces a validation error."""
-        from IgnoreScope.core.config import ScopeDockerConfig
-
-        config = _make_scope_config(
-            host_project_root=tmp_path,
-            container_mode="Bogus",
-        )
-
-        errors = config.validate()
-        assert any("container_mode" in e for e in errors)
+        # Round-trip must not re-emit the legacy keys.
+        round_tripped = config.to_dict()
+        assert "container_mode" not in round_tripped
+        assert "init_source" not in round_tripped
 
     def test_version_migration_dev_bypass(self, monkeypatch):
         """DEV_BYPASS_ENV_VAR skips migration and version stamping."""

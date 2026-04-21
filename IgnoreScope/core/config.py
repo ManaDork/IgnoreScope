@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
 from .local_mount_config import LocalMountConfig, ExtensionConfig
 from ..utils.paths import to_absolute_paths, to_relative_posix
@@ -134,8 +134,6 @@ class ScopeDockerConfig(LocalMountConfig):
     extensions: list[ExtensionConfig] = field(default_factory=list)
     ports: list[str] = field(default_factory=list)
     show_hidden: bool = False
-    container_mode: Literal["Hybrid", "Isolation"] = "Hybrid"
-    init_source: Literal["cp", "clone"] = "cp"
 
     def __post_init__(self):
         """Derive defaults for host_container_root and container_root."""
@@ -172,8 +170,6 @@ class ScopeDockerConfig(LocalMountConfig):
             'dev_mode': self.dev_mode,
             'mirrored': self.mirrored,
             'show_hidden': self.show_hidden,
-            'container_mode': self.container_mode,
-            'init_source': self.init_source,
             'local': base_dict,
         }
 
@@ -265,8 +261,6 @@ class ScopeDockerConfig(LocalMountConfig):
             extensions=extensions,
             ports=data.get('ports', []),
             show_hidden=data.get('show_hidden', False),
-            container_mode=data.get('container_mode', 'Hybrid'),
-            init_source=data.get('init_source', 'cp'),
         )
 
     def track_extension(
@@ -322,18 +316,6 @@ class ScopeDockerConfig(LocalMountConfig):
                     errors.append("host_container_root must be ancestor of host_project_root")
             except (TypeError, ValueError):
                 errors.append("host_container_root must be ancestor of host_project_root")
-        if self.container_mode not in ("Hybrid", "Isolation"):
-            errors.append(
-                f"container_mode must be 'Hybrid' or 'Isolation', got {self.container_mode!r}"
-            )
-        if self.init_source not in ("cp", "clone"):
-            errors.append(
-                f"init_source must be 'cp' or 'clone', got {self.init_source!r}"
-            )
-        elif self.init_source == "clone":
-            errors.append(
-                "init_source='clone' is a Phase 3 feature; Phase 1 only supports 'cp'"
-            )
         return errors
 
 def get_igsc_root(host_project_root: Path) -> Path:
