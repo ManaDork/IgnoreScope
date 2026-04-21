@@ -173,3 +173,87 @@ class TestGetVirtualPaths:
         spec = self._make_spec(tmp_path, ["src/", "!src/api/"])
         result = spec.get_virtual_paths()
         assert result == {tmp_path / "src"}
+
+
+# ──────────────────────────────────────────────
+# MSP-3: delivery field (bind vs detached)
+# ──────────────────────────────────────────────
+
+
+class TestDeliveryField:
+    """Tests for MountSpecPath.delivery (per-spec content-delivery mode)."""
+
+    def test_delivery_defaults_to_bind(self, tmp_path: Path):
+        """A spec created without an explicit delivery defaults to 'bind'."""
+        spec = MountSpecPath(mount_root=tmp_path / "src", patterns=["vendor/"])
+        assert spec.delivery == "bind"
+
+    def test_delivery_explicit_detached(self, tmp_path: Path):
+        """Detached delivery can be set at construction."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="detached",
+        )
+        assert spec.delivery == "detached"
+
+    def test_to_dict_emits_delivery(self, tmp_path: Path):
+        """to_dict serializes the delivery value."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/"],
+            delivery="detached",
+        )
+        data = spec.to_dict(tmp_path)
+        assert data["delivery"] == "detached"
+
+    def test_to_dict_emits_bind_by_default(self, tmp_path: Path):
+        """to_dict emits 'bind' for default-constructed specs."""
+        spec = MountSpecPath(mount_root=tmp_path / "src", patterns=[])
+        assert spec.to_dict(tmp_path)["delivery"] == "bind"
+
+    def test_from_dict_defaults_missing_delivery_to_bind(self, tmp_path: Path):
+        """Legacy configs without 'delivery' default to 'bind'."""
+        data = {"mount_root": "src", "patterns": ["vendor/"]}
+        spec = MountSpecPath.from_dict(data, tmp_path)
+        assert spec.delivery == "bind"
+
+    def test_from_dict_round_trip_detached(self, tmp_path: Path):
+        """Detached delivery survives to_dict / from_dict."""
+        original = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/"],
+            delivery="detached",
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.delivery == "detached"
+        assert restored.mount_root == original.mount_root
+        assert restored.patterns == original.patterns
+
+    def test_validate_rejects_invalid_delivery(self, tmp_path: Path):
+        """validate() flags any delivery value other than bind / detached."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="bogus",  # type: ignore[arg-type]
+        )
+        errors = spec.validate()
+        assert any("delivery" in e for e in errors)
+
+    def test_validate_accepts_bind_and_detached(self, tmp_path: Path):
+        """validate() returns no delivery error for legitimate values."""
+        bind = MountSpecPath(mount_root=tmp_path / "src", patterns=[], delivery="bind")
+        detached = MountSpecPath(
+            mount_root=tmp_path / "src", patterns=[], delivery="detached",
+        )
+        assert not any("delivery" in e for e in bind.validate())
+        assert not any("delivery" in e for e in detached.validate())
+
+    def test_validate_no_overlap_is_delivery_agnostic(self, tmp_path: Path):
+        """Overlap check ignores delivery — two specs at the same root still overlap."""
+        a = MountSpecPath(mount_root=tmp_path / "src", patterns=[], delivery="bind")
+        b = MountSpecPath(
+            mount_root=tmp_path / "src", patterns=[], delivery="detached",
+        )
+        errors = MountSpecPath.validate_no_overlap([a, b])
+        assert any("Duplicate mount root" in e for e in errors)
