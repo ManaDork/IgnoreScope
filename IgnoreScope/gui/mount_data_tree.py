@@ -149,6 +149,7 @@ class MountDataTree(QObject):
     stateChanged = pyqtSignal()
     structureChanged = pyqtSignal()
     aboutToMutate = pyqtSignal()  # Emitted before mount_specs mutations (undo snapshot)
+    mountSpecsChanged = pyqtSignal()  # Emitted after any mount_specs mutation
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -468,6 +469,7 @@ class MountDataTree(QObject):
                 if ms.mount_root != path
             ]
         self._recompute_states()
+        self.mountSpecsChanged.emit()
 
     def convert_delivery(self, path: Path, target: str) -> bool:
         """Flip delivery on the matching spec. Returns True if flipped."""
@@ -476,6 +478,7 @@ class MountDataTree(QObject):
             if ms.mount_root == path and ms.delivery != target:
                 ms.delivery = target
                 self._recompute_states()
+                self.mountSpecsChanged.emit()
                 return True
         return False
 
@@ -525,6 +528,7 @@ class MountDataTree(QObject):
         for offset, ns in enumerate(new_specs):
             self._mount_specs.insert(idx + offset, ns)
         self._recompute_states()
+        self.mountSpecsChanged.emit()
         return True
 
     # ── Pattern Operations (RMB actions) ───────────────────────────
@@ -540,6 +544,7 @@ class MountDataTree(QObject):
         if not operation(f"{prefix}{rel}/"):
             return False
         self._recompute_states()
+        self.mountSpecsChanged.emit()
         return True
 
     def add_mask(self, path: Path) -> bool:
@@ -569,6 +574,7 @@ class MountDataTree(QObject):
             MountSpecPath.from_dict(d, host_root) for d in specs_data
         ]
         self._recompute_states()
+        self.mountSpecsChanged.emit()
 
     def _find_owning_spec(self, path: Path):
         """Find the MountSpecPath whose root contains this path."""
@@ -716,6 +722,7 @@ class MountDataTree(QObject):
             self._pushed_files.update(sibling.pushed_files)
 
         self._recompute_states()
+        self.mountSpecsChanged.emit()
 
     def build_config(
         self,
@@ -765,3 +772,4 @@ class MountDataTree(QObject):
         self._sibling_nodes.clear()
         self._virtual_nodes.clear()
         self.structureChanged.emit()  # Sync menu checkbox on project switch
+        self.mountSpecsChanged.emit()

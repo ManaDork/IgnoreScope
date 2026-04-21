@@ -111,8 +111,7 @@ class LocalHostView(QWidget):
             self._on_selection_changed,
         )
         # Re-tint the Project Root Header whenever mount_specs mutate.
-        # MountDataTree emits stateChanged after every _recompute_states().
-        self._tree.stateChanged.connect(self._apply_header_tint)
+        self._tree.mountSpecsChanged.connect(self._apply_header_tint)
         self._apply_header_tint()
 
     # ── Header Delivery Tint ──────────────────────────────────────
