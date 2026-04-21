@@ -508,9 +508,12 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 
 **Module:** `core/mount_spec_path.py`
 **Fields:**
-- `mount_root: Path` — absolute path to the mount root on the host
+- `mount_root: Path` — absolute path to the mount root. Interpreted as a host path when `host_path` is set; interpreted as a container-logical path when `host_path is None` (container-only specs produced by the Scope Config "Make Folder" family).
 - `patterns: list[str]` — ordered gitignore-style patterns, relative to mount_root
-- `delivery: Literal["bind", "detached"] = "bind"` — how content is delivered to the container. `"bind"` emits a live bind-mount (host changes propagate). `"detached"` emits no bind-mount and instead cp's the content at container create (container-only copy, no live host link). See **Mount Delivery Terms** section.
+- `delivery: Literal["bind", "detached", "volume"] = "bind"` — how content is delivered to the container. `"bind"` emits a live bind-mount (host changes propagate). `"detached"` emits no bind-mount and instead cp's the content at container create (container-only copy, no live host link; destroyed on recreate unless `preserve_on_update`). `"volume"` emits a named Docker volume (survives ordinary recreate; destroyed only via `docker compose down -v`). See **Mount Delivery Terms** section.
+- `host_path: Optional[Path] = None` — host-side source for content. `None` = container-only (no host read side). Required when `delivery == "bind"` — auto-filled from `mount_root` by `__post_init__` for legacy Phase 1/2 construction.
+- `content_seed: Literal["tree", "folder"] = "tree"` — controls initial container-side content for non-bind specs. `"tree"` cp-walks the whole subtree from host (Phase 1 behavior). `"folder"` only `mkdir -p`'s the mount root; content is filled via `pushed_files` or inside-container writes.
+- `preserve_on_update: bool = False` — if `True`, the update lifecycle cp's this spec's container contents to a host tmp staging area across recreate. Only valid when `delivery == "detached"` and `content_seed == "folder"` (tree-seed specs re-read from host; `delivery="volume"` survives natively).
 
 **Pattern syntax (gitignore native, applies to both delivery modes):**
 - `"vendor/"` — mask (deny) the vendor directory
@@ -518,19 +521,26 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 - `"vendor/public/tmp/"` — re-mask vendor/public/tmp
 
 **Evaluation:** Uses `pathspec` library with `gitignore` mode. Last matching pattern wins.
-**Methods:** `add_pattern()`, `remove_pattern()`, `move_pattern()`, `is_masked(path)`, `is_unmasked(path)`, `get_masked_paths()`, `get_revealed_paths()`, `validate()`, `validate_no_overlap(specs)`
+**Methods:** `add_pattern()`, `remove_pattern()`, `move_pattern()`, `is_masked(path)`, `is_unmasked(path)`, `get_masked_paths()`, `get_revealed_paths()`, `get_stencil_paths()`, `validate()`, `validate_no_overlap(specs)`
 
 **Mount overlap rule:** No mount root can be a descendant of another mount root, regardless of delivery. Hard block validated by `validate_no_overlap()`.
+
+**Cross-field validator constraints (Phase 3):**
+- `host_path is None` → `delivery != "bind"` (bind needs a host source)
+- `delivery == "volume"` → `content_seed == "folder"` (no tree-seeding into a named volume at this phase)
+- `preserve_on_update == True` → `delivery == "detached"` and `content_seed == "folder"` (meaningless elsewhere)
 
 **JSON format:**
 ```json
 "mount_specs": [
   {"mount_root": "src", "patterns": ["vendor/", "!vendor/public/"], "delivery": "bind"},
-  {"mount_root": "src/generated", "patterns": [], "delivery": "detached"}
+  {"mount_root": "src/generated", "patterns": [], "delivery": "detached"},
+  {"mount_root": "/container/scratch", "patterns": [], "delivery": "detached", "content_seed": "folder", "preserve_on_update": true},
+  {"mount_root": "/container/cache", "patterns": [], "delivery": "volume", "content_seed": "folder"}
 ]
 ```
 
-`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs).
+`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs). `host_path`, `content_seed`, and `preserve_on_update` are omitted from JSON when at their defaults, so Phase 1/2 configs round-trip unchanged.
 
 **Domains:** Config (mount_spec_path.py), Computation (node_state.py pathspec eval, hierarchy.py volume generation), Presentation (future rule list panel)
 
@@ -538,7 +548,12 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 
 ## Mount Delivery Terms
 
-Per-spec `delivery` mode on `MountSpecPath` (`"bind"` or `"detached"`, default `"bind"`) selects how mount content reaches the container. Introduced in 0.5 to replace the earlier scope-level `container_mode` binary. A single scope may mix delivery modes across its mount_specs — each spec is independent.
+Per-spec `delivery` mode on `MountSpecPath` (`"bind"`, `"detached"`, or `"volume"`; default `"bind"`) selects how mount content reaches the container. Introduced in 0.5 to replace the earlier scope-level `container_mode` binary; extended in Phase 3 with the `"volume"` tier and container-only (`host_path is None`) specs. A single scope may mix delivery modes across its mount_specs — each spec is independent.
+
+**Seed & persistence fields (Phase 3):**
+- `host_path: Optional[Path]` — host-side source. `None` = container-only (produced by Scope Config "Make Folder" family).
+- `content_seed: Literal["tree", "folder"]` — `"tree"` cp-walks the whole host subtree (Phase 1 behavior); `"folder"` only `mkdir -p`'s the mount root. Non-bind specs only.
+- `preserve_on_update: bool` — soft-permanent flag for `delivery="detached" + content_seed="folder"` specs. Update lifecycle cp's contents to a host tmp stage across recreate. Meaningless (and validator-rejected) on other combinations.
 
 ### Mount (delivery="bind")
 
@@ -561,6 +576,43 @@ Detached-snapshot delivery. No bind-mount is emitted for the mount_root; the con
 **Overlap:** same `validate_no_overlap` rule as bind — no ancestor/descendant overlap with any other mount_spec regardless of delivery.
 
 **Domains:** Generation (compose — no L1 emitted), Lifecycle (`_detached_init_cp` walk at create + recreate), Config (delivery field on MountSpecPath)
+
+---
+
+### Virtual Folder (delivery="detached", content_seed="folder")
+
+Folder-seeded variant of Virtual Mount. No cp walk — just `docker exec mkdir -p <container_path>` at create. `pushed_files` still applies (users populate content explicitly via push or inside-container writes). Can be host-backed (LocalHost "Virtual Folder" gesture, `host_path` set) or container-only (Scope Config "Make Folder" gesture, `host_path is None`).
+
+**UX label:** "Virtual Folder" (LocalHost tree RMB) / "Make Folder" (Scope Config tree RMB).
+**Persistence:** Same as Virtual Mount — container-layer content lost on recreate unless `preserve_on_update=True`.
+**Masks/reveals:** Not applicable — folder-seed specs have no walked tree to mask. Validator rejects patterns on folder-seed specs.
+
+**Domains:** Generation (compose — no L1, no cp walk), Lifecycle (`_detached_init` emits mkdir only), Config (`add_stencil_folder()` constructor on LocalMountConfig)
+
+---
+
+### Permanent Folder — No Recreate (delivery="detached", content_seed="folder", preserve_on_update=True)
+
+Soft-permanent variant. Update lifecycle cp's folder contents to a host tmp staging area before recreate, then cp's them back after the new container is up. Survives ordinary `execute_update`, destroyed only if cp-out fails (fail-safe: old container stays running) or user explicitly removes.
+
+**UX label:** "Make Permanent Folder → No Recreate" (Scope Config RMB) or "Mark Permanent" gesture on an existing Virtual Folder.
+**Persistence:** Lifecycle-preserved. Lost on explicit Remove.
+**Tradeoff vs. volume tier:** cheaper (no volume bookkeeping), but cp-copy overhead on every update.
+
+**Domains:** Lifecycle (`_preserve_and_recreate` hook), Config (`preserve_on_update` field)
+
+---
+
+### Permanent Folder — Volume Mount (delivery="volume", content_seed="folder")
+
+Hard-permanent variant. Backed by a Docker named volume emitted in compose. Survives `docker compose up` with arbitrary config changes; content is stored by Docker outside the container layer. Destroyed only by explicit `docker compose down -v` (recreate path warns and redirects user to the Diff view when available).
+
+**UX label:** "Make Permanent Folder → Volume Mount" (Scope Config RMB). Container-only (no host_path). Does not support host-backed volume-tier specs in Phase 3.
+**Persistence:** Native Docker volume persistence.
+**Constraints:** `content_seed` must be `"folder"` — no tree-seeding into a named volume at this phase. `preserve_on_update` is meaningless (volume survives natively) and validator-rejected.
+**Volume naming:** auto-derived from scope + spec index + sanitized container path (see Task 4.4).
+
+**Domains:** Generation (compose — named volume entry + top-level `volumes:`), Config (`add_stencil_volume()` constructor)
 
 ---
 

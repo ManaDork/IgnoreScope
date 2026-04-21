@@ -242,3 +242,153 @@ class TestRemoveButKeepChildren:
         b_spec = next(ms for ms in config.mount_specs if ms.mount_root.name == "b")
         assert "vendor/" in a_spec.patterns
         assert b_spec.patterns == []
+
+
+# ──────────────────────────────────────────────
+# LMC-5: Phase 3 container-only constructors
+#        add_stencil_folder / add_stencil_volume / mark_permanent / unmark_permanent
+# ──────────────────────────────────────────────
+
+
+class TestAddStencilFolder:
+    def test_creates_detached_folder_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        container_path = Path("/container/folder")
+        assert config.add_stencil_folder(container_path) is True
+        spec = config.mount_specs[0]
+        assert spec.mount_root == container_path
+        assert spec.delivery == "detached"
+        assert spec.content_seed == "folder"
+        assert spec.host_path is None
+        assert spec.preserve_on_update is False
+
+    def test_preserve_on_update_flag_propagates(self, tmp_path: Path):
+        config = LocalMountConfig()
+        assert config.add_stencil_folder(
+            Path("/container/folder"), preserve_on_update=True,
+        ) is True
+        assert config.mount_specs[0].preserve_on_update is True
+
+    def test_duplicate_rejected(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/folder")
+        config.add_stencil_folder(p)
+        assert config.add_stencil_folder(p) is False
+
+    def test_overlap_rejected(self, tmp_path: Path):
+        config = LocalMountConfig()
+        config.add_stencil_folder(Path("/container/parent"))
+        assert config.add_stencil_folder(Path("/container/parent/child")) is False
+        assert len(config.mount_specs) == 1
+
+
+class TestAddStencilVolume:
+    def test_creates_volume_folder_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        container_path = Path("/container/data")
+        assert config.add_stencil_volume(container_path) is True
+        spec = config.mount_specs[0]
+        assert spec.mount_root == container_path
+        assert spec.delivery == "volume"
+        assert spec.content_seed == "folder"
+        assert spec.host_path is None
+        assert spec.preserve_on_update is False
+
+    def test_volume_duplicate_rejected(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/data")
+        config.add_stencil_volume(p)
+        assert config.add_stencil_volume(p) is False
+
+
+class TestMarkPermanent:
+    def test_flips_false_to_true_on_detached_folder(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/folder")
+        config.add_stencil_folder(p)
+        assert config.mount_specs[0].preserve_on_update is False
+        assert config.mark_permanent(p) is True
+        assert config.mount_specs[0].preserve_on_update is True
+
+    def test_noop_when_already_permanent(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/folder")
+        config.add_stencil_folder(p, preserve_on_update=True)
+        assert config.mark_permanent(p) is False
+
+    def test_rejected_on_bind_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        src = tmp_path / "src"
+        src.mkdir()
+        config.add_mount(src)
+        assert config.mark_permanent(src) is False
+        assert config.mount_specs[0].preserve_on_update is False
+
+    def test_rejected_on_volume_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/data")
+        config.add_stencil_volume(p)
+        assert config.mark_permanent(p) is False
+
+    def test_rejected_on_detached_tree_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        src = tmp_path / "src"
+        src.mkdir()
+        config.add_detached_mount(src)  # tree seed
+        assert config.mark_permanent(src) is False
+
+    def test_no_match_returns_false(self, tmp_path: Path):
+        config = LocalMountConfig()
+        assert config.mark_permanent(Path("/container/missing")) is False
+
+
+class TestUnmarkPermanent:
+    def test_flips_true_to_false(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/folder")
+        config.add_stencil_folder(p, preserve_on_update=True)
+        assert config.unmark_permanent(p) is True
+        assert config.mount_specs[0].preserve_on_update is False
+
+    def test_noop_when_already_false(self, tmp_path: Path):
+        config = LocalMountConfig()
+        p = Path("/container/folder")
+        config.add_stencil_folder(p)
+        assert config.unmark_permanent(p) is False
+
+    def test_no_match_returns_false(self, tmp_path: Path):
+        config = LocalMountConfig()
+        assert config.unmark_permanent(Path("/container/missing")) is False
+
+
+class TestConfigRoundTripWithPhase3:
+    def test_container_only_folder_round_trip(self, tmp_path: Path):
+        config = LocalMountConfig()
+        config.add_stencil_folder(
+            Path("/container/data"), preserve_on_update=True,
+        )
+        restored = LocalMountConfig.from_dict(config.to_dict(tmp_path), tmp_path)
+        assert len(restored.mount_specs) == 1
+        spec = restored.mount_specs[0]
+        assert spec.delivery == "detached"
+        assert spec.content_seed == "folder"
+        assert spec.host_path is None
+        assert spec.preserve_on_update is True
+
+    def test_volume_round_trip(self, tmp_path: Path):
+        config = LocalMountConfig()
+        config.add_stencil_volume(Path("/container/cache"))
+        restored = LocalMountConfig.from_dict(config.to_dict(tmp_path), tmp_path)
+        spec = restored.mount_specs[0]
+        assert spec.delivery == "volume"
+        assert spec.content_seed == "folder"
+        assert spec.host_path is None
+
+    def test_legacy_bind_mount_still_sets_host_path_to_mirror_mount_root(
+        self, tmp_path: Path,
+    ):
+        config = LocalMountConfig()
+        src = tmp_path / "src"
+        src.mkdir()
+        config.add_mount(src)
+        assert config.mount_specs[0].host_path == src

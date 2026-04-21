@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import pathspec
 
@@ -30,16 +30,46 @@ class MountSpecPath:
     """A single mount root with ordered gitignore-style mask/unmask patterns.
 
     Attributes:
-        mount_root: Absolute path to the bind mount root on the host.
+        mount_root: Absolute path to the mount root. Interpreted as a host path
+            when ``host_path`` is set or when ``delivery == "bind"``; interpreted
+            as a container-logical path when ``host_path`` is None (container-only
+            specs produced by the Scope Config "Make Folder" family).
         patterns: Ordered list of gitignore-style patterns, relative to mount_root.
         delivery: How content reaches the container.
             "bind"     — L1 bind mount (default, host is live-linked).
             "detached" — docker cp snapshot at container create; no host link.
+            "volume"   — named Docker volume (L_volume); survives ordinary update.
+        host_path: Optional host-side source for content. None => container-only
+            (no host read side). Required when ``delivery == "bind"``.
+        content_seed: Controls initial container-side content for non-bind specs.
+            "tree"   — whole subtree cp-walked from host (Phase 1 behavior).
+            "folder" — only the mount root is mkdir'd; content filled via
+                pushed_files or inside-container writes.
+        preserve_on_update: If True, the update lifecycle cp's this spec's
+            container contents to a host tmp staging area across recreate.
+            Only valid when ``delivery == "detached"`` and
+            ``content_seed == "folder"``; tree-seed specs re-read from host, so
+            the flag is meaningless there. ``delivery == "volume"`` survives
+            update natively without needing this flag.
     """
 
     mount_root: Path = field(default_factory=Path)
     patterns: list[str] = field(default_factory=list)
-    delivery: Literal["bind", "detached"] = "bind"
+    delivery: Literal["bind", "detached", "volume"] = "bind"
+    host_path: Optional[Path] = None
+    content_seed: Literal["tree", "folder"] = "tree"
+    preserve_on_update: bool = False
+
+    def __post_init__(self) -> None:
+        """For bind specs, default host_path to mount_root.
+
+        Phase 2 and earlier treated mount_root as the host path. Phase 3 split
+        them conceptually (to support container-only specs) but the bind case
+        always has host_path == mount_root by definition — auto-fill keeps the
+        Phase 2 construction shape valid.
+        """
+        if self.delivery == "bind" and self.host_path is None:
+            self.host_path = self.mount_root
 
     # --- Pattern CRUD ---
 
@@ -184,15 +214,50 @@ class MountSpecPath:
     # --- Validation ---
 
     def validate(self) -> list[str]:
-        """Validate pattern consistency. Returns list of error strings."""
+        """Validate pattern + delivery-field cross-constraint consistency."""
         errors = []
 
         if not self.mount_root:
             errors.append("mount_root is empty")
 
-        if self.delivery not in ("bind", "detached"):
+        if self.delivery not in ("bind", "detached", "volume"):
             errors.append(
-                f"delivery must be 'bind' or 'detached', got {self.delivery!r}"
+                f"delivery must be 'bind', 'detached', or 'volume', "
+                f"got {self.delivery!r}"
+            )
+
+        if self.content_seed not in ("tree", "folder"):
+            errors.append(
+                f"content_seed must be 'tree' or 'folder', "
+                f"got {self.content_seed!r}"
+            )
+
+        # host_path=None is valid only for non-bind deliveries (container-only).
+        if self.host_path is None and self.delivery == "bind":
+            errors.append(
+                "host_path is required when delivery='bind' (bind mounts "
+                "need a host source)"
+            )
+
+        # delivery='volume' requires folder seeding — no tree-seeding into a
+        # named volume at this phase.
+        if self.delivery == "volume" and self.content_seed != "folder":
+            errors.append(
+                "delivery='volume' requires content_seed='folder'; "
+                f"got content_seed={self.content_seed!r}"
+            )
+
+        # preserve_on_update is only meaningful on detached+folder specs.
+        # Tree-seed specs re-read from host on update anyway; volume specs
+        # survive update natively.
+        if self.preserve_on_update and not (
+            self.delivery == "detached" and self.content_seed == "folder"
+        ):
+            errors.append(
+                "preserve_on_update=True is only valid when "
+                "delivery='detached' and content_seed='folder'; "
+                f"got delivery={self.delivery!r}, "
+                f"content_seed={self.content_seed!r}"
             )
 
         for i, p in enumerate(self.patterns):
@@ -254,15 +319,31 @@ class MountSpecPath:
     def to_dict(self, host_project_root: Path) -> dict:
         """Serialize to dict with relative paths.
 
+        Non-default fields (host_path, content_seed, preserve_on_update) are
+        emitted only when they differ from defaults, so legacy Phase 1/2 specs
+        round-trip to the same JSON they came from.
+
         Args:
             host_project_root: Base path for relative conversion.
         """
         rel_root = to_relative_posix(self.mount_root, host_project_root)
-        return {
+        result: dict = {
             "mount_root": rel_root,
             "patterns": list(self.patterns),
             "delivery": self.delivery,
         }
+        # Omit host_path from JSON when it's the implicit default for bind
+        # (host_path == mount_root) — preserves Phase 1/2 JSON shape.
+        emit_host_path = self.host_path is not None and not (
+            self.delivery == "bind" and self.host_path == self.mount_root
+        )
+        if emit_host_path:
+            result["host_path"] = to_relative_posix(self.host_path, host_project_root)
+        if self.content_seed != "tree":
+            result["content_seed"] = self.content_seed
+        if self.preserve_on_update:
+            result["preserve_on_update"] = True
+        return result
 
     @classmethod
     def from_dict(cls, data: dict, host_project_root: Path) -> MountSpecPath:
@@ -270,14 +351,31 @@ class MountSpecPath:
 
         Args:
             data: Dict with 'mount_root' (relative path), 'patterns' (list),
-                and optional 'delivery' ('bind' default for legacy configs).
+                and optional 'delivery' ('bind' default for legacy configs),
+                'host_path' (None default — container-only), 'content_seed'
+                ('tree' default), 'preserve_on_update' (False default).
             host_project_root: Base path for resolving relative mount_root.
         """
         raw_root = data.get("mount_root", ".")
         mount_root = (host_project_root / raw_root).resolve()
         patterns = list(data.get("patterns", []))
         delivery = data.get("delivery", "bind")
-        return cls(mount_root=mount_root, patterns=patterns, delivery=delivery)
+
+        raw_host = data.get("host_path")
+        host_path: Optional[Path] = (
+            (host_project_root / raw_host).resolve() if raw_host else None
+        )
+        content_seed = data.get("content_seed", "tree")
+        preserve_on_update = data.get("preserve_on_update", False)
+
+        return cls(
+            mount_root=mount_root,
+            patterns=patterns,
+            delivery=delivery,
+            host_path=host_path,
+            content_seed=content_seed,
+            preserve_on_update=preserve_on_update,
+        )
 
     # --- Internal ---
 

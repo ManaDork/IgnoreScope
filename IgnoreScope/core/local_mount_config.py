@@ -136,14 +136,119 @@ class LocalMountConfig:
         path: Path,
         delivery: Literal["bind", "detached"],
     ) -> bool:
-        """Shared add_mount / add_detached_mount body — overlap guard + append."""
+        """Shared add_mount / add_detached_mount body — overlap guard + append.
+
+        Both gestures originate from LocalHost (host-backed) so host_path mirrors
+        mount_root; content_seed defaults to "tree" (Phase 1 behavior).
+        """
         if any(ms.mount_root == path for ms in self.mount_specs):
             return False
         for ms in self.mount_specs:
             if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
                 return False
-        self.mount_specs.append(MountSpecPath(mount_root=path, delivery=delivery))
+        self.mount_specs.append(
+            MountSpecPath(mount_root=path, delivery=delivery, host_path=path)
+        )
         return True
+
+    def add_stencil_folder(
+        self,
+        container_path: Path,
+        *,
+        preserve_on_update: bool = False,
+    ) -> bool:
+        """Add a container-only folder spec (UX: "Make Folder" / "Make Permanent Folder → No Recreate").
+
+        Creates a MountSpecPath with ``delivery="detached"``, ``content_seed="folder"``,
+        and ``host_path=None`` — the folder lives only in the container and is
+        mkdir'd at container create. ``preserve_on_update=True`` flips it to
+        the "No Recreate" soft-permanent variant.
+
+        Returns:
+            True if added, False if already mounted or overlap detected.
+        """
+        return self._add_stencil_spec(
+            container_path,
+            delivery="detached",
+            content_seed="folder",
+            preserve_on_update=preserve_on_update,
+        )
+
+    def add_stencil_volume(self, container_path: Path) -> bool:
+        """Add a container-only named-volume spec (UX: "Make Permanent Folder → Volume Mount").
+
+        Creates a MountSpecPath with ``delivery="volume"``, ``content_seed="folder"``,
+        and ``host_path=None``. A Docker named volume will be emitted in compose;
+        contents survive ordinary ``docker compose up`` and are destroyed only
+        via explicit ``docker compose down -v``.
+
+        Returns:
+            True if added, False if already mounted or overlap detected.
+        """
+        return self._add_stencil_spec(
+            container_path,
+            delivery="volume",
+            content_seed="folder",
+            preserve_on_update=False,
+        )
+
+    def _add_stencil_spec(
+        self,
+        container_path: Path,
+        *,
+        delivery: Literal["detached", "volume"],
+        content_seed: Literal["tree", "folder"],
+        preserve_on_update: bool,
+    ) -> bool:
+        """Shared body for container-only constructors (host_path=None)."""
+        if any(ms.mount_root == container_path for ms in self.mount_specs):
+            return False
+        for ms in self.mount_specs:
+            if is_descendant(container_path, ms.mount_root) or is_descendant(
+                ms.mount_root, container_path
+            ):
+                return False
+        self.mount_specs.append(
+            MountSpecPath(
+                mount_root=container_path,
+                delivery=delivery,
+                host_path=None,
+                content_seed=content_seed,
+                preserve_on_update=preserve_on_update,
+            )
+        )
+        return True
+
+    def mark_permanent(self, path: Path) -> bool:
+        """Flip preserve_on_update False→True on the detached-folder spec at ``path``.
+
+        No-op (returns False) if no exact-match spec, if already permanent, or
+        if the spec is not ``delivery="detached"`` + ``content_seed="folder"``.
+        """
+        for ms in self.mount_specs:
+            if ms.mount_root != path:
+                continue
+            if ms.preserve_on_update:
+                return False
+            if ms.delivery != "detached" or ms.content_seed != "folder":
+                return False
+            ms.preserve_on_update = True
+            return True
+        return False
+
+    def unmark_permanent(self, path: Path) -> bool:
+        """Flip preserve_on_update True→False on the spec at ``path``.
+
+        No-op (returns False) if no exact-match spec or flag already False.
+        """
+        for ms in self.mount_specs:
+            if ms.mount_root != path:
+                continue
+            if not ms.preserve_on_update:
+                return False
+            ms.preserve_on_update = False
+            return True
+        return False
 
     def is_detached_mounted(self, path: Path) -> bool:
         """True iff path is the mount_root of a delivery="detached" spec.
