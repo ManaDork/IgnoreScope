@@ -192,15 +192,19 @@ METHOD flags (`is_masked`, `is_revealed`, `is_mount_root`, etc.) drive the P3/P4
 
 ---
 
-## Container Mode Color Mapping
+## Mount Delivery Color Mapping
 
-The Project Root Header tints to indicate the active scope's `container_mode` (see glossary → Container Mode Terms). The mapping reuses existing theme keys — no new variables are introduced.
+The Project Root Header tints to indicate the active scope's dominant delivery mode across its `mount_specs` (see glossary → Mount Delivery Terms). The mapping reuses existing theme keys — no new variables are introduced.
 
-| Mode | Theme Key | Rationale |
+| Scope's mount_specs delivery mix | Theme Key | Rationale |
 |------|-----------|-----------|
-| `"Hybrid"`    | `config.mount`         | Consistent with mount-checkbox coloring — Hybrid IS the mount-driven mode. |
-| `"Isolation"` | `visibility.virtual`   | Consistent with container-only / virtual content tinting — Isolation content lives only in the container. |
+| All `delivery == "bind"` | `config.mount` | Consistent with mount-checkbox coloring — bind IS the mount-driven mechanism. |
+| All `delivery == "detached"` | `visibility.virtual` | Consistent with container-only / virtual content tinting — detached content lives only in the container. |
+| **Mixed** (some bind, some detached) | **Majority by spec count wins** | Ties resolve to `config.mount`. |
+| Empty scope (no mount_specs) | Default panel-header color | No signal to communicate. |
 
-Semantic overload note: `visibility.virtual` already tints container-only files and mirrored intermediate directories. Extending it to the Isolation header cue keeps the "lives only in the container" palette consistent across node-level and scope-level cues.
+Semantic overload note: `visibility.virtual` already tints container-only files and mirrored intermediate directories. Extending it to the detached-majority header tint keeps the "lives only in the container" palette consistent across node-level and scope-level cues.
 
-Selector mechanism is an implementation detail left to the GUI zone — the Blueprint only specifies the mode→key mapping above.
+Per-scope header tint is a signal of the scope's overall shape — it does NOT imply every spec has that delivery. For fine-grained per-spec visual cues, refer to per-node styling in `GUI_STATE_STYLES.md`.
+
+Selector mechanism is an implementation detail left to the GUI zone — the Blueprint only specifies the input signal (`delivery` mix) and the output theme key above.
