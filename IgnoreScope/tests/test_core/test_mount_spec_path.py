@@ -241,19 +241,327 @@ class TestDeliveryField:
         assert any("delivery" in e for e in errors)
 
     def test_validate_accepts_bind_and_detached(self, tmp_path: Path):
-        """validate() returns no delivery error for legitimate values."""
-        bind = MountSpecPath(mount_root=tmp_path / "src", patterns=[], delivery="bind")
-        detached = MountSpecPath(
-            mount_root=tmp_path / "src", patterns=[], delivery="detached",
+        """validate() returns no delivery-enum error for legitimate values."""
+        bind = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="bind",
+            host_path=tmp_path / "src",
         )
-        assert not any("delivery" in e for e in bind.validate())
-        assert not any("delivery" in e for e in detached.validate())
+        detached = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="detached",
+            host_path=tmp_path / "src",
+        )
+        assert not any("delivery must be" in e for e in bind.validate())
+        assert not any("delivery must be" in e for e in detached.validate())
 
     def test_validate_no_overlap_is_delivery_agnostic(self, tmp_path: Path):
         """Overlap check ignores delivery — two specs at the same root still overlap."""
-        a = MountSpecPath(mount_root=tmp_path / "src", patterns=[], delivery="bind")
+        a = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="bind",
+            host_path=tmp_path / "src",
+        )
         b = MountSpecPath(
-            mount_root=tmp_path / "src", patterns=[], delivery="detached",
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="detached",
+            host_path=tmp_path / "src",
         )
         errors = MountSpecPath.validate_no_overlap([a, b])
         assert any("Duplicate mount root" in e for e in errors)
+
+
+# ──────────────────────────────────────────────
+# MSP-4: Phase 3 schema extensions
+#   host_path / content_seed / preserve_on_update / delivery="volume"
+# ──────────────────────────────────────────────
+
+
+class TestPhase3SchemaDefaults:
+    """Phase 3 fields default to backward-compatible values."""
+
+    def test_host_path_defaults_to_none_for_non_bind(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/folder"),
+            delivery="detached",
+            content_seed="folder",
+        )
+        assert spec.host_path is None
+
+    def test_host_path_auto_fills_from_mount_root_for_bind(self, tmp_path: Path):
+        """Default delivery is 'bind'; __post_init__ fills host_path."""
+        spec = MountSpecPath(mount_root=tmp_path / "src")
+        assert spec.delivery == "bind"
+        assert spec.host_path == tmp_path / "src"
+
+    def test_content_seed_defaults_to_tree(self, tmp_path: Path):
+        spec = MountSpecPath(mount_root=tmp_path / "src")
+        assert spec.content_seed == "tree"
+
+    def test_preserve_on_update_defaults_to_false(self, tmp_path: Path):
+        spec = MountSpecPath(mount_root=tmp_path / "src")
+        assert spec.preserve_on_update is False
+
+
+class TestPhase3ValidateHostPath:
+    """host_path=None is valid only for non-bind deliveries."""
+
+    def test_bind_auto_fills_host_path_from_mount_root(self, tmp_path: Path):
+        """__post_init__ fills host_path = mount_root when unset on a bind spec."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src", delivery="bind", host_path=None,
+        )
+        assert spec.host_path == tmp_path / "src"
+        assert not any("host_path" in e for e in spec.validate())
+
+    def test_bind_with_explicit_none_post_construction_rejected(self, tmp_path: Path):
+        """Explicit post-construction tampering is caught by validate()."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src", delivery="bind",
+            host_path=tmp_path / "src",
+        )
+        spec.host_path = None  # tamper
+        assert any("host_path is required" in e for e in spec.validate())
+
+    def test_bind_with_host_path_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            delivery="bind",
+            host_path=tmp_path / "src",
+        )
+        assert not any("host_path" in e for e in spec.validate())
+
+    def test_detached_container_only_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/folder"),
+            delivery="detached",
+            host_path=None,
+            content_seed="folder",
+        )
+        assert not any("host_path" in e for e in spec.validate())
+
+    def test_volume_container_only_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/folder"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+        )
+        assert not any("host_path" in e for e in spec.validate())
+
+
+class TestPhase3ValidateVolumeRequiresFolderSeed:
+    """delivery='volume' rejects tree-seeding at this phase."""
+
+    def test_volume_with_tree_seed_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/data"),
+            delivery="volume",
+            host_path=None,
+            content_seed="tree",
+        )
+        assert any("delivery='volume' requires content_seed='folder'" in e
+                   for e in spec.validate())
+
+    def test_volume_with_folder_seed_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/data"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+        )
+        errors = spec.validate()
+        assert not any("content_seed" in e for e in errors)
+
+
+class TestPhase3ValidatePreserveOnUpdate:
+    """preserve_on_update is only valid on detached+folder specs."""
+
+    def test_preserve_on_tree_seed_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="tree",
+            preserve_on_update=True,
+        )
+        assert any("preserve_on_update" in e for e in spec.validate())
+
+    def test_preserve_on_volume_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/data"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+            preserve_on_update=True,
+        )
+        assert any("preserve_on_update" in e for e in spec.validate())
+
+    def test_preserve_on_bind_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            delivery="bind",
+            host_path=tmp_path / "src",
+            content_seed="tree",
+            preserve_on_update=True,
+        )
+        assert any("preserve_on_update" in e for e in spec.validate())
+
+    def test_preserve_on_detached_folder_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/data"),
+            delivery="detached",
+            host_path=None,
+            content_seed="folder",
+            preserve_on_update=True,
+        )
+        assert not any("preserve_on_update" in e for e in spec.validate())
+
+    def test_preserve_false_always_ok(self, tmp_path: Path):
+        # Even on "invalid" combos, False flag produces no preserve error.
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            delivery="bind",
+            host_path=tmp_path / "src",
+            preserve_on_update=False,
+        )
+        assert not any("preserve_on_update" in e for e in spec.validate())
+
+
+class TestPhase3ValidateContentSeedEnum:
+    def test_invalid_content_seed_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            host_path=tmp_path / "src",
+            content_seed="bogus",  # type: ignore[arg-type]
+        )
+        assert any("content_seed" in e for e in spec.validate())
+
+
+class TestPhase3ValidateDeliveryEnum:
+    def test_volume_accepted_as_delivery(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/data"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+        )
+        assert not any("delivery must be" in e for e in spec.validate())
+
+
+class TestPhase3Serialization:
+    """All combinations round-trip through to_dict/from_dict."""
+
+    def test_legacy_bind_round_trip(self, tmp_path: Path):
+        original = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/"],
+            delivery="bind",
+            host_path=tmp_path / "src",
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.delivery == "bind"
+        assert restored.host_path == (tmp_path / "src").resolve()
+        assert restored.content_seed == "tree"
+        assert restored.preserve_on_update is False
+
+    def test_detached_tree_seed_round_trip(self, tmp_path: Path):
+        original = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="tree",
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.delivery == "detached"
+        assert restored.content_seed == "tree"
+        assert restored.host_path == (tmp_path / "src").resolve()
+
+    def test_detached_folder_seed_round_trip(self, tmp_path: Path):
+        original = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="folder",
+            preserve_on_update=True,
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.content_seed == "folder"
+        assert restored.preserve_on_update is True
+
+    def test_container_only_folder_round_trip(self, tmp_path: Path):
+        original = MountSpecPath(
+            mount_root=Path("/container/data"),
+            patterns=[],
+            delivery="detached",
+            host_path=None,
+            content_seed="folder",
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.host_path is None
+        assert restored.content_seed == "folder"
+        assert restored.delivery == "detached"
+
+    def test_volume_round_trip(self, tmp_path: Path):
+        original = MountSpecPath(
+            mount_root=Path("/container/cache"),
+            patterns=[],
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.delivery == "volume"
+        assert restored.content_seed == "folder"
+        assert restored.host_path is None
+
+    def test_legacy_dict_deserializes_with_defaults(self, tmp_path: Path):
+        """Phase 1/2 configs on disk have no Phase 3 keys; from_dict fills defaults.
+
+        Legacy bind specs had no host_path key — __post_init__ derives it from
+        mount_root so the spec validates cleanly under Phase 3 rules.
+        """
+        legacy = {
+            "mount_root": "src",
+            "patterns": ["vendor/"],
+            "delivery": "bind",
+        }
+        spec = MountSpecPath.from_dict(legacy, tmp_path)
+        assert spec.host_path == (tmp_path / "src").resolve()
+        assert spec.content_seed == "tree"
+        assert spec.preserve_on_update is False
+        assert spec.delivery == "bind"
+        assert spec.validate() == []
+
+    def test_default_fields_omitted_from_dict(self, tmp_path: Path):
+        """Legacy Phase 1/2 specs serialize to the same JSON shape they had.
+
+        host_path == mount_root on a bind spec is the implicit default, so it's
+        omitted from JSON — keeps existing configs round-tripping unchanged.
+        """
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/"],
+            delivery="bind",
+        )
+        data = spec.to_dict(tmp_path)
+        assert "host_path" not in data
+        assert "content_seed" not in data
+        assert "preserve_on_update" not in data
+
+    def test_non_default_fields_present_in_dict(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/data"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+        )
+        data = spec.to_dict(tmp_path)
+        assert data["content_seed"] == "folder"
+        assert data["delivery"] == "volume"
