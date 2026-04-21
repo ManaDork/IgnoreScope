@@ -59,9 +59,10 @@ class ContainerHierarchy:
         masked_paths: All hidden container paths (for UI/debugging)
     """
 
-    # For docker-compose.yml generation — Layer 1-3 + siblings (project content only)
-    # L4 isolation entries live in isolation_volume_entries; callers skip ordered_volumes
-    # in Isolation container mode while still emitting L4.
+    # For docker-compose.yml generation — Layer 1-3 + siblings (bind-delivery
+    # project content only; detached-delivery specs emit nothing here).
+    # L4 isolation entries live in isolation_volume_entries and are emitted
+    # regardless of any spec's delivery.
     ordered_volumes: list[str] = field(default_factory=list)
 
     # Named mask volumes declared in docker-compose.yml volumes section
@@ -230,14 +231,24 @@ def _compute_volume_entries(
 ) -> tuple[list[str], list[str], set[str], set[str]]:
     """Compute ordered volume entries from mount_specs in pattern order.
 
-    For each mount_spec:
+    For each mount_spec with ``delivery == "bind"``:
       1. Bind mount for mount_root (Layer 1)
       2. For each pattern in order:
          - Non-negated: named mask volume (Layer 2)
          - Negated (!): bind mount punch-through (Layer 3)
 
+    For each mount_spec with ``delivery == "detached"``:
+      - No Docker volume emitted. Content reaches the container via
+        ``docker cp`` at lifecycle-init time (see ``_detached_init`` in
+        ``container_lifecycle.py``). Masks become post-cp ``rm -rf``.
+        Reveals are included in the cp walk.
+
     Docker applies volumes in declaration order (last-writer-wins),
     so pattern order = correct nested layering.
+
+    The ``visible_paths`` / ``masked_paths`` sets are populated for ALL
+    specs regardless of delivery — they describe container-side state
+    for UI consumption, not Docker volume layout.
 
     Args:
         mount_specs: List of MountSpecPath with ordered patterns
@@ -254,9 +265,12 @@ def _compute_volume_entries(
     seen_names: set[str] = set()
 
     for ms in mount_specs:
-        # Layer 1: Bind mount for mount_root
+        emit_volumes = (ms.delivery == "bind")
+
+        # Layer 1: Bind mount for mount_root (bind delivery only).
         cpath = to_container_path(ms.mount_root, container_root, host_container_root)
-        entries.append(f"{ms.mount_root.as_posix()}:{cpath}")
+        if emit_volumes:
+            entries.append(f"{ms.mount_root.as_posix()}:{cpath}")
         visible.add(cpath)
 
         # Interleaved layers: iterate patterns in order
@@ -274,21 +288,24 @@ def _compute_volume_entries(
             cpath = to_container_path(abs_path, container_root, host_container_root)
 
             if is_exception:
-                # Reveal: bind mount punch-through
-                entries.append(f"{abs_path.as_posix()}:{cpath}")
+                # Reveal: bind punch-through for bind delivery; included in cp
+                # walk for detached delivery.
+                if emit_volumes:
+                    entries.append(f"{abs_path.as_posix()}:{cpath}")
                 visible.add(cpath)
             else:
-                # Mask: named volume
-                rel_path = to_relative_posix_or_name(abs_path, host_container_root)
-                base_name = f"mask_{sanitize_volume_name(rel_path.replace('/', '_'))}"
-                vol_name = base_name
-                counter = 2
-                while vol_name in seen_names:
-                    vol_name = f"{base_name}_{counter}"
-                    counter += 1
-                seen_names.add(vol_name)
-                mask_names.append(vol_name)
-                entries.append(f"{vol_name}:{cpath}")
+                # Mask: named volume for bind delivery; post-cp rm for detached.
+                if emit_volumes:
+                    rel_path = to_relative_posix_or_name(abs_path, host_container_root)
+                    base_name = f"mask_{sanitize_volume_name(rel_path.replace('/', '_'))}"
+                    vol_name = base_name
+                    counter = 2
+                    while vol_name in seen_names:
+                        vol_name = f"{base_name}_{counter}"
+                        counter += 1
+                    seen_names.add(vol_name)
+                    mask_names.append(vol_name)
+                    entries.append(f"{vol_name}:{cpath}")
                 hidden.add(cpath)
 
     return entries, mask_names, visible, hidden
@@ -445,8 +462,8 @@ def compute_container_hierarchy(
                 hierarchy.validation_errors.append(f"[{sibling.container_path}] {err}")
 
     # Layer 4: Isolation volumes (persistent, container-owned, final overlay).
-    # Kept separate from ordered_volumes so Isolation container mode can skip
-    # project-content volumes while still emitting L4.
+    # Kept separate from ordered_volumes because L4 is emitted regardless of
+    # any spec's delivery — ordered_volumes carries only bind-delivery content.
     if isolation_paths:
         for ext_name, container_path in isolation_paths:
             vol_name = f"iso_{sanitize_volume_name(ext_name)}_{sanitize_volume_name(container_path.strip('/').replace('/', '_'))}"

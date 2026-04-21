@@ -1219,3 +1219,121 @@ class TestIsolationVolumes:
         assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
 
 
+# ──────────────────────────────────────────────
+# TEST: per-spec delivery (bind vs detached) — Task 2.3
+# ──────────────────────────────────────────────
+
+
+class TestPerSpecDelivery:
+    """Detached specs emit no L1/L2/L3 volumes; bind specs behave as before."""
+
+    def test_detached_spec_emits_no_volume_entries(self, tmp_path: Path):
+        """A single detached spec produces an empty ordered_volumes list."""
+        src = tmp_path / "src"
+        detached = MountSpecPath(
+            mount_root=src, patterns=["vendor/"], delivery="detached",
+        )
+
+        entries, masks, visible, hidden = _compute_volume_entries(
+            [detached], "/workspace", tmp_path,
+        )
+        assert entries == []
+        assert masks == []
+        # Tracking still reflects container-side visibility semantics.
+        assert "/workspace/src" in visible
+        assert "/workspace/src/vendor" in hidden
+
+    def test_bind_spec_unchanged_baseline(self, tmp_path: Path):
+        """A pure-bind spec produces the same entries as before delivery existed."""
+        src = tmp_path / "src"
+        bind = MountSpecPath(
+            mount_root=src, patterns=["vendor/", "!vendor/public/"], delivery="bind",
+        )
+
+        entries, masks, _visible, _hidden = _compute_volume_entries(
+            [bind], "/workspace", tmp_path,
+        )
+        assert len(entries) == 3  # L1 bind + L2 mask + L3 reveal
+        assert entries[0].endswith(":/workspace/src")
+        assert any(e.startswith("mask_") for e in entries)
+        assert len(masks) == 1
+
+    def test_mixed_scope_only_bind_spec_emits_volumes(self, tmp_path: Path):
+        """A scope with one bind + one detached spec emits only the bind's volumes."""
+        src = tmp_path / "src"
+        assets = tmp_path / "assets"
+        bind = MountSpecPath(mount_root=src, patterns=[], delivery="bind")
+        detached = MountSpecPath(
+            mount_root=assets, patterns=["cache/"], delivery="detached",
+        )
+
+        entries, masks, visible, hidden = _compute_volume_entries(
+            [bind, detached], "/workspace", tmp_path,
+        )
+        # Only the bind mount_root produces an entry.
+        assert len(entries) == 1
+        assert entries[0].endswith(":/workspace/src")
+        assert masks == []
+        # Both specs contribute to visibility tracking.
+        assert "/workspace/src" in visible
+        assert "/workspace/assets" in visible
+        assert "/workspace/assets/cache" in hidden
+
+    def test_detached_ignores_reveal_pattern_in_compose(self, tmp_path: Path):
+        """Reveal patterns on a detached spec do not produce L3 bind entries."""
+        src = tmp_path / "src"
+        detached = MountSpecPath(
+            mount_root=src,
+            patterns=["vendor/", "!vendor/public/"],
+            delivery="detached",
+        )
+
+        entries, masks, visible, hidden = _compute_volume_entries(
+            [detached], "/workspace", tmp_path,
+        )
+        assert entries == []
+        assert masks == []
+        assert "/workspace/src" in visible
+        assert "/workspace/src/vendor/public" in visible
+        assert "/workspace/src/vendor" in hidden
+
+    def test_l4_still_emitted_for_all_detached_scope(self, tmp_path: Path):
+        """An all-detached scope still emits L4 isolation volumes."""
+        src = tmp_path / "src"
+        detached = MountSpecPath(
+            mount_root=src, patterns=[], delivery="detached",
+        )
+
+        hierarchy = compute_container_hierarchy(
+            container_root="/workspace",
+            mount_specs=[detached],
+            pushed_files=set(),
+            host_project_root=tmp_path,
+            host_container_root=tmp_path,
+            isolation_paths=[("Claude Code", "/root/.local")],
+        )
+        assert hierarchy.ordered_volumes == []
+        assert hierarchy.mask_volume_names == []
+        assert len(hierarchy.isolation_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+
+    def test_bind_only_scope_byte_identical_to_legacy_baseline(self, tmp_path: Path):
+        """A scope built without ever mentioning delivery matches bind-by-default output."""
+        src = tmp_path / "src"
+        legacy = MountSpecPath(mount_root=src, patterns=["vendor/"])  # default bind
+        explicit = MountSpecPath(
+            mount_root=src, patterns=["vendor/"], delivery="bind",
+        )
+
+        entries_legacy, masks_legacy, vis_legacy, hid_legacy = _compute_volume_entries(
+            [legacy], "/workspace", tmp_path,
+        )
+        entries_explicit, masks_explicit, vis_explicit, hid_explicit = _compute_volume_entries(
+            [explicit], "/workspace", tmp_path,
+        )
+        assert entries_legacy == entries_explicit
+        assert masks_legacy == masks_explicit
+        assert vis_legacy == vis_explicit
+        assert hid_legacy == hid_explicit
+
+
