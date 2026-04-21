@@ -115,7 +115,7 @@ No tree walks. Three checks per restricted-visibility path:
 - **Check 3 (above-mount):** any `mount_root` is descendant of path — mount_specs scan
 
 Dual computation: config queries (primary) + inverse pattern derivation via
-`MountSpecPath.get_virtual_paths()` (cross-reference with discrepancy logging).
+`MountSpecPath.get_stencil_paths()` (cross-reference with discrepancy logging).
 
 Replaces the former tree-walk `find_mirrored_paths()` and subsumes Stage 2b.
 
@@ -157,7 +157,7 @@ mount_data_tree._recompute_states()
 | File | Role |
 |---|---|
 | `core/hierarchy.py` | `_walk_mirrored_intermediates()` — path inclusion (GUI tree + container mkdir) |
-| `core/node_state.py` | `_compute_virtual_paths_from_config()` — config-native virtual detection (Checks 1/2/3) |
-| `core/mount_spec_path.py` | `has_exception_descendant()`, `get_virtual_paths()` — pattern queries + inverse derivation |
+| `core/node_state.py` | `_compute_stencil_paths_from_config()` — config-native stencil detection (Checks 1/2/3) |
+| `core/mount_spec_path.py` | `has_exception_descendant()`, `get_stencil_paths()` — pattern queries + inverse derivation |
 | `core/local_mount_config.py` | `has_pushed_descendant()` — pushed files descendant query |
 | `gui/mount_data_tree.py` | Orchestrator — computes intermediates for path inclusion, delegates virtual detection to CORE |

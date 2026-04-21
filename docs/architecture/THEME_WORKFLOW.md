@@ -44,7 +44,7 @@ Each extracted color maps to a specific key in `glassmorphism_v1_theme.json`:
 | Revealed Folder Node | `config.revealed`             |
 | Mount Folder Node    | `config.mount`                |
 | Masked Folder Node   | `config.masked`               |
-| Virtual Node         | `virtual.volume`, `virtual.auth` |
+| Stencil Node         | `stencil.volume`, `stencil.auth` |
 | Accessible Folder    | `visibility.accessible`       |
 | Restricted Folder    | `visibility.restricted`       |
 | Virtual Structural   | `visibility.virtual`          |
@@ -77,7 +77,7 @@ Gradient stops use **palette variable names**, not inline hex. Define the hex in
 | Visual Element         | JSON Key              |
 |------------------------|-----------------------|
 | Pushed file text       | `text_pushed_sync`    |
-| Virtual node text      | `text_virtual_purple` |
+| Stencil node text      | `text_stencil_purple` |
 | Warning/orphan text    | `text_warning`        |
 | Primary text           | `text_primary`        |
 | Muted/dim text         | `text_dim`            |
@@ -147,13 +147,13 @@ config.pushed                # docker cp'd content
 
 inherited.masked             # inherited mask from ancestor
 inherited.revealed           # inherited reveal from ancestor
-inherited.virtual_auth       # virtual auth path
-inherited.virtual_volume     # virtual volume path
+inherited.stencil_auth       # inherited stencil auth path
+inherited.stencil_volume     # inherited stencil volume path
 
 ancestor.visible             # ancestor has visible descendants
 
-virtual.volume               # volume virtual node
-virtual.auth                 # auth virtual node
+stencil.volume               # volume stencil node
+stencil.auth                 # auth stencil node
 
 status.warning               # attention-required state
 ui.selected                  # delegate selection overlay

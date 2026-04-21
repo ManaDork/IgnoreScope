@@ -109,24 +109,24 @@ Visibility is pure STATE (`accessible`, `restricted`, `virtual`). METHOD flags (
 | F6 | `FOLDER_MASKED_REVEALED` | vis=virtual, masked=T, has_vis_desc | `(virtual, virtual, inherited.masked, config.revealed)` | `default` |
 | F7 | `FOLDER_MASKED_MIRRORED` | vis=virtual, masked=T, no vis descendants | `(virtual, virtual, inherited.masked, inherited.masked)` | `default` |
 | F8 | `FOLDER_REVEALED` | vis=accessible, revealed=T | `(accessible, restricted, restricted, config.revealed)` | `default` |
-| F9 | `FOLDER_MIRRORED` | vis=virtual, not masked, no vis descendants | `(virtual, virtual, virtual, virtual)` | `virtual_mirrored` |
-| F10 | `FOLDER_MIRRORED_REVEALED` | vis=virtual, not masked, has_vis_desc | `(virtual, virtual, virtual, ancestor.visible)` | `virtual_mirrored` |
-| F11 | `FOLDER_VIRTUAL_VOLUME` | vis=virtual, virtual_type=volume | `(virtual, virtual, virtual, virtual.volume)` | `virtual_volume` |
-| F12 | `FOLDER_VIRTUAL_AUTH` | vis=virtual, virtual_type=auth | `(virtual, virtual, virtual, virtual.auth)` | `virtual_auth` |
+| F9 | `FOLDER_MIRRORED` | vis=virtual, not masked, no vis descendants | `(virtual, virtual, virtual, virtual)` | `stencil_mirrored` |
+| F10 | `FOLDER_MIRRORED_REVEALED` | vis=virtual, not masked, has_vis_desc | `(virtual, virtual, virtual, ancestor.visible)` | `stencil_mirrored` |
+| F11 | `FOLDER_STENCIL_VOLUME` | vis=virtual, stencil_tier=volume | `(virtual, virtual, virtual, stencil.volume)` | `stencil_volume` |
+| F12 | `FOLDER_STENCIL_AUTH` | vis=virtual, stencil_tier=auth | `(virtual, virtual, virtual, stencil.auth)` | `stencil_auth` |
 | F13 | `FOLDER_PUSHED_ANCESTOR` | vis=restricted, not masked, has_vis_desc | `(restricted, restricted, restricted, ancestor.visible)` | `default` |
 | F14 | `FOLDER_CONTAINER_ONLY` | vis=virtual, container_only=T | `(virtual, virtual, virtual, virtual)` | `italic` |
 
 **Folder resolution** (if/elif chain in `_resolve_folder_state()`, first match wins):
 
 ```
-visibility | masked | revealed | mount_root | virtual_type | has_vis_desc | -> State Name              | Font
+visibility | masked | revealed | mount_root | stencil_tier | has_vis_desc | -> State Name              | Font
 ---------- | ------ | -------- | ---------- | ------------ | ------------ | -------------------------- | -------
-virtual    | -      | -        | -          | volume       | -            | FOLDER_VIRTUAL_VOLUME      | virtual_volume
-virtual    | -      | -        | -          | auth         | -            | FOLDER_VIRTUAL_AUTH        | virtual_auth
+virtual    | -      | -        | -          | volume       | -            | FOLDER_STENCIL_VOLUME      | stencil_volume
+virtual    | -      | -        | -          | auth         | -            | FOLDER_STENCIL_AUTH        | stencil_auth
 virtual    | T      | -        | -          | -            | T            | FOLDER_MASKED_REVEALED     | default
 virtual    | T      | -        | -          | -            | F            | FOLDER_MASKED_MIRRORED     | default
-virtual    | F      | -        | -          | -            | T            | FOLDER_MIRRORED_REVEALED   | virtual_mirrored
-virtual    | F      | -        | -          | -            | F            | FOLDER_MIRRORED            | virtual_mirrored
+virtual    | F      | -        | -          | -            | T            | FOLDER_MIRRORED_REVEALED   | stencil_mirrored
+virtual    | F      | -        | -          | -            | F            | FOLDER_MIRRORED            | stencil_mirrored
 accessible | -      | T        | -          | -            | -            | FOLDER_REVEALED            | default
 accessible | -      | F        | T          | -            | T            | FOLDER_MOUNTED_REVEALED    | default
 accessible | -      | F        | T          | -            | F            | FOLDER_MOUNTED             | default
@@ -146,7 +146,7 @@ restricted | -      | -        | -          | -            | -            | (che
 - **FOLDER_MASKED_REVEALED** vs **FOLDER_MASKED_MIRRORED**: Both vis=virtual with masked=T. Visible descendant presence distinguishes "parent of visible content" from "structural mkdir-p intermediate."
 - **FOLDER_MIRRORED** vs **FOLDER_MIRRORED_REVEALED**: Both vis=virtual without masked. These are structural paths above mount boundaries.
 - **FOLDER_CONTAINER_ONLY**: vis=virtual with container_only=T. Container-only nodes that aren't masked get virtual visibility in Stage 1.
-- New states vs prior spec: FOLDER_MOUNTED, FOLDER_MOUNTED_REVEALED, FOLDER_MIRRORED, FOLDER_MIRRORED_REVEALED, FOLDER_VIRTUAL_VOLUME, FOLDER_VIRTUAL_AUTH, FOLDER_CONTAINER_ONLY are new. Old F3 (FOLDER_MOUNTED_MASKED) and F4 (FOLDER_MOUNTED_MASKED_PUSHED) consolidated into F5 (FOLDER_MASKED) — mount_root distinction now handled by FOLDER_MOUNTED/FOLDER_MOUNTED_REVEALED.
+- New states vs prior spec: FOLDER_MOUNTED, FOLDER_MOUNTED_REVEALED, FOLDER_MIRRORED, FOLDER_MIRRORED_REVEALED, FOLDER_STENCIL_VOLUME, FOLDER_STENCIL_AUTH, FOLDER_CONTAINER_ONLY are new. Old F3 (FOLDER_MOUNTED_MASKED) and F4 (FOLDER_MOUNTED_MASKED_PUSHED) consolidated into F5 (FOLDER_MASKED) — mount_root distinction now handled by FOLDER_MOUNTED/FOLDER_MOUNTED_REVEALED.
 
 ### 3.2 File States (8)
 
@@ -253,23 +253,23 @@ Color variables for tree panel GradientClass resolution. Uses categorical dot-no
 | `config.pushed` | `#F17149` | `#D06040` | Red-orange — docker cp'd content |
 | `inherited.masked` | `#582A2E` | `#4A2228` | Dark red (dim) — inherited mask from ancestor |
 | `inherited.revealed` | `#B88040` | `#A07035` | Orange (dim) — inherited reveal from ancestor |
-| `inherited.virtual_auth` | `#501E60` | `#441A55` | Purple — virtual auth path |
-| `inherited.virtual_volume` | `#501E60` | `#441A55` | Purple — virtual volume path |
+| `inherited.stencil_auth` | `#501E60` | `#441A55` | Purple — inherited stencil auth path |
+| `inherited.stencil_volume` | `#501E60` | `#441A55` | Purple — inherited stencil volume path |
 | `ancestor.visible` | `#DD9B4C` | `#C88840` | Orange — ancestor has visible descendants |
-| `virtual.volume` | `#662477` | `#581E68` | Purple — volume virtual node |
-| `virtual.auth` | `#662477` | `#581E68` | Purple — auth virtual node |
+| `stencil.volume` | `#662477` | `#581E68` | Purple — volume stencil node |
+| `stencil.auth` | `#662477` | `#581E68` | Purple — auth stencil node |
 | `status.warning` | `#DD9B4C` | `#C88840` | Orange — attention-required state |
 | `ui.selected` | `#6366F1` | `#5558E0` | Indigo — delegate selection overlay |
 
 **Color groups** (semantic families):
 
 - **Pink/Red** (mount/mask): `config.mount`, `config.masked`, `inherited.masked` — mount root and content excluded from container
-- **Purple** (virtual): `virtual.*`, `inherited.virtual_*` — virtual path content
+- **Purple** (stencil): `stencil.*`, `inherited.stencil_*` — stencil (synthetic intermediate) path content
 - **Red-orange** (push): `config.pushed` — docker cp'd content
 - **Orange** (reveal/warning): `config.revealed`, `inherited.revealed`, `ancestor.visible`, `status.warning` — restored or attention-required
 - **State** (visibility): `visibility.*` — 3 pure state keys mapping directly to visibility field values
 
-**Variable naming convention:** Dot-notation groups variables by **semantic origin** (visibility, config, inherited, virtual, status, ui). The same group prefix may resolve to different hex values per panel — the scope panel can override any variable via `scope.state_colors` deep-merge.
+**Variable naming convention:** Dot-notation groups variables by **semantic origin** (visibility, config, inherited, stencil, status, ui). The same group prefix may resolve to different hex values per panel — the scope panel can override any variable via `scope.state_colors` deep-merge.
 
 ### 5.2 list_style.json (not yet consolidated)
 
@@ -310,9 +310,9 @@ Font variables for tree panel FontStyleClass resolution. All values use **variab
 | `default` | normal | false | `text_primary` | F2–F4, F6–F8, F10, F13, FI2, FI4–FI5 |
 | `muted` | normal | false | `text_dim` | F1, F5, FI1, FI3 |
 | `italic` | normal | true | `text_warning` | F14, FI6–FI8 |
-| `virtual_mirrored` | normal | false | `text_primary` | F9 (FOLDER_MIRRORED), F10 (FOLDER_MIRRORED_REVEALED) |
-| `virtual_volume` | normal | true | `text_virtual_purple` | F11 (FOLDER_VIRTUAL_VOLUME) |
-| `virtual_auth` | normal | true | `text_virtual_purple` | F12 (FOLDER_VIRTUAL_AUTH) |
+| `stencil_mirrored` | normal | false | `text_primary` | F9 (FOLDER_MIRRORED), F10 (FOLDER_MIRRORED_REVEALED) |
+| `stencil_volume` | normal | true | `text_stencil_purple` | F11 (FOLDER_STENCIL_VOLUME) |
+| `stencil_auth` | normal | true | `text_stencil_purple` | F12 (FOLDER_STENCIL_AUTH) |
 | `pushed_sync` | normal | false | `text_pushed_sync` | Pushed files (synced) |
 | `pushed_nosync` | normal | false | `text_pushed_nosync` | Pushed files (not synced) |
 
@@ -337,7 +337,7 @@ The following values are used in rendering but don't correspond to gradient stat
 | `text_primary` | `#E8DEFF` | Bright text for accessible/active states | `base.text.text_primary` |
 | `text_dim` | `#A89BC8` | Muted text for restricted states | `base.text.text_dim` |
 | `text_warning` | `#DD9B4C` | Orange text for orphaned files | `base.text.text_warning` |
-| `text_virtual_purple` | `#9040B0` | Purple text for virtual paths | `base.text.text_virtual_purple` |
+| `text_stencil_purple` | `#9040B0` | Purple text for stencil paths | `base.text.text_stencil_purple` |
 | `text_pushed_sync` | `#F17149` | Red-orange text for synced pushes | `base.text.text_pushed_sync` |
 | `text_pushed_nosync` | `#C05838` | Dim red-orange for unsynced pushes | `base.text.text_pushed_nosync` |
 

@@ -50,14 +50,14 @@ class TestMountSpecsChanged:
         tree.toggle_mounted(src, True)
         assert len(emitted) == 1
 
-    def test_emits_on_toggle_virtual_mounted(
+    def test_emits_on_toggle_detached_mount(
         self, tree: MountDataTree, tmp_path: Path,
     ):
         src = tmp_path / "src"
         src.mkdir()
         emitted = []
         tree.mountSpecsChanged.connect(lambda: emitted.append(True))
-        tree.toggle_virtual_mounted(src, True)
+        tree.toggle_detached_mount(src, True)
         assert len(emitted) == 1
 
     def test_emits_on_convert_delivery(
@@ -88,7 +88,7 @@ class TestMountSpecsChanged:
         parent = tmp_path / "parent"
         (parent / "a").mkdir(parents=True)
         (parent / "b").mkdir()
-        tree.toggle_virtual_mounted(parent, True)
+        tree.toggle_detached_mount(parent, True)
         emitted = []
         tree.mountSpecsChanged.connect(lambda: emitted.append(True))
         assert tree.remove_but_keep_children(parent) is True
@@ -119,14 +119,14 @@ class TestScopeConfigChangedForwarding:
         tree.toggle_mounted(src, True)
         assert len(emitted) == 1
 
-    def test_forwards_on_toggle_virtual_mounted(
+    def test_forwards_on_toggle_detached_mount(
         self, cm: ConfigManager, tree: MountDataTree, tmp_path: Path,
     ):
         src = tmp_path / "src"
         src.mkdir()
         emitted = []
         cm.scopeConfigChanged.connect(lambda: emitted.append(True))
-        tree.toggle_virtual_mounted(src, True)
+        tree.toggle_detached_mount(src, True)
         assert len(emitted) == 1
 
     def test_forwards_on_convert_delivery(
@@ -145,7 +145,7 @@ class TestScopeConfigChangedForwarding:
     ):
         parent = tmp_path / "parent"
         (parent / "a").mkdir(parents=True)
-        tree.toggle_virtual_mounted(parent, True)
+        tree.toggle_detached_mount(parent, True)
         emitted = []
         cm.scopeConfigChanged.connect(lambda: emitted.append(True))
         tree.remove_but_keep_children(parent)

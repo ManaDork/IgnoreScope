@@ -162,8 +162,8 @@ def find_paths_with_direct_visible_children(
 
     Used by GUI to distinguish has_direct_visible_child=True (direct parent of
     visible content) from False (structural intermediate). Checks Stage 1
-    flags (revealed, pushed) — NOT visibility. Virtual children are structural
-    and should NOT propagate this flag.
+    flags (revealed, pushed) — NOT visibility. Stencil children (visibility
+    "virtual") are structural and should NOT propagate this flag.
 
     Algorithm: Single pass — collect parents of revealed/pushed nodes.
     Complexity: O(n).
@@ -298,11 +298,14 @@ def _find_owning_spec(
     return None
 
 
-def _compute_virtual_paths_from_config(
+def _compute_stencil_paths_from_config(
     states: dict[Path, NodeState],
     config: 'ScopeDockerConfig',
 ) -> set[Path]:
-    """Config-native virtual detection (no tree walks).
+    """Config-native stencil detection (no tree walks).
+
+    Stencils are structural intermediates whose visibility axis is upgraded
+    to "virtual" so the GUI renders them as present-but-hollow.
 
     For each masked/hidden path, checks three conditions:
       Check 1 (within-mount): owning spec has exception descendant
@@ -312,7 +315,7 @@ def _compute_virtual_paths_from_config(
     Returns:
         Set of paths whose visibility should be upgraded to "virtual".
     """
-    virtual: set[Path] = set()
+    stencils: set[Path] = set()
     for path, state in states.items():
         if state.visibility != "restricted":
             continue
@@ -320,69 +323,69 @@ def _compute_virtual_paths_from_config(
         # Check 1: owning spec has exception pattern below this path
         owning_spec = _find_owning_spec(path, config.mount_specs)
         if owning_spec and owning_spec.has_exception_descendant(path):
-            virtual.add(path)
+            stencils.add(path)
             continue
 
         # Check 2: pushed file exists below this path
         if config.has_pushed_descendant(path):
-            virtual.add(path)
+            stencils.add(path)
             continue
 
         # Check 3: mount root below this path (above-mount structural paths)
         # Mount roots get visibility="accessible" in Stage 1, so any restricted
-        # ancestor above a mount should become virtual.
+        # ancestor above a mount should become a stencil (visibility="virtual").
         if not state.masked:
             for ms in config.mount_specs:
                 if ms.mount_root != path and is_descendant(ms.mount_root, path):
-                    virtual.add(path)
+                    stencils.add(path)
                     break
 
-    return virtual
+    return stencils
 
 
-def _cross_reference_virtual(
-    query_virtual: set[Path],
+def _cross_reference_stencil_paths(
+    query_stencils: set[Path],
     config: 'ScopeDockerConfig',
     states: dict[Path, NodeState],
 ) -> None:
-    """Cross-reference config-query virtual results against inverse pattern derivation.
+    """Cross-reference config-query stencil results against inverse pattern derivation.
 
     Logs discrepancies between the two independent methods. Expected differences:
-      - Above-mount paths: in query_virtual but not inverse (inverse only covers within-mount)
-      - Pushed-only virtual: in query_virtual but not inverse (inverse only covers patterns)
+      - Above-mount paths: in query_stencils but not inverse (inverse only covers within-mount)
+      - Pushed-only stencils: in query_stencils but not inverse (inverse only covers patterns)
 
     Unexpected differences indicate malformed patterns or detection bugs.
     """
     import logging
     logger = logging.getLogger(__name__)
 
-    # Collect inverse-derived virtual paths from all mount specs
-    inverse_virtual: set[Path] = set()
+    # Collect inverse-derived stencil paths from all mount specs
+    inverse_stencils: set[Path] = set()
     for ms in config.mount_specs:
-        inverse_virtual.update(ms.get_virtual_paths())
+        inverse_stencils.update(ms.get_stencil_paths())
 
     # Filter inverse to only paths in states dict (inverse may produce paths not in scope)
-    inverse_in_scope = inverse_virtual & set(states.keys())
+    inverse_in_scope = inverse_stencils & set(states.keys())
 
     # Paths in inverse but not in query result — potential detection bug
-    missed_by_query = inverse_in_scope - query_virtual
+    missed_by_query = inverse_in_scope - query_stencils
     for path in missed_by_query:
         st = states.get(path)
         if st and st.visibility == "restricted":
             logger.warning(
-                "Virtual cross-ref: path %s is virtual by inverse pattern derivation "
+                "Stencil cross-ref: path %s is a stencil by inverse pattern derivation "
                 "but NOT by config query (vis=%s, masked=%s). Possible detection bug.",
                 path, st.visibility, st.masked,
             )
 
     # Paths in query but not in inverse — expected for above-mount and pushed-only
-    extra_in_query = query_virtual - inverse_in_scope
+    extra_in_query = query_stencils - inverse_in_scope
     for path in extra_in_query:
         st = states.get(path)
         if st and st.masked:
-            # Masked path virtual by query but not inverse — pushed-only or detection gap
+            # Masked path is a stencil by query but not inverse — pushed-only or detection gap
             logger.debug(
-                "Virtual cross-ref: path %s virtual by query but not inverse (pushed descendant).",
+                "Stencil cross-ref: path %s is a stencil by query but not inverse (pushed descendant).",
                 path,
             )
 
@@ -396,7 +399,8 @@ def apply_node_states_from_scope(
     Phase 3 pipeline (architecture docs: COREFLOWCHART):
 
     Stage 1: Per-node flags + visibility (6 flags + 1 derived)
-    Stage 2: Config-native virtual detection (when config.mirrored=True)
+    Stage 2: Config-native stencil detection — upgrades structural
+             intermediates to visibility="virtual" (when config.mirrored=True)
     Stage 3: Descendant folder fields (has_pushed_descendant, has_direct_visible_child)
 
     Args:
@@ -418,13 +422,13 @@ def apply_node_states_from_scope(
         for p in paths
     }
 
-    # Stage 2: config-native virtual detection (no tree walks)
-    # Upgrades masked/hidden paths that have revealed or pushed descendants
+    # Stage 2: config-native stencil detection (no tree walks)
+    # Upgrades masked/hidden stencil paths (structural intermediates) to visibility="virtual"
     if getattr(config, 'mirrored', True):
-        virtual_paths = _compute_virtual_paths_from_config(states, config)
-        _cross_reference_virtual(virtual_paths, config, states)
-        for vp in virtual_paths:
-            states[vp] = replace(states[vp], visibility="virtual")
+        stencil_paths = _compute_stencil_paths_from_config(states, config)
+        _cross_reference_stencil_paths(stencil_paths, config, states)
+        for sp in stencil_paths:
+            states[sp] = replace(states[sp], visibility="virtual")
 
     # Stage 3: descendant folder fields
     # has_pushed_descendant via config query (no tree walk)

@@ -447,7 +447,7 @@ Panel (dock widget)
 | `display_hidden` | bool | Show nodes with visibility=hidden |
 | `display_non_mounted` | bool | Show folders with no mount ancestor |
 | `display_masked_dead_branches` | bool | Show masked folders with no revealed content |
-| `display_virtual_nodes` | bool | Show virtual nodes (auth volume, LLM configs) |
+| `display_stencil_nodes` | bool | Show stencil nodes (auth volume, LLM configs) |
 | `display_orphaned` | bool | Show orphaned nodes (pushed + masked + mount removed) |
 
 ### D. Per-Panel Defaults
@@ -459,7 +459,7 @@ Panel (dock widget)
 | display_hidden | True | False |
 | display_non_mounted | True | False |
 | display_masked_dead_branches | True | False |
-| display_virtual_nodes | False | True |
+| display_stencil_nodes | False | True |
 | display_orphaned | True | True |
 | undo_scope | full | selection_history |
 
@@ -509,7 +509,7 @@ See `GUI_STATE_STYLES.md` Section 2 for full specification.
 
 22 tree states (14 folder + 8 file) + 2 selected overrides. Each state has a GradientClass and FontStyleClass, derived from visibility STATE + boolean METHOD flags.
 
-Folder states resolved by `_resolve_folder_state()`: visibility + masked + revealed + is_mount_root + virtual_type + has_visible_descendant.
+Folder states resolved by `_resolve_folder_state()`: visibility + masked + revealed + is_mount_root + stencil_tier + has_visible_descendant.
 File states resolved by `_resolve_file_state()`: visibility + container_only + container_orphaned + revealed + pushed + host_orphaned + masked.
 GUI uses if/elif resolution chains — no tree walking.
 

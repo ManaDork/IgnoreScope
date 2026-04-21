@@ -53,7 +53,7 @@ def derive_gradient(
     is_masked: bool = False,
     is_revealed: bool = False,
     has_visible_descendant: bool = False,
-    virtual_type: str = "mirrored",
+    stencil_tier: str = "mirrored",
     container_only: bool = False,
 ) -> tuple[GradientClass, str]:
     """Derive gradient + font var from node properties. No lookup table.
@@ -65,7 +65,7 @@ def derive_gradient(
         (GradientClass, font_var_name) tuple for StateStyleClass construction.
     """
     # P1: pure state — direct 1:1 to visibility.* JSON key
-    is_virtual = (visibility == "virtual")
+    is_stencil_display = (visibility == "virtual")
     p1 = visibility
 
     # P2: parent context — REVEALED gets P2=restricted (accessible in restricted context)
@@ -81,8 +81,8 @@ def derive_gradient(
         p4_var = "config.revealed"
     elif is_masked:
         p4_var = "inherited.masked"
-    elif is_virtual and virtual_type in ("volume", "auth"):
-        p4_var = f"virtual.{virtual_type}"
+    elif is_stencil_display and stencil_tier in ("volume", "auth"):
+        p4_var = f"stencil.{stencil_tier}"
     else:
         p4_var = None
 
@@ -101,10 +101,10 @@ def derive_gradient(
     # Font derivation
     if container_only:
         font = "italic"
-    elif is_virtual and virtual_type in ("volume", "auth"):
-        font = f"virtual_{virtual_type}"
-    elif is_virtual:
-        font = "virtual_mirrored"
+    elif is_stencil_display and stencil_tier in ("volume", "auth"):
+        font = f"stencil_{stencil_tier}"
+    elif is_stencil_display:
+        font = "stencil_mirrored"
     elif p1 == "restricted" and not has_visible_descendant:
         font = "muted"
     else:
@@ -126,8 +126,8 @@ _FOLDER_STATE_INPUTS: dict[str, dict] = {
     "FOLDER_REVEALED":          {"visibility": "accessible", "is_revealed": True},
     "FOLDER_MIRRORED":          {"visibility": "virtual"},
     "FOLDER_MIRRORED_REVEALED": {"visibility": "virtual", "has_visible_descendant": True},
-    "FOLDER_VIRTUAL_VOLUME":    {"visibility": "virtual", "virtual_type": "volume"},
-    "FOLDER_VIRTUAL_AUTH":      {"visibility": "virtual", "virtual_type": "auth"},
+    "FOLDER_STENCIL_VOLUME":    {"visibility": "virtual", "stencil_tier": "volume"},
+    "FOLDER_STENCIL_AUTH":      {"visibility": "virtual", "stencil_tier": "auth"},
     "FOLDER_PUSHED_ANCESTOR":   {"visibility": "restricted", "has_visible_descendant": True},
     "FOLDER_CONTAINER_ONLY":    {"visibility": "virtual", "container_only": True},
 }
@@ -221,7 +221,7 @@ _TREE_STATE_DEFS: dict[str, tuple[Optional[GradientClass], str]] = {
 # Folder states are derived via derive_gradient() — no lookup table needed.
 # The _FOLDER_STATE_INPUTS dict above defines all known states declaratively.
 
-def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrored") -> str:
+def resolve_tree_state(node_state, is_folder: bool, stencil_tier: str = "mirrored") -> str:
     """Resolve a NodeState to a display state name.
 
     Both folders and files use if/elif resolution against pure STATE
@@ -230,13 +230,13 @@ def resolve_tree_state(node_state, is_folder: bool, virtual_type: str = "mirrore
     Args:
         node_state: A core.node_state.NodeState instance.
         is_folder: True for folder nodes, False for file nodes.
-        virtual_type: For virtual nodes — "mirrored", "volume", or "auth".
+        stencil_tier: For stencil nodes (visibility="virtual") — "mirrored", "volume", or "auth".
 
     Returns:
         State name string (e.g. "FOLDER_MOUNTED", "FILE_PUSHED").
     """
     if is_folder:
-        return _resolve_folder_state(node_state, virtual_type)
+        return _resolve_folder_state(node_state, stencil_tier)
     return _resolve_file_state(node_state)
 
 
@@ -262,7 +262,7 @@ def _resolve_file_state(node_state) -> str:
     return "FILE_HIDDEN"
 
 
-def _resolve_folder_state(node_state, virtual_type: str = "mirrored") -> str:
+def _resolve_folder_state(node_state, stencil_tier: str = "mirrored") -> str:
     """Derive folder state name directly from NodeState properties.
 
     Uses the same logic as derive_gradient() to determine the state name
@@ -275,10 +275,10 @@ def _resolve_folder_state(node_state, virtual_type: str = "mirrored") -> str:
     if node_state.container_only:
         return "FOLDER_CONTAINER_ONLY"
     if vis == "virtual":
-        if virtual_type == "volume":
-            return "FOLDER_VIRTUAL_VOLUME"
-        if virtual_type == "auth":
-            return "FOLDER_VIRTUAL_AUTH"
+        if stencil_tier == "volume":
+            return "FOLDER_STENCIL_VOLUME"
+        if stencil_tier == "auth":
+            return "FOLDER_STENCIL_AUTH"
         if node_state.masked:
             if has_vis_desc:
                 return "FOLDER_MASKED_REVEALED"
@@ -392,7 +392,7 @@ class TreeDisplayConfig(BaseDisplayConfig):
     display_hidden: bool = True
     display_non_mounted: bool = True
     display_masked_dead_branches: bool = True
-    display_virtual_nodes: bool = False
+    display_stencil_nodes: bool = False
     display_orphaned: bool = True
     undo_scope: str = "full"
 
@@ -414,7 +414,7 @@ class LocalHostDisplayConfig(TreeDisplayConfig):
     display_hidden = True
     display_non_mounted = True
     display_masked_dead_branches = True
-    display_virtual_nodes = False
+    display_stencil_nodes = False
     display_orphaned = True
     undo_scope = "full"
 
@@ -440,7 +440,7 @@ class ScopeDisplayConfig(TreeDisplayConfig):
     display_hidden = False
     display_non_mounted = False
     display_masked_dead_branches = False
-    display_virtual_nodes = True
+    display_stencil_nodes = True
     display_orphaned = True
     undo_scope = "selection_history"
 

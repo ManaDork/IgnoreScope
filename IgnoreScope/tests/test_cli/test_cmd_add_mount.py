@@ -1,7 +1,7 @@
 """Tests for cmd_add_mount and cmd_convert CLI commands (Phase 2 Tasks 3.1, 3.2).
 
 Verifies the thin CLI wrappers over LocalMountConfig.add_mount /
-add_virtual_mount / convert_delivery. Docker calls are mocked where
+add_detached_mount / convert_delivery. Docker calls are mocked where
 they would otherwise be invoked.
 """
 

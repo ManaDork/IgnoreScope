@@ -49,7 +49,7 @@
             "text_primary": "#E8DEFF",
             "text_dim": "#A89BC8",
             "text_warning": "#DD9B4C",
-            "text_virtual_purple": "#9040B0",
+            "text_stencil_purple": "#9040B0",
             "text_pushed_sync": "#F17149",
             "text_pushed_nosync": "#C05838"
         },
@@ -147,13 +147,13 @@
 
             "inherited.masked":          "#582A2E",
             "inherited.revealed":        "#B88040",
-            "inherited.virtual_auth":    "#501E60",
-            "inherited.virtual_volume":  "#501E60",
+            "inherited.stencil_auth":    "#501E60",
+            "inherited.stencil_volume":  "#501E60",
 
             "ancestor.visible":          "#DD9B4C",
 
-            "virtual.volume":            "#662477",
-            "virtual.auth":              "#662477",
+            "stencil.volume":            "#662477",
+            "stencil.auth":              "#662477",
 
             "status.warning":            "#DD9B4C",
             "ui.selected":               "#6366F1"
@@ -162,9 +162,9 @@
             "default":          { "weight": "normal", "italic": false, "text_color": "text_primary" },
             "muted":            { "weight": "normal", "italic": false, "text_color": "text_dim" },
             "italic":           { "weight": "normal", "italic": true,  "text_color": "text_warning" },
-            "virtual_mirrored": { "weight": "normal", "italic": false, "text_color": "text_primary" },
-            "virtual_volume":   { "weight": "normal", "italic": true,  "text_color": "text_virtual_purple" },
-            "virtual_auth":     { "weight": "normal", "italic": true,  "text_color": "text_virtual_purple" },
+            "stencil_mirrored": { "weight": "normal", "italic": false, "text_color": "text_primary" },
+            "stencil_volume":   { "weight": "normal", "italic": true,  "text_color": "text_stencil_purple" },
+            "stencil_auth":     { "weight": "normal", "italic": true,  "text_color": "text_stencil_purple" },
             "pushed_sync":      { "weight": "normal", "italic": false, "text_color": "text_pushed_sync" },
             "pushed_nosync":    { "weight": "normal", "italic": false, "text_color": "text_pushed_nosync" }
         }
@@ -182,13 +182,13 @@
 
             "inherited.masked":          "#4A2228",
             "inherited.revealed":        "#A07035",
-            "inherited.virtual_auth":    "#441A55",
-            "inherited.virtual_volume":  "#441A55",
+            "inherited.stencil_auth":    "#441A55",
+            "inherited.stencil_volume":  "#441A55",
 
             "ancestor.visible":          "#C88840",
 
-            "virtual.volume":            "#581E68",
-            "virtual.auth":              "#581E68",
+            "stencil.volume":            "#581E68",
+            "stencil.auth":              "#581E68",
 
             "status.warning":            "#C88840",
             "ui.selected":               "#5558E0"
