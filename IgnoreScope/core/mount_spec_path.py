@@ -148,21 +148,22 @@ class MountSpecPath:
                     return True
         return False
 
-    def get_virtual_paths(self) -> set[Path]:
-        """Derive virtual paths from pattern structure (inverse pathspec).
+    def get_stencil_paths(self) -> set[Path]:
+        """Derive stencil (structural intermediate) paths from pattern structure.
 
         For each exception pattern, walks UP through path components to find
         the nearest covering deny pattern. All intermediate paths between the
-        deny and the exception are virtual — their content is masked but their
+        deny and the exception are stencils — their content is masked but their
         directory structure must exist for the container to reach revealed content.
+        These intermediates present as `visibility="virtual"` at runtime.
 
-        Used as cross-reference against config-query virtual detection.
+        Used as cross-reference against config-query stencil detection.
         Discrepancies indicate malformed patterns or detection bugs.
 
         Returns:
             Set of absolute paths that should have virtual visibility.
         """
-        virtual: set[Path] = set()
+        stencils: set[Path] = set()
         deny_set = {p.rstrip("/") for p in self.patterns if not p.startswith("!")}
         for pattern in self.patterns:
             if not pattern.startswith("!"):
@@ -176,9 +177,9 @@ class MountSpecPath:
                     # All intermediates from deny (inclusive) to exception (exclusive)
                     for j in range(i, len(parts)):
                         mid = "/".join(parts[:j])
-                        virtual.add(self.mount_root / mid)
+                        stencils.add(self.mount_root / mid)
                     break
-        return virtual
+        return stencils
 
     # --- Validation ---
 

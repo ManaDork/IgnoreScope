@@ -1,8 +1,8 @@
-"""Tests for MountSpecPath descendant query and virtual derivation methods.
+"""Tests for MountSpecPath descendant query and stencil derivation methods.
 
 Tests:
   MSP-1: has_exception_descendant()
-  MSP-2: get_virtual_paths()
+  MSP-2: get_stencil_paths()
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class TestHasExceptionDescendant:
         """Querying mount_root returns False — _to_relative produces '.'
         which doesn't prefix-match exception patterns. This is acceptable
         because mount_root always gets visibility='visible' in Stage 1
-        and is never checked for virtual upgrade."""
+        and is never checked for stencil upgrade."""
         spec = self._make_spec(tmp_path, ["vendor/", "!vendor/public/"])
         assert spec.has_exception_descendant(tmp_path) is False
 
@@ -97,29 +97,29 @@ class TestHasExceptionDescendant:
 
 
 # ──────────────────────────────────────────────
-# MSP-2: get_virtual_paths()
+# MSP-2: get_stencil_paths()
 # ──────────────────────────────────────────────
 
 
-class TestGetVirtualPaths:
-    """Tests for MountSpecPath.get_virtual_paths()."""
+class TestGetStencilPaths:
+    """Tests for MountSpecPath.get_stencil_paths()."""
 
     def _make_spec(self, tmp_path: Path, patterns: list[str]) -> MountSpecPath:
         return MountSpecPath(mount_root=tmp_path, patterns=patterns)
 
     def test_simple_mask_reveal(self, tmp_path: Path):
-        """vendor/ + !vendor/public/ → vendor is virtual."""
+        """vendor/ + !vendor/public/ → vendor is stencil."""
         spec = self._make_spec(tmp_path, ["vendor/", "!vendor/public/"])
-        result = spec.get_virtual_paths()
+        result = spec.get_stencil_paths()
         assert result == {tmp_path / "vendor"}
 
     def test_deep_reveal(self, tmp_path: Path):
-        """vendor/ + !vendor/internal/handlers/public/ → vendor, vendor/internal, vendor/internal/handlers are virtual."""
+        """vendor/ + !vendor/internal/handlers/public/ → vendor, vendor/internal, vendor/internal/handlers are stencils."""
         spec = self._make_spec(tmp_path, [
             "vendor/",
             "!vendor/internal/handlers/public/",
         ])
-        result = spec.get_virtual_paths()
+        result = spec.get_stencil_paths()
         expected = {
             tmp_path / "vendor",
             tmp_path / "vendor" / "internal",
@@ -135,26 +135,26 @@ class TestGetVirtualPaths:
             "vendor/public/tmp/",
             "!vendor/public/tmp/logs/",
         ])
-        result = spec.get_virtual_paths()
-        # vendor → virtual (covers vendor/public exception)
-        # vendor/public/tmp → virtual (covers vendor/public/tmp/logs exception)
+        result = spec.get_stencil_paths()
+        # vendor → stencil (covers vendor/public exception)
+        # vendor/public/tmp → stencil (covers vendor/public/tmp/logs exception)
         assert tmp_path / "vendor" in result
         assert tmp_path / "vendor" / "public" / "tmp" in result
 
     def test_no_exceptions(self, tmp_path: Path):
-        """Deny-only patterns produce no virtual paths."""
+        """Deny-only patterns produce no stencil paths."""
         spec = self._make_spec(tmp_path, ["vendor/", "dist/"])
-        assert spec.get_virtual_paths() == set()
+        assert spec.get_stencil_paths() == set()
 
     def test_empty_patterns(self, tmp_path: Path):
         """No patterns at all."""
         spec = self._make_spec(tmp_path, [])
-        assert spec.get_virtual_paths() == set()
+        assert spec.get_stencil_paths() == set()
 
     def test_exception_without_covering_deny(self, tmp_path: Path):
-        """Orphan exception (no deny above it) — produces no virtual paths."""
+        """Orphan exception (no deny above it) — produces no stencil paths."""
         spec = self._make_spec(tmp_path, ["!vendor/public/"])
-        assert spec.get_virtual_paths() == set()
+        assert spec.get_stencil_paths() == set()
 
     def test_multiple_independent_exceptions(self, tmp_path: Path):
         """Two separate deny/exception pairs."""
@@ -164,14 +164,14 @@ class TestGetVirtualPaths:
             "dist/",
             "!dist/assets/",
         ])
-        result = spec.get_virtual_paths()
+        result = spec.get_stencil_paths()
         assert tmp_path / "vendor" in result
         assert tmp_path / "dist" in result
 
     def test_exception_immediately_under_deny(self, tmp_path: Path):
-        """Exception is immediate child of deny — deny path itself is virtual."""
+        """Exception is immediate child of deny — deny path itself is stencil."""
         spec = self._make_spec(tmp_path, ["src/", "!src/api/"])
-        result = spec.get_virtual_paths()
+        result = spec.get_stencil_paths()
         assert result == {tmp_path / "src"}
 
 

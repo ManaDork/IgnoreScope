@@ -38,7 +38,7 @@ class NodeSource(Enum):
     """Where a tree node originates."""
     PROJECT = "project"
     SIBLING = "sibling"
-    VIRTUAL = "virtual"
+    STENCIL = "stencil"
 
 
 # Windows reserved device names that can crash on property access
@@ -59,7 +59,8 @@ def _is_windows_reserved_name(name: str) -> bool:
 class MountDataNode:
     """Unified tree node for all panels.
 
-    Covers project files, sibling files, and virtual entries.
+    Covers project files, sibling files, and stencil entries
+    (synthetic nodes — UX "virtual" — not on disk).
     """
     # Class-level filter flag — set by MountDataTree before triggering loads
     show_hidden: ClassVar[bool] = False
@@ -69,8 +70,8 @@ class MountDataNode:
     children: list[MountDataNode] = field(default_factory=list)
     children_loaded: bool = False
     is_file: bool = False
-    is_virtual: bool = False
-    virtual_type: str = "mirrored"        # "mirrored" | "volume" | "auth"
+    is_stencil_node: bool = False
+    stencil_tier: str = "mirrored"        # "mirrored" | "volume" | "auth"
     source: NodeSource = NodeSource.PROJECT
     container_path: str = ""              # Sibling root container target path
 
@@ -89,7 +90,7 @@ class MountDataNode:
 
     def load_children(self, folders_only: bool = False) -> None:
         """Load children from filesystem (lazy loading)."""
-        if self.children_loaded or self.is_file or self.is_virtual:
+        if self.children_loaded or self.is_file or self.is_stencil_node:
             return
 
         self.children = []
@@ -167,9 +168,9 @@ class MountDataTree(QObject):
         # Computed state (CORE output)
         self._states: dict[Path, NodeState] = {}
 
-        # Sibling and virtual subtrees
+        # Sibling and stencil subtrees
         self._sibling_nodes: list[MountDataNode] = []
-        self._virtual_nodes: list[MountDataNode] = []
+        self._stencil_nodes: list[MountDataNode] = []
 
         # Extension configs (not GUI widgets — carried forward through build_config)
         self._extensions: list = []
@@ -233,8 +234,8 @@ class MountDataTree(QObject):
         paths (above-mount and within-mount intermediates) to the path set.
         These paths must exist in all_paths for CORE to evaluate them.
 
-        Virtual detection: handled by CORE config-native queries (no tree walk).
-        The hierarchy call is for path INCLUSION only, not virtual detection.
+        Stencil detection: handled by CORE config-native queries (no tree walk).
+        The hierarchy call is for path INCLUSION only, not stencil detection.
         """
         from ..core.local_mount_config import LocalMountConfig
 
@@ -350,7 +351,7 @@ class MountDataTree(QObject):
         self._pushed_files.clear()
         self._container_files.clear()
         self._sibling_nodes.clear()
-        self._virtual_nodes.clear()
+        self._stencil_nodes.clear()
         self._states.clear()
 
     # ── State Access ──────────────────────────────────────────────
@@ -442,8 +443,8 @@ class MountDataTree(QObject):
         """
         self._toggle_mount_with_delivery(path, checked, delivery="bind")
 
-    def toggle_virtual_mounted(self, path: Path, checked: bool) -> None:
-        """Toggle virtual (detached) mount for a path.
+    def toggle_detached_mount(self, path: Path, checked: bool) -> None:
+        """Toggle detached-delivery mount for a path (UX: "Virtual Mount").
 
         Add: creates new MountSpecPath with delivery="detached".
         Remove: deletes entire MountSpecPath (all patterns lost).
@@ -587,7 +588,7 @@ class MountDataTree(QObject):
         """Check membership — used for checkbox state and RMB context.
 
         Args:
-            field_name: One of 'mounted', 'virtual_mounted', 'pushed'
+            field_name: One of 'mounted', 'detached_mounted', 'pushed'
             path: Path to check
         """
         if field_name == 'mounted':
@@ -595,7 +596,7 @@ class MountDataTree(QObject):
                 ms.mount_root == path and ms.delivery == "bind"
                 for ms in self._mount_specs
             )
-        elif field_name == 'virtual_mounted':
+        elif field_name == 'detached_mounted':
             return any(
                 ms.mount_root == path and ms.delivery == "detached"
                 for ms in self._mount_specs
@@ -770,6 +771,6 @@ class MountDataTree(QObject):
         MountDataNode.show_hidden = False
         self._states.clear()
         self._sibling_nodes.clear()
-        self._virtual_nodes.clear()
+        self._stencil_nodes.clear()
         self.structureChanged.emit()  # Sync menu checkbox on project switch
         self.mountSpecsChanged.emit()

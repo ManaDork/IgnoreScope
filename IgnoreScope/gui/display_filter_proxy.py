@@ -1,7 +1,7 @@
 """Display Filter Proxy for tree views.
 
 QSortFilterProxyModel that enforces TreeDisplayConfig filter booleans
-(display_files, display_virtual_nodes, display_hidden, display_orphaned,
+(display_files, display_stencil_nodes, display_hidden, display_orphaned,
 display_non_mounted, display_masked_dead_branches). Sits between
 MountDataTreeModel and QTreeView.
 
@@ -71,8 +71,8 @@ class DisplayFilterProxy(QSortFilterProxyModel):
         if not self._config.display_files and node.is_file:
             return False
 
-        # ── Virtual node filter ───────────────────────────────
-        if not self._config.display_virtual_nodes and node.is_virtual:
+        # ── Stencil node filter ───────────────────────────────
+        if not self._config.display_stencil_nodes and node.is_stencil_node:
             return False
 
         # State-dependent filters require CORE state

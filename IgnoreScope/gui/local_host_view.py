@@ -193,24 +193,24 @@ class LocalHostView(QWidget):
     def _add_delivery_gestures(self, menu: QMenu, path: Path) -> None:
         """Append the five-gesture delivery state machine to ``menu``.
 
-        States:
-          NONE            → Mount | Virtual Mount
-          BIND_MOUNTED    → Unmount | Convert to Virtual Mount
-          VIRTUAL_MOUNTED → Remove Virtual Mount | Convert to Mount
-                            | Remove But Keep Children
-                            | (if container) Remove Folder from Container
-                            | (if container) Remove Folder Tree from Container
+        States (UX labels shown; internal delivery values in parens):
+          NONE                  → Mount | Virtual Mount
+          BIND_MOUNTED (bind)   → Unmount | Convert to Virtual Mount
+          DETACHED_MOUNTED      → Remove Virtual Mount | Convert to Mount
+                                  | Remove But Keep Children
+                                  | (if container) Remove Folder from Container
+                                  | (if container) Remove Folder Tree from Container
         """
         is_bind = self._tree.is_in_raw_set("mounted", path)
-        is_virtual = self._tree.is_in_raw_set("virtual_mounted", path)
+        is_detached = self._tree.is_in_raw_set("detached_mounted", path)
 
-        if not is_bind and not is_virtual:
+        if not is_bind and not is_detached:
             if self._tree.can_mount(path):
                 a = menu.addAction(f"Mount {path.name}")
                 a.triggered.connect(lambda: self._tree.toggle_mounted(path, True))
                 a = menu.addAction(f"Virtual Mount {path.name}")
                 a.triggered.connect(
-                    lambda: self._tree.toggle_virtual_mounted(path, True),
+                    lambda: self._tree.toggle_detached_mount(path, True),
                 )
         elif is_bind:
             a = menu.addAction(f"Unmount {path.name}")
@@ -219,10 +219,10 @@ class LocalHostView(QWidget):
             a.triggered.connect(
                 lambda: self.convertDeliveryRequested.emit(path, "detached"),
             )
-        elif is_virtual:
+        elif is_detached:
             a = menu.addAction(f"Remove Virtual Mount {path.name}")
             a.triggered.connect(
-                lambda: self._tree.toggle_virtual_mounted(path, False),
+                lambda: self._tree.toggle_detached_mount(path, False),
             )
             a = menu.addAction("Convert to Mount")
             a.triggered.connect(
@@ -385,16 +385,16 @@ class LocalHostView(QWidget):
         folders = [n for n in nodes if not n.is_file]
         files = [n for n in nodes if n.is_file]
 
-        # Batch Remove Virtual Mount when all selected folders are virtual-mounted
+        # Batch Remove Virtual Mount when all selected folders are detached-mounted
         if folders and all(
-            self._tree.is_in_raw_set("virtual_mounted", n.path) for n in folders
+            self._tree.is_in_raw_set("detached_mounted", n.path) for n in folders
         ):
             remove_vm_action = QAction(
                 f"Remove Virtual Mount ({len(folders)} folders)", menu,
             )
             remove_vm_action.triggered.connect(
                 lambda: [
-                    self._tree.toggle_virtual_mounted(n.path, False) for n in folders
+                    self._tree.toggle_detached_mount(n.path, False) for n in folders
                 ]
             )
             menu.addAction(remove_vm_action)

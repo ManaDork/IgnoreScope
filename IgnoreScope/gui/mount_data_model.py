@@ -203,7 +203,7 @@ class MountDataTreeModel(QAbstractItemModel):
             return root is not None and len(root.children) > 0
 
         node: MountDataNode = parent.internalPointer()
-        if node is None or node.is_file or node.is_virtual:
+        if node is None or node.is_file or node.is_stencil_node:
             return False
 
         if not node.children_loaded:
@@ -217,13 +217,13 @@ class MountDataTreeModel(QAbstractItemModel):
         node: MountDataNode = parent.internalPointer()
         if node is None:
             return False
-        return not node.children_loaded and not node.is_file and not node.is_virtual
+        return not node.children_loaded and not node.is_file and not node.is_stencil_node
 
     def fetchMore(self, parent: QModelIndex) -> None:
         if not parent.isValid():
             return
         node: MountDataNode = parent.internalPointer()
-        if node is None or node.children_loaded or node.is_file or node.is_virtual:
+        if node is None or node.children_loaded or node.is_file or node.is_stencil_node:
             return
         node.load_children(folders_only=not self._config.display_files)
         # Recompute states BEFORE announcing rows to proxy.

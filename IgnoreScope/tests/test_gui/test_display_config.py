@@ -85,15 +85,15 @@ class TestFolderTruthTable:
         ns = NodeState(visibility="virtual", has_direct_visible_child=False)
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MIRRORED"
 
-    def test_folder_virtual_volume(self):
+    def test_folder_stencil_volume(self):
         """Non-filesystem volume entry."""
         ns = NodeState(visibility="virtual")
-        assert resolve_tree_state(ns, is_folder=True, virtual_type="volume") == "FOLDER_VIRTUAL_VOLUME"
+        assert resolve_tree_state(ns, is_folder=True, stencil_tier="volume") == "FOLDER_STENCIL_VOLUME"
 
-    def test_folder_virtual_auth(self):
+    def test_folder_stencil_auth(self):
         """Non-filesystem auth volume entry."""
         ns = NodeState(visibility="virtual")
-        assert resolve_tree_state(ns, is_folder=True, virtual_type="auth") == "FOLDER_VIRTUAL_AUTH"
+        assert resolve_tree_state(ns, is_folder=True, stencil_tier="auth") == "FOLDER_STENCIL_AUTH"
 
     def test_folder_pushed_ancestor(self):
         ns = NodeState(visibility="restricted", has_pushed_descendant=True)
@@ -120,15 +120,15 @@ class TestFolderTruthTable:
                        has_pushed_descendant=True)
         assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MASKED_REVEALED"
 
-    def test_folder_virtual_volume_not_affected_by_masked(self):
-        """Volume virtual type takes priority over masked flag."""
+    def test_folder_stencil_volume_not_affected_by_masked(self):
+        """Volume stencil tier takes priority over masked flag."""
         ns = NodeState(visibility="virtual", masked=True)
-        assert resolve_tree_state(ns, is_folder=True, virtual_type="volume") == "FOLDER_VIRTUAL_VOLUME"
+        assert resolve_tree_state(ns, is_folder=True, stencil_tier="volume") == "FOLDER_STENCIL_VOLUME"
 
-    def test_folder_virtual_auth_not_affected_by_masked(self):
-        """Auth virtual type takes priority over masked flag."""
+    def test_folder_stencil_auth_not_affected_by_masked(self):
+        """Auth stencil tier takes priority over masked flag."""
         ns = NodeState(visibility="virtual", masked=True)
-        assert resolve_tree_state(ns, is_folder=True, virtual_type="auth") == "FOLDER_VIRTUAL_AUTH"
+        assert resolve_tree_state(ns, is_folder=True, stencil_tier="auth") == "FOLDER_STENCIL_AUTH"
 
     def test_folder_container_only(self):
         ns = NodeState(visibility="virtual", container_only=True)
@@ -201,7 +201,7 @@ class TestStateStylesDict:
             "FOLDER_MASKED",
             "FOLDER_MASKED_REVEALED", "FOLDER_MASKED_MIRRORED",
             "FOLDER_MIRRORED_REVEALED", "FOLDER_MIRRORED",
-            "FOLDER_VIRTUAL_VOLUME", "FOLDER_VIRTUAL_AUTH",
+            "FOLDER_STENCIL_VOLUME", "FOLDER_STENCIL_AUTH",
             "FOLDER_REVEALED", "FOLDER_PUSHED_ANCESTOR",
             "FOLDER_CONTAINER_ONLY",
             "FILE_HIDDEN", "FILE_VISIBLE", "FILE_MASKED",
@@ -260,13 +260,13 @@ class TestStateStylesDict:
         )
 
     def test_folder_masked_revealed_font(self, config):
-        """F5: default font (not muted, not virtual_mirrored)."""
+        """F5: default font (not muted, not stencil_mirrored)."""
         style = config.state_styles["FOLDER_MASKED_REVEALED"]
         assert style.font.text_color_var == "text_primary"
         assert style.font.italic is False
 
     def test_folder_masked_mirrored_font(self, config):
-        """F6: default font (not muted, not virtual_mirrored)."""
+        """F6: default font (not muted, not stencil_mirrored)."""
         style = config.state_styles["FOLDER_MASKED_MIRRORED"]
         assert style.font.text_color_var == "text_primary"
         assert style.font.italic is False
@@ -280,14 +280,14 @@ class TestStateStylesDict:
         assert g.pos3 == "config.revealed"
 
     def test_folder_mirrored_font(self, config):
-        """FOLDER_MIRRORED: virtual_mirrored font (text_primary)."""
+        """FOLDER_MIRRORED: stencil_mirrored font (text_primary)."""
         style = config.state_styles["FOLDER_MIRRORED"]
         assert style.font.text_color_var == "text_primary"
 
-    def test_folder_virtual_volume_font(self, config):
-        """FOLDER_VIRTUAL_VOLUME: purple text."""
-        style = config.state_styles["FOLDER_VIRTUAL_VOLUME"]
-        assert style.font.text_color_var == "text_virtual_purple"
+    def test_folder_stencil_volume_font(self, config):
+        """FOLDER_STENCIL_VOLUME: purple text."""
+        style = config.state_styles["FOLDER_STENCIL_VOLUME"]
+        assert style.font.text_color_var == "text_stencil_purple"
         assert style.font.italic is True
 
     def test_folder_pushed_ancestor_gradient(self, config):
@@ -415,7 +415,7 @@ class TestJsonLoading:
         """Old flat names are gone."""
         keys = set(config.color_vars.keys())
         for old_key in ("background", "visible", "hidden", "masked", "revealed",
-                        "mounted", "pushed", "virtual", "warning", "selected"):
+                        "mounted", "pushed", "stencil", "warning", "selected"):
             assert old_key not in keys, f"Old key '{old_key}' still present"
 
     def test_font_vars_count(self, config):
@@ -425,7 +425,7 @@ class TestJsonLoading:
     def test_font_vars_keys(self, config):
         assert set(config._font_vars.keys()) == {
             "default", "muted", "italic",
-            "virtual_mirrored", "virtual_volume", "virtual_auth",
+            "stencil_mirrored", "stencil_volume", "stencil_auth",
             "pushed_sync", "pushed_nosync",
         }
 
@@ -438,7 +438,7 @@ class TestJsonLoading:
         assert config.resolve_text_color(font) == "#A89BC8"
 
     def test_resolve_text_color_purple(self, config):
-        font = FontStyleClass(text_color_var="text_virtual_purple")
+        font = FontStyleClass(text_color_var="text_stencil_purple")
         assert config.resolve_text_color(font) == "#9040B0"
 
     def test_resolve_text_color_unknown_fallback(self, config):
@@ -470,7 +470,7 @@ class TestLocalHostDisplayConfig:
         assert config.display_hidden is True
         assert config.display_non_mounted is True
         assert config.display_masked_dead_branches is True
-        assert config.display_virtual_nodes is False
+        assert config.display_stencil_nodes is False
         assert config.display_orphaned is True
 
     def test_undo_scope(self, config):
@@ -496,7 +496,7 @@ class TestScopeDisplayConfig:
         assert config.display_hidden is False
         assert config.display_non_mounted is False
         assert config.display_masked_dead_branches is False
-        assert config.display_virtual_nodes is True
+        assert config.display_stencil_nodes is True
         assert config.display_orphaned is True
 
     def test_undo_scope(self, config):

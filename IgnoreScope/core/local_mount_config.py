@@ -118,8 +118,8 @@ class LocalMountConfig:
         """
         return self._add_mount_with_delivery(path, delivery="bind")
 
-    def add_virtual_mount(self, path: Path) -> bool:
-        """Add a detached (virtual) mount point.
+    def add_detached_mount(self, path: Path) -> bool:
+        """Add a detached mount point (UX: "Virtual Mount").
 
         Creates a MountSpecPath with delivery="detached". Content is delivered
         via docker cp at container create time; no host live-link. Overlap
@@ -136,7 +136,7 @@ class LocalMountConfig:
         path: Path,
         delivery: Literal["bind", "detached"],
     ) -> bool:
-        """Shared add_mount / add_virtual_mount body — overlap guard + append."""
+        """Shared add_mount / add_detached_mount body — overlap guard + append."""
         if any(ms.mount_root == path for ms in self.mount_specs):
             return False
         for ms in self.mount_specs:
@@ -145,11 +145,12 @@ class LocalMountConfig:
         self.mount_specs.append(MountSpecPath(mount_root=path, delivery=delivery))
         return True
 
-    def is_virtual_mounted(self, path: Path) -> bool:
+    def is_detached_mounted(self, path: Path) -> bool:
         """True iff path is the mount_root of a delivery="detached" spec.
 
-        Does not match descendants or bind-delivered mount_roots — the gesture
-        state machine only cares about exact-match at mount_root boundaries.
+        UX term: "Virtual Mount". Does not match descendants or bind-delivered
+        mount_roots — the gesture state machine only cares about exact-match
+        at mount_root boundaries.
         """
         for ms in self.mount_specs:
             if ms.mount_root == path and ms.delivery == "detached":

@@ -123,11 +123,11 @@ PHASE 2: BUILD HOST STRUCTURE
         ├── FOR EACH sibling in scope.siblings:
         │       Scan sibling.host_path → append nodes
         │
-        ├── Virtual nodes (auth volume, future LLM configs)
+        ├── Stencil nodes (auth volume, future LLM configs, detached mount roots)
         │       Appended as non-filesystem entries
         │
         └── Returns: HostFileTree — node tree
-                     (no state yet — just filesystem structure + virtuals)
+                     (no state yet — just filesystem structure + stencils)
                      In GUI context, this becomes MountDataNode tree before
                      state application.
 

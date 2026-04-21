@@ -479,7 +479,7 @@ def cmd_add_mount(
         return False, f"Failed to load config: {e}"
 
     added = (
-        config.add_virtual_mount(mount_path)
+        config.add_detached_mount(mount_path)
         if delivery == "detached"
         else config.add_mount(mount_path)
     )

@@ -154,6 +154,33 @@ A visual state for files or folders that exist in the container but not on the h
 
 ---
 
+### STENCIL (synthetic node category)
+
+Internal umbrella term for nodes added to the unified tree that are NOT filesystem-backed host entries. Five kinds:
+
+1. **Mirrored intermediates** — directories between a masked root and a revealed descendant, inserted so the container can `mkdir -p` the path (see `mirrored`).
+2. **Detached mount roots** — `MountSpecPath` entries with `delivery="detached"` whose container content is cp-delivered (UX label: "Virtual Mount").
+3. **L4 auth volume nodes** — per-extension auth mount points injected by container extensions (see `auth volume`).
+4. **Container-only folders** — directory entries discovered by container scan diff that have no host counterpart (see `container_only`; distinct bool field, still a stencil category at the tree layer).
+5. **Permanent / retained volume nodes** — named-volume stencils (Phase 3+ `delivery="retained"`; reserved).
+
+**Identifiers (internal — NOT UX):**
+- `NodeSource.STENCIL` — MountDataTree source discriminator
+- `MountDataNode.is_stencil_node: bool`, `MountDataNode.stencil_tier: str` (values: `mirrored`, `volume`, `auth`)
+- `MountSpecPath.get_stencil_paths()` — derives stencil paths from mask/reveal patterns
+- `_compute_stencil_paths_from_config()`, `_cross_reference_stencil_paths()` in `core/node_state.py`
+- `display_stencil_nodes: bool` on TreeDisplayConfig
+- Theme variables: `stencil.volume`, `stencil.auth`, `inherited.stencil_volume`, `inherited.stencil_auth`, `text_stencil_purple`
+- Folder states: `FOLDER_STENCIL_VOLUME`, `FOLDER_STENCIL_AUTH`
+
+**Distinction from `visibility="virtual"`:** `visibility` is the per-node MatrixState axis returned by `compute_visibility()`; it stays `"virtual"` to preserve the CORE/GUI coloring contract. STENCIL is the category label for *why a node exists*; `visibility="virtual"` is the container-side *state* of that (or any other restricted-with-structure) node. Many stencils end up with `visibility="virtual"`, but the two axes are not interchangeable.
+
+**UX preservation:** User-facing labels keep the word "Virtual" ("Virtual Mount", "Virtual Folders"). Only internal identifiers use `stencil` / `detached`.
+
+**Domains:** Computation (node_state, mount_spec_path), Presentation (MountDataNode, TreeDisplayConfig, theme)
+
+---
+
 ### visibility
 
 Computed property representing a node's container-side **STATE** — what the container sees, not how the node got there. METHOD flags (`masked`, `revealed`, `mounted`, etc.) remain on the boolean fields. Visibility is one of exactly 3 values: `accessible`, `restricted`, `virtual`.
@@ -528,7 +555,7 @@ The default delivery. Live bind-mount declared in `docker-compose.yml`. Host cha
 
 Detached-snapshot delivery. No bind-mount is emitted for the mount_root; the content is cp'd into the container's filesystem at create time and lives in the container's writable layer. Host edits after create do NOT affect the container. Container edits do NOT flow back to the host.
 
-**UX label:** "Virtual Mount" (RMB gesture). The term "virtual" aligns with `visibility.virtual` in `NodeState` — container-only content — but the underlying field value is `delivery="detached"` to avoid triple-overload with `visibility.virtual`, `NodeSource.VIRTUAL`, and `MountSpecPath.get_virtual_paths()`.
+**UX label:** "Virtual Mount" (RMB gesture). The term "virtual" aligns with `visibility.virtual` in `NodeState` — container-only content — but the underlying field value is `delivery="detached"`. Internal synthetic-node identifiers use `stencil` (`NodeSource.STENCIL`, `MountSpecPath.get_stencil_paths()`, `MountDataNode.is_stencil_node`) so that only the `visibility="virtual"` MatrixState axis retains the `virtual` vocabulary.
 **Persistence:** Container writable-layer content is lost on recreate. `_detached_init` replays the cp walk on every create; `pushed_files` replay follows.
 **Masks inside:** post-cp `docker exec rm -rf` of masked subtree. Reveals inside: included in the cp walk.
 **Overlap:** same `validate_no_overlap` rule as bind — no ancestor/descendant overlap with any other mount_spec regardless of delivery.
@@ -748,8 +775,8 @@ Per-node data object in the unified tree. Represents a single filesystem entry (
 | Field | Type | Description |
 |-------|------|-------------|
 | `is_file` | bool | True for files, False for folders |
-| `is_virtual` | bool | True for virtual entries (not filesystem-backed) |
-| `source` | NodeSource | PROJECT, SIBLING, or VIRTUAL |
+| `is_stencil_node` | bool | True for stencil entries (synthetic, not filesystem-backed) |
+| `source` | NodeSource | PROJECT, SIBLING, or STENCIL |
 | `container_path` | str | Target path in container (sibling nodes) |
 
 Column availability per node is controlled by ColumnDef guards (`files_only`, `folders_only`), not by node type directly.

@@ -110,7 +110,7 @@ class TestLocalHostViewHeaderTint:
     ):
         src = tmp_path / "src"
         src.mkdir()
-        view._tree.toggle_virtual_mounted(src, True)
+        view._tree.toggle_detached_mount(src, True)
 
         expected_hex = view._config.color_vars["visibility.virtual"]
         qss = view._tree_view.header().styleSheet()
@@ -127,7 +127,7 @@ class TestLocalHostViewHeaderTint:
         c.mkdir()
         view._tree.toggle_mounted(a, True)
         view._tree.toggle_mounted(b, True)
-        view._tree.toggle_virtual_mounted(c, True)
+        view._tree.toggle_detached_mount(c, True)
 
         expected_hex = view._config.color_vars["config.mount"]
         assert expected_hex in view._tree_view.header().styleSheet()
@@ -141,8 +141,8 @@ class TestLocalHostViewHeaderTint:
         a.mkdir()
         b.mkdir()
         c.mkdir()
-        view._tree.toggle_virtual_mounted(a, True)
-        view._tree.toggle_virtual_mounted(b, True)
+        view._tree.toggle_detached_mount(a, True)
+        view._tree.toggle_detached_mount(b, True)
         view._tree.toggle_mounted(c, True)
 
         expected_hex = view._config.color_vars["visibility.virtual"]
@@ -154,7 +154,7 @@ class TestLocalHostViewHeaderTint:
         assert view._tree_view.header().styleSheet() == ""
         src = tmp_path / "src"
         src.mkdir()
-        view._tree.toggle_virtual_mounted(src, True)
+        view._tree.toggle_detached_mount(src, True)
         expected_hex = view._config.color_vars["visibility.virtual"]
         assert expected_hex in view._tree_view.header().styleSheet()
 

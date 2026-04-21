@@ -95,16 +95,16 @@ class TestHasPushedDescendant:
 
 
 # ──────────────────────────────────────────────
-# LMC-2: add_virtual_mount / is_virtual_mounted
+# LMC-2: add_detached_mount / is_detached_mounted
 # ──────────────────────────────────────────────
 
 
-class TestAddVirtualMount:
+class TestAddDetachedMount:
     def test_adds_detached_spec(self, tmp_path: Path):
         config = LocalMountConfig()
         src = tmp_path / "src"
         src.mkdir()
-        assert config.add_virtual_mount(src) is True
+        assert config.add_detached_mount(src) is True
         assert len(config.mount_specs) == 1
         assert config.mount_specs[0].mount_root == src
         assert config.mount_specs[0].delivery == "detached"
@@ -115,37 +115,37 @@ class TestAddVirtualMount:
         parent.mkdir()
         child = parent / "child"
         config.add_mount(parent)
-        assert config.add_virtual_mount(child) is False
+        assert config.add_detached_mount(child) is False
         # Overlap in reverse: try adding a bind under a detached parent
         other = tmp_path / "other"
         other.mkdir()
         child2 = other / "inner"
-        config.add_virtual_mount(other)
+        config.add_detached_mount(other)
         assert config.add_mount(child2) is False
 
     def test_duplicate_mount_root_rejected(self, tmp_path: Path):
         config = LocalMountConfig()
         src = tmp_path / "src"
         src.mkdir()
-        config.add_virtual_mount(src)
-        assert config.add_virtual_mount(src) is False
+        config.add_detached_mount(src)
+        assert config.add_detached_mount(src) is False
 
-    def test_is_virtual_mounted_exact_match(self, tmp_path: Path):
+    def test_is_detached_mounted_exact_match(self, tmp_path: Path):
         config = LocalMountConfig()
         src = tmp_path / "src"
         other = tmp_path / "other"
         src.mkdir()
         other.mkdir()
-        config.add_virtual_mount(src)
+        config.add_detached_mount(src)
         config.add_mount(other)
 
-        assert config.is_virtual_mounted(src) is True
-        assert config.is_virtual_mounted(other) is False  # bind spec
-        assert config.is_virtual_mounted(src / "child") is False  # descendant
+        assert config.is_detached_mounted(src) is True
+        assert config.is_detached_mounted(other) is False  # bind spec
+        assert config.is_detached_mounted(src / "child") is False  # descendant
 
-    def test_is_virtual_mounted_empty_config(self, tmp_path: Path):
+    def test_is_detached_mounted_empty_config(self, tmp_path: Path):
         config = LocalMountConfig()
-        assert config.is_virtual_mounted(tmp_path / "anything") is False
+        assert config.is_detached_mounted(tmp_path / "anything") is False
 
 
 # ──────────────────────────────────────────────
@@ -166,7 +166,7 @@ class TestConvertDelivery:
         config = LocalMountConfig()
         src = tmp_path / "src"
         src.mkdir()
-        config.add_virtual_mount(src)
+        config.add_detached_mount(src)
         assert config.convert_delivery(src, "bind") is True
         assert config.mount_specs[0].delivery == "bind"
 
@@ -207,7 +207,7 @@ class TestRemoveButKeepChildren:
         (parent / "b").mkdir()
 
         config = LocalMountConfig()
-        config.add_virtual_mount(parent)
+        config.add_detached_mount(parent)
         config.remove_but_keep_children(parent)
 
         assert all(ms.delivery == "detached" for ms in config.mount_specs)
