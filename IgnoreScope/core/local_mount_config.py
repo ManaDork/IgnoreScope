@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from ..utils.paths import is_descendant, to_absolute_paths, to_relative_posix
 from .mount_spec_path import MountSpecPath
@@ -115,13 +116,127 @@ class LocalMountConfig:
         Returns:
             True if added, False if already mounted or overlap detected.
         """
+        return self._add_mount_with_delivery(path, delivery="bind")
+
+    def add_virtual_mount(self, path: Path) -> bool:
+        """Add a detached (virtual) mount point.
+
+        Creates a MountSpecPath with delivery="detached". Content is delivered
+        via docker cp at container create time; no host live-link. Overlap
+        rules are identical to add_mount — the two delivery modes share one
+        mount_specs namespace.
+
+        Returns:
+            True if added, False if already mounted or overlap detected.
+        """
+        return self._add_mount_with_delivery(path, delivery="detached")
+
+    def _add_mount_with_delivery(
+        self,
+        path: Path,
+        delivery: Literal["bind", "detached"],
+    ) -> bool:
+        """Shared add_mount / add_virtual_mount body — overlap guard + append."""
         if any(ms.mount_root == path for ms in self.mount_specs):
             return False
-        # Overlap check
         for ms in self.mount_specs:
             if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
                 return False
-        self.mount_specs.append(MountSpecPath(mount_root=path))
+        self.mount_specs.append(MountSpecPath(mount_root=path, delivery=delivery))
+        return True
+
+    def is_virtual_mounted(self, path: Path) -> bool:
+        """True iff path is the mount_root of a delivery="detached" spec.
+
+        Does not match descendants or bind-delivered mount_roots — the gesture
+        state machine only cares about exact-match at mount_root boundaries.
+        """
+        for ms in self.mount_specs:
+            if ms.mount_root == path and ms.delivery == "detached":
+                return True
+        return False
+
+    def convert_delivery(
+        self,
+        path: Path,
+        target: Literal["bind", "detached"],
+    ) -> bool:
+        """Flip delivery on the spec whose mount_root is ``path``.
+
+        No-op (returns False) if no exact-match spec is found or delivery
+        already matches target. Caller triggers recreate pipeline — this
+        method mutates config only.
+
+        Returns:
+            True if delivery flipped, False if already at target or no match.
+        """
+        for ms in self.mount_specs:
+            if ms.mount_root == path:
+                if ms.delivery == target:
+                    return False
+                ms.delivery = target
+                return True
+        return False
+
+    def remove_but_keep_children(self, path: Path) -> bool:
+        """Replace a parent mount spec with N explicit child specs.
+
+        Enumerates immediate host-filesystem children of ``path``, creates
+        one new MountSpecPath per child (inheriting delivery + a subset of
+        the parent's patterns where the pattern falls under the child), and
+        removes the parent entry. Patterns that do not fall under any child
+        are dropped.
+
+        Use case: user mounts a parent folder, then wants finer-grained
+        per-child tracking without retyping each child's mount.
+
+        Returns:
+            True if the parent was replaced, False if no matching mount
+            spec or the host path has no enumerable children.
+        """
+        parent = None
+        for ms in self.mount_specs:
+            if ms.mount_root == path:
+                parent = ms
+                break
+        if parent is None:
+            return False
+        if not path.is_dir():
+            return False
+
+        try:
+            children = sorted(
+                c for c in path.iterdir() if c.is_dir()
+            )
+        except OSError:
+            return False
+        if not children:
+            return False
+
+        new_specs: list[MountSpecPath] = []
+        for child in children:
+            child_rel = str(child.relative_to(parent.mount_root)).replace("\\", "/") + "/"
+            child_patterns: list[str] = []
+            for pat in parent.patterns:
+                stripped = pat.lstrip("!")
+                if stripped.startswith(child_rel) or stripped == child_rel.rstrip("/") + "/":
+                    # Rewrite pattern to be relative to the new child mount_root.
+                    prefix = "!" if pat.startswith("!") else ""
+                    suffix = stripped[len(child_rel):]
+                    if suffix:
+                        child_patterns.append(f"{prefix}{suffix}")
+            new_specs.append(
+                MountSpecPath(
+                    mount_root=child,
+                    patterns=child_patterns,
+                    delivery=parent.delivery,
+                )
+            )
+
+        idx = self.mount_specs.index(parent)
+        self.mount_specs.pop(idx)
+        for offset, ns in enumerate(new_specs):
+            self.mount_specs.insert(idx + offset, ns)
         return True
 
     # --- Mask operations (delegate to mount spec) ---

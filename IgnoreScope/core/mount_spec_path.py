@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import pathspec
 
@@ -31,10 +32,14 @@ class MountSpecPath:
     Attributes:
         mount_root: Absolute path to the bind mount root on the host.
         patterns: Ordered list of gitignore-style patterns, relative to mount_root.
+        delivery: How content reaches the container.
+            "bind"     — L1 bind mount (default, host is live-linked).
+            "detached" — docker cp snapshot at container create; no host link.
     """
 
     mount_root: Path = field(default_factory=Path)
     patterns: list[str] = field(default_factory=list)
+    delivery: Literal["bind", "detached"] = "bind"
 
     # --- Pattern CRUD ---
 
@@ -184,6 +189,11 @@ class MountSpecPath:
         if not self.mount_root:
             errors.append("mount_root is empty")
 
+        if self.delivery not in ("bind", "detached"):
+            errors.append(
+                f"delivery must be 'bind' or 'detached', got {self.delivery!r}"
+            )
+
         for i, p in enumerate(self.patterns):
             stripped = p.lstrip("!")
             if not stripped:
@@ -250,6 +260,7 @@ class MountSpecPath:
         return {
             "mount_root": rel_root,
             "patterns": list(self.patterns),
+            "delivery": self.delivery,
         }
 
     @classmethod
@@ -257,13 +268,15 @@ class MountSpecPath:
         """Deserialize from dict.
 
         Args:
-            data: Dict with 'mount_root' (relative path) and 'patterns' (list).
+            data: Dict with 'mount_root' (relative path), 'patterns' (list),
+                and optional 'delivery' ('bind' default for legacy configs).
             host_project_root: Base path for resolving relative mount_root.
         """
         raw_root = data.get("mount_root", ".")
         mount_root = (host_project_root / raw_root).resolve()
         patterns = list(data.get("patterns", []))
-        return cls(mount_root=mount_root, patterns=patterns)
+        delivery = data.get("delivery", "bind")
+        return cls(mount_root=mount_root, patterns=patterns, delivery=delivery)
 
     # --- Internal ---
 

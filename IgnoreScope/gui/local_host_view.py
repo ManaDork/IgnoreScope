@@ -28,6 +28,7 @@ from .mount_data_tree import MountDataTree, MountDataNode, NodeSource
 from .mount_data_model import MountDataTreeModel
 from dataclasses import replace as dc_replace
 from .display_config import LocalHostDisplayConfig
+from .style_engine import resolve_delivery_tint_key
 from .view_helpers import configure_tree_view, apply_header_config
 
 
@@ -46,6 +47,8 @@ class LocalHostView(QWidget):
     nodeSelected = pyqtSignal(Path)
     syncRequested = pyqtSignal(Path)
     removeSiblingRequested = pyqtSignal(object)  # Path emitted
+    convertDeliveryRequested = pyqtSignal(object, str)  # (path, target)
+    removeFromContainerRequested = pyqtSignal(object, bool)  # (path, recursive)
 
     def __init__(
         self, tree: MountDataTree, parent: Optional[QWidget] = None,
@@ -59,9 +62,29 @@ class LocalHostView(QWidget):
         self._proxy = DisplayFilterProxy(self._model, self._config)
         self._tree_view = QTreeView()
         self._tree_view.setObjectName("localHostTree")
+        # Optional callable() -> bool, set by parent, indicates container exists.
+        # When None, container-dependent gestures are hidden.
+        self._container_exists_fn = None
 
         self._setup_ui()
         self._connect_signals()
+
+    def set_container_exists_fn(self, fn) -> None:
+        """Inject a zero-arg callable that returns True iff a container exists.
+
+        Used to gate the container-dependent RMB gestures (Remove Folder
+        from Container / Remove Folder Tree from Container). When the
+        callable is None or returns False, those gestures are hidden.
+        """
+        self._container_exists_fn = fn
+
+    def _container_exists(self) -> bool:
+        if self._container_exists_fn is None:
+            return False
+        try:
+            return bool(self._container_exists_fn())
+        except Exception:
+            return False
 
     # ── UI Setup ──────────────────────────────────────────────────
 
@@ -86,6 +109,31 @@ class LocalHostView(QWidget):
         self._model.stateChanged.connect(self.stateChanged.emit)
         self._tree_view.selectionModel().currentChanged.connect(
             self._on_selection_changed,
+        )
+        # Re-tint the Project Root Header whenever mount_specs mutate.
+        self._tree.mountSpecsChanged.connect(self._apply_header_tint)
+        self._apply_header_tint()
+
+    # ── Header Delivery Tint ──────────────────────────────────────
+
+    def _apply_header_tint(self) -> None:
+        """Tint the QHeaderView based on dominant mount_specs delivery.
+
+        All-bind → ``config.mount``; all-detached → ``visibility.virtual``;
+        mixed → majority by spec count (ties → ``config.mount``); empty
+        scope → clear the override (fall back to the global QSS default).
+        """
+        key = resolve_delivery_tint_key(self._tree._mount_specs)
+        header = self._tree_view.header()
+        if key is None:
+            header.setStyleSheet("")
+            return
+        color = self._config.color_vars.get(key)
+        if not color:
+            header.setStyleSheet("")
+            return
+        header.setStyleSheet(
+            f"QHeaderView::section {{ background-color: {color}; }}"
         )
 
     # ── Public API ────────────────────────────────────────────────
@@ -124,21 +172,68 @@ class LocalHostView(QWidget):
     # ── Header Context Menu ──────────────────────────────────────
 
     def _show_header_context_menu(self, pos: QPoint) -> None:
-        """Header RMB: toggle mount for host_project_root."""
+        """Header RMB: full 5-gesture state machine scoped to host_project_root."""
         root = self._tree.host_project_root
         if root is None:
             return
 
         menu = QMenu(self)
-        is_mounted = self._tree.is_in_raw_set("mounted", root)
-        if is_mounted:
-            a = menu.addAction(f"Unmount {root.name}")
-            a.triggered.connect(lambda: self._tree.toggle_mounted(root, False))
-        elif self._tree.can_mount(root):
-            a = menu.addAction(f"Mount {root.name}")
-            a.triggered.connect(lambda: self._tree.toggle_mounted(root, True))
+        self._add_delivery_gestures(menu, root)
         if menu.actions():
             menu.exec(self._tree_view.header().mapToGlobal(pos))
+
+    def _add_delivery_gestures(self, menu: QMenu, path: Path) -> None:
+        """Append the five-gesture delivery state machine to ``menu``.
+
+        States:
+          NONE            → Mount | Virtual Mount
+          BIND_MOUNTED    → Unmount | Convert to Virtual Mount
+          VIRTUAL_MOUNTED → Remove Virtual Mount | Convert to Mount
+                            | Remove But Keep Children
+                            | (if container) Remove Folder from Container
+                            | (if container) Remove Folder Tree from Container
+        """
+        is_bind = self._tree.is_in_raw_set("mounted", path)
+        is_virtual = self._tree.is_in_raw_set("virtual_mounted", path)
+
+        if not is_bind and not is_virtual:
+            if self._tree.can_mount(path):
+                a = menu.addAction(f"Mount {path.name}")
+                a.triggered.connect(lambda: self._tree.toggle_mounted(path, True))
+                a = menu.addAction(f"Virtual Mount {path.name}")
+                a.triggered.connect(
+                    lambda: self._tree.toggle_virtual_mounted(path, True),
+                )
+        elif is_bind:
+            a = menu.addAction(f"Unmount {path.name}")
+            a.triggered.connect(lambda: self._tree.toggle_mounted(path, False))
+            a = menu.addAction("Convert to Virtual Mount")
+            a.triggered.connect(
+                lambda: self.convertDeliveryRequested.emit(path, "detached"),
+            )
+        elif is_virtual:
+            a = menu.addAction(f"Remove Virtual Mount {path.name}")
+            a.triggered.connect(
+                lambda: self._tree.toggle_virtual_mounted(path, False),
+            )
+            a = menu.addAction("Convert to Mount")
+            a.triggered.connect(
+                lambda: self.convertDeliveryRequested.emit(path, "bind"),
+            )
+            a = menu.addAction("Remove But Keep Children")
+            a.triggered.connect(
+                lambda: self._tree.remove_but_keep_children(path),
+            )
+            if self._container_exists():
+                menu.addSeparator()
+                a = menu.addAction("Remove Folder from Container")
+                a.triggered.connect(
+                    lambda: self.removeFromContainerRequested.emit(path, False),
+                )
+                a = menu.addAction("Remove Folder Tree from Container")
+                a.triggered.connect(
+                    lambda: self.removeFromContainerRequested.emit(path, True),
+                )
 
     # ── Context Menu ──────────────────────────────────────────────
 
@@ -188,18 +283,10 @@ class LocalHostView(QWidget):
         state = self._tree.get_node_state(path)
 
         if not node.is_file:
-            # ── Folder actions — state-driven ──
-            is_mounted = self._tree.is_in_raw_set("mounted", path)
+            # ── Folder actions — 5-gesture delivery state machine ──
+            self._add_delivery_gestures(menu, path)
+
             ms = self._tree._find_owning_spec(path)
-
-            # Mount / Unmount
-            if is_mounted:
-                a = menu.addAction(f"Unmount {path.name}")
-                a.triggered.connect(lambda: self._tree.toggle_mounted(path, False))
-            elif self._tree.can_mount(path):
-                a = menu.addAction(f"Mount {path.name}")
-                a.triggered.connect(lambda: self._tree.toggle_mounted(path, True))
-
             if ms and state:
                 # Check if THIS folder has its own explicit pattern
                 try:
@@ -286,6 +373,21 @@ class LocalHostView(QWidget):
         count = len(nodes)
         folders = [n for n in nodes if not n.is_file]
         files = [n for n in nodes if n.is_file]
+
+        # Batch Remove Virtual Mount when all selected folders are virtual-mounted
+        if folders and all(
+            self._tree.is_in_raw_set("virtual_mounted", n.path) for n in folders
+        ):
+            remove_vm_action = QAction(
+                f"Remove Virtual Mount ({len(folders)} folders)", menu,
+            )
+            remove_vm_action.triggered.connect(
+                lambda: [
+                    self._tree.toggle_virtual_mounted(n.path, False) for n in folders
+                ]
+            )
+            menu.addAction(remove_vm_action)
+            menu.addSeparator()
 
         # Folder batch actions
         if folders:

@@ -270,8 +270,9 @@ class TestScopeDockerConfig:
         # Serialize
         data = original.to_dict()
 
-        # Verify structure
-        assert data["version"] == "0.2.0"
+        # Verify structure — version always reflects the installed __version__
+        from IgnoreScope._version import __version__
+        assert data["version"] == __version__
         assert data["scope_name"] == "test-container"
         assert data["dev_mode"] is False
         assert data["mirrored"] is False
@@ -316,6 +317,49 @@ class TestScopeDockerConfig:
         assert tmp_path / "src" / "api" / "config.json" in config.pushed_files
         assert len(config.mount_specs) == 1
         assert config.mount_specs[0].patterns == ["api/", "!api/public/"]
+
+    def test_legacy_container_mode_keys_silently_dropped(self, tmp_path: Path):
+        """v0.4.x configs containing container_mode / init_source load without error."""
+        from IgnoreScope.core.config import ScopeDockerConfig
+
+        data = {
+            "version": "0.4.1",
+            "scope_name": "legacy",
+            "dev_mode": True,
+            "container_mode": "Isolation",
+            "init_source": "cp",
+            "local": {
+                "mount_specs": [],
+                "pushed_files": [],
+            },
+        }
+
+        config = ScopeDockerConfig.from_dict(data, tmp_path)
+        assert not hasattr(config, "container_mode")
+        assert not hasattr(config, "init_source")
+        assert config.validate() == []
+
+        # Round-trip must not re-emit the legacy keys.
+        round_tripped = config.to_dict()
+        assert "container_mode" not in round_tripped
+        assert "init_source" not in round_tripped
+
+    def test_version_migration_dev_bypass(self, monkeypatch):
+        """DEV_BYPASS_ENV_VAR skips migration and version stamping."""
+        from IgnoreScope._version import (
+            DEV_BYPASS_ENV_VAR, check_version_mismatch, __version__,
+        )
+
+        stale = {"version": "0.0.1", "scope_name": "stale"}
+
+        # Default: version gets stamped to current
+        stamped = check_version_mismatch(dict(stale))
+        assert stamped["version"] == __version__
+
+        # With bypass: data returned unchanged
+        monkeypatch.setenv(DEV_BYPASS_ENV_VAR, "1")
+        unchanged = check_version_mismatch(dict(stale))
+        assert unchanged["version"] == "0.0.1"
 
 
 class TestSiblingMount:

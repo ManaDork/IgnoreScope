@@ -54,6 +54,8 @@ class ConfigManager(QObject):
     # Phase 2: emitted after undo/redo so SessionHistory panel can update cursor
     undoPerformed = pyqtSignal()
     redoPerformed = pyqtSignal()
+    # Forwarded from MountDataTree.mountSpecsChanged — fires after any mount_specs mutation
+    scopeConfigChanged = pyqtSignal()
 
     MAX_UNDO = 10
 
@@ -62,6 +64,7 @@ class ConfigManager(QObject):
         self._app = app
         self._undo_stack: deque[FullConfigSnapshot] = deque(maxlen=self.MAX_UNDO)
         self._redo_stack: deque[FullConfigSnapshot] = deque(maxlen=self.MAX_UNDO)
+        self._app._mount_data_tree.mountSpecsChanged.connect(self.scopeConfigChanged.emit)
 
     # ── Undo / Redo ────────────────────────────────────────────────
 

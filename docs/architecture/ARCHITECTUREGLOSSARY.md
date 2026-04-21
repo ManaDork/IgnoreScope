@@ -452,19 +452,24 @@ Docker-compose volumes are applied in declaration order. Later volumes overlay e
 
 ```
 For each MountSpecPath:
-  1. Bind mount (mount_root)                    — base visibility
-  2. For each pattern in order:
+  1. Layer 1 — emitted iff delivery == "bind":
+       Bind mount (mount_root)                  — base visibility, live host link
+     (If delivery == "detached", Layer 1 is NOT emitted.
+      Content is cp'd into the container at init time instead — container-only copy.)
+  2. For each pattern in order (applies to both delivery modes):
      - Non-negated (e.g., "vendor/")            — named mask volume (hides)
      - Negated (e.g., "!vendor/public/")        — bind mount punch-through (reveals)
      - Non-negated (e.g., "vendor/public/tmp/") — named mask volume (re-hides)
   ...
 For each Sibling (same pattern-order structure)
-Final: Isolation volumes                         — persistent, container-owned
+Final: Isolation volumes                         — persistent, container-owned (Layer 4)
 ```
 
 Pattern order = volume declaration order = correct nested layering. A reveal after a mask re-exposes content; a mask after a reveal re-hides a subfolder within it.
 
-**Isolation:** Named volumes backing extension install paths (e.g., `/root/.local` for Claude). Declared via `ExtensionConfig.isolation_paths`. Volume naming: `iso_{sanitized_ext_name}_{sanitized_path}`. Nothing punches through isolation — it is the final overlay.
+**Detached delivery mechanics:** masks within a detached mount are enforced post-cp via `docker exec rm -rf` of the masked subtree; reveals are included in the initial cp walk. See **Mount Delivery Terms** for the full gesture set.
+
+**Isolation (Layer 4):** Named volumes backing extension install paths (e.g., `/root/.local` for Claude). Declared via `ExtensionConfig.isolation_paths`. Volume naming: `iso_{sanitized_ext_name}_{sanitized_path}`. Nothing punches through isolation — it is the final overlay. Orthogonal to `delivery` — Layer 4 volumes are emitted regardless of mount_specs delivery modes.
 
 **Domains:** Computation (core/hierarchy.py computes ordering), Generation (docker/compose.py formats into YAML)
 
@@ -472,31 +477,115 @@ Pattern order = volume declaration order = correct nested layering. A reveal aft
 
 ### MountSpecPath
 
-Dataclass representing a single bind mount root with an ordered list of gitignore-style patterns controlling which subdirectories are masked (hidden) or unmasked (revealed) within that mount.
+Dataclass representing a single mount root with an ordered list of gitignore-style patterns controlling which subdirectories are masked (hidden) or unmasked (revealed) within that mount, plus a `delivery` mode selecting how the content reaches the container.
 
 **Module:** `core/mount_spec_path.py`
 **Fields:**
-- `mount_root: Path` — absolute path to the bind mount root on the host
+- `mount_root: Path` — absolute path to the mount root on the host
 - `patterns: list[str]` — ordered gitignore-style patterns, relative to mount_root
+- `delivery: Literal["bind", "detached"] = "bind"` — how content is delivered to the container. `"bind"` emits a live bind-mount (host changes propagate). `"detached"` emits no bind-mount and instead cp's the content at container create (container-only copy, no live host link). See **Mount Delivery Terms** section.
 
-**Pattern syntax (gitignore native):**
-- `"vendor/"` — mask (deny) the vendor directory (named Docker volume)
-- `"!vendor/public/"` — unmask (exception) vendor/public (bind mount punch-through)
-- `"vendor/public/tmp/"` — re-mask vendor/public/tmp (named Docker volume)
+**Pattern syntax (gitignore native, applies to both delivery modes):**
+- `"vendor/"` — mask (deny) the vendor directory
+- `"!vendor/public/"` — unmask (exception) vendor/public
+- `"vendor/public/tmp/"` — re-mask vendor/public/tmp
 
 **Evaluation:** Uses `pathspec` library with `gitignore` mode. Last matching pattern wins.
 **Methods:** `add_pattern()`, `remove_pattern()`, `move_pattern()`, `is_masked(path)`, `is_unmasked(path)`, `get_masked_paths()`, `get_revealed_paths()`, `validate()`, `validate_no_overlap(specs)`
 
-**Mount overlap rule:** No mount root can be a descendant of another mount root. Hard block validated by `validate_no_overlap()`.
+**Mount overlap rule:** No mount root can be a descendant of another mount root, regardless of delivery. Hard block validated by `validate_no_overlap()`.
 
 **JSON format:**
 ```json
 "mount_specs": [
-  {"mount_root": "src", "patterns": ["vendor/", "!vendor/public/"]}
+  {"mount_root": "src", "patterns": ["vendor/", "!vendor/public/"], "delivery": "bind"},
+  {"mount_root": "src/generated", "patterns": [], "delivery": "detached"}
 ]
 ```
 
+`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs).
+
 **Domains:** Config (mount_spec_path.py), Computation (node_state.py pathspec eval, hierarchy.py volume generation), Presentation (future rule list panel)
+
+---
+
+## Mount Delivery Terms
+
+Per-spec `delivery` mode on `MountSpecPath` (`"bind"` or `"detached"`, default `"bind"`) selects how mount content reaches the container. Introduced in 0.5 to replace the earlier scope-level `container_mode` binary. A single scope may mix delivery modes across its mount_specs — each spec is independent.
+
+### Mount (delivery="bind")
+
+The default delivery. Live bind-mount declared in `docker-compose.yml`. Host changes propagate into the container immediately; container-side edits (where not masked) write through to the host. Masks (named volumes) and reveals (bind punch-throughs) layer over the bind in pattern order.
+
+**UX label:** "Mount" (RMB gesture). No visible delivery modifier — "Mount" always means bind.
+**Persistence:** Nothing to replay on container recreate — the bind re-attaches host state.
+
+**Domains:** Generation (compose L1 bind entry), Lifecycle (no init step)
+
+---
+
+### Virtual Mount (delivery="detached")
+
+Detached-snapshot delivery. No bind-mount is emitted for the mount_root; the content is cp'd into the container's filesystem at create time and lives in the container's writable layer. Host edits after create do NOT affect the container. Container edits do NOT flow back to the host.
+
+**UX label:** "Virtual Mount" (RMB gesture). The term "virtual" aligns with `visibility.virtual` in `NodeState` — container-only content — but the underlying field value is `delivery="detached"` to avoid triple-overload with `visibility.virtual`, `NodeSource.VIRTUAL`, and `MountSpecPath.get_virtual_paths()`.
+**Persistence:** Container writable-layer content is lost on recreate. `_detached_init` replays the cp walk on every create; `pushed_files` replay follows.
+**Masks inside:** post-cp `docker exec rm -rf` of masked subtree. Reveals inside: included in the cp walk.
+**Overlap:** same `validate_no_overlap` rule as bind — no ancestor/descendant overlap with any other mount_spec regardless of delivery.
+
+**Domains:** Generation (compose — no L1 emitted), Lifecycle (`_detached_init_cp` walk at create + recreate), Config (delivery field on MountSpecPath)
+
+---
+
+### Five RMB gestures (tree node + Project Root Header)
+
+The RMB action set at both the tree-node level and the Project Root Header depends on the current state of the target path:
+
+| State | Container exists? | Actions available |
+|---|---|---|
+| Neither Mount nor Virtual Mount set | — | **Mount**, **Virtual Mount** |
+| Mount | no | **Unmount**, **Convert to Virtual Mount** |
+| Mount | yes | **Unmount**, **Convert to Virtual Mount** ⚠️ recreates container |
+| Virtual Mount | no | **Remove Virtual Mount**, **Convert to Mount**, **Remove But Keep Children** |
+| Virtual Mount | yes | **Remove Virtual Mount**, **Convert to Mount**, **Remove But Keep Children**, **Remove Folder from Container** (transient), **Remove Folder Tree from Container** (permanent) |
+
+**Convert gestures** toggle `delivery` on the existing `MountSpecPath` entry. When a container exists, a recreate-confirmation dialog fires (Docker has no hot-attach/detach for volumes — conversion requires `execute_update`'s recreate pipeline).
+
+**Remove But Keep Children** — a Virtual-Mount-only restructuring gesture. Enumerates direct host children of the current `mount_root`, replaces the parent entry with N child entries (each a Virtual Mount of the corresponding child), preserving the existing pattern engine on each child. Used when the user wants finer-grained tracking than a single parent entry.
+
+**Remove Folder from Container (transient)** — `docker exec rm -rf <container_path>` only. Config unchanged. Next recreate replays the detached cp, restoring the folder.
+
+**Remove Folder Tree from Container (permanent)** — `docker exec rm -rf` plus delete the config entry. Folder is permanently absent from the scope.
+
+Shift-select supports batch Remove across multiple Virtual Mount entries.
+
+**Domains:** Presentation (local_host_view RMB + Project Root Header RMB), Config (toggle/remove on LocalMountConfig), Lifecycle (convert triggers recreate)
+
+---
+
+### Mount Delivery header cue
+
+The Project Root Header in the GUI tints to indicate the active scope's dominant delivery mode across its `mount_specs`:
+- All specs `delivery="bind"` → `config.mount` theme color (Mount-consistent)
+- All specs `delivery="detached"` → `visibility.virtual` theme color (container-only-consistent)
+- Mixed (some bind, some detached) → majority-by-spec-count wins. Ties resolve to `config.mount`.
+- Empty scope (no mount_specs) → default panel-header color.
+
+Selection mechanism and QSS details are an implementation concern of `gui/local_host_view.py` and the theme stylesheet.
+
+**Domains:** Presentation (GUI theme), Config (delivery read)
+
+---
+
+### Detached symlink placeholder (guidance)
+
+Detached delivery uses a conservative policy for host symlinks and Windows junctions inside a scoped mount: create the container-side directory stub at the symlink's location, but do not traverse into the symlink target. The directory appears in the container's listing so downstream tooling sees the expected structure; populating it is left to the user via manual `docker cp` / `scope push` later.
+
+**Rationale:** Scoped trees often contain Perforce/UE5 junctions that could silently deref gigabytes if followed. Skip-and-stub is safe by default; users opt in to content by pushing explicitly.
+
+**Deferred Presentation (Phase 2+):** a dedicated deferred-style node state can indicate a placeholder directory that exists in the container but has not been populated. Not shipped in Phase 1.
+
+**Domains:** Lifecycle (detached init), Presentation (future deferred-style state for symlink nodes)
 
 ---
 
@@ -706,15 +795,18 @@ Key fields: `header`, `width`, `check_field`, `files_only`, `folders_only`, `sym
 
 The `QHeaderView` band atop the `localHostTree` QTreeView in `LocalHostView`. Provides its own RMB context menu (`_show_header_context_menu`) distinct from the node-level RMB. Targets `host_project_root` only — the folder configured as the project root.
 
-**Mount/Unmount conditions:**
-- `is_in_raw_set("mounted", root)` — True → show "Unmount root"
-- `can_mount(root)` — True (no overlap with existing specs) → show "Mount root"
-- Neither condition met → menu is empty, not shown
+**Actions follow the five-gesture state machine** documented in `Mount Delivery Terms`. The header RMB offers the same gesture set as a tree-node RMB, scoped to `host_project_root`:
 
-**Contrast with tree node RMB:** Node RMB checks both `is_in_raw_set` and `can_mount` per selected node; header RMB targets only the project root.
+- No mount set on root → **Mount**, **Virtual Mount** (both apply to the entire project)
+- Mount set on root → **Unmount**, **Convert to Virtual Mount**
+- Virtual Mount set on root → **Remove Virtual Mount**, **Convert to Mount**, **Remove But Keep Children**, plus container-dependent actions when a container exists
+
+The header never hides when a scope is loaded — gestures always include at least Mount/Virtual Mount when the root has no mount set. Menu is only fully empty when no scope is loaded.
+
+**Contrast with tree node RMB:** Node RMB checks the same gate flags per selected node; header RMB always targets `host_project_root`. Multi-select (shift-click in the tree) does not apply to the header.
 
 **Domains:** Presentation (LocalHostView header interaction)  
-**See:** `local_host_view.py → _show_header_context_menu`, `GUI_LAYOUT_SPECS.md § Module Ownership Map`
+**See:** `Mount Delivery Terms § Five RMB gestures`, `local_host_view.py → _show_header_context_menu`, `GUI_LAYOUT_SPECS.md § Module Ownership Map`
 
 ---
 
