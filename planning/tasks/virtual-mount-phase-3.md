@@ -279,16 +279,18 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 - Theme: add `stencil.auth` color key
 
 **Acceptance Criteria:**
-- [ ] L4 volume mount points visible in Scope Config Tree.
-- [ ] RMB on L4 node shows disabled "Extension-owned" entry (per Phase 2 silent-no-op pattern).
-- [ ] Visual tier glyph distinguishes L4 from user-created stencil nodes.
-- [ ] Updated `DATAFLOWCHART.md` — L4 isolation volumes rendered under Scope Config Tree (previously invisible in GUI); data flow shows hierarchy → MountDataTree → ScopeView.
-- [ ] Updated `THEME_WORKFLOW.md` — new `stencil.auth` color key added to the Mount Delivery Color Mapping, plus any other stencil tier colors introduced (`stencil.folder`, `stencil.volume`, `stencil.mirrored`).
-- [ ] Updated `GUI_STRUCTURE.md` — Scope Config Tree node-type hierarchy includes stencil tiers.
+- [x] L4 volume mount points visible in Scope Config Tree. (`MountDataTree._rebuild_l4_stencil_nodes` synthesizes one stencil node per `ExtensionConfig.isolation_paths` entry, appended to `root_node.children`.)
+- [x] RMB on L4 node falls through to the silent-no-op fallback ("No valid actions"). `ScopeView._show_context_menu` short-circuits when `node.is_stencil_node and node.stencil_tier == "auth"`; container_lifecycle owns the lifecycle.
+- [x] Tier-aware rendering wired end-to-end. New `NodeStencilTierRole` on `MountDataTreeModel` exposes `node.stencil_tier`; `TreeStyleDelegate._resolve_style` forwards it into `resolve_tree_state`, routing virtual+auth to `FOLDER_STENCIL_AUTH` (existing palette key from Task 4.1).
+- [x] Updated `DATAFLOWCHART.md` — `load_config` flow now lists `_rebuild_l4_stencil_nodes()` as the post-sibling step; scope-side RMB invariants gained an L4 silent-no-op rule.
+- [x] Updated `THEME_WORKFLOW.md` — new "Stencil Tier Color Mapping" section documents the three tiers (mirrored / volume / auth) and the model→delegate routing.
+- [x] Updated `GUI_STRUCTURE.md` — `scopeTree` row notes that rows = project + sibling + L4 auth stencil children of `MountDataTree.root_node`.
+- [x] Refresh hook for hot-install/uninstall: new `MountDataTree.set_extensions(list)` method rebuilds the L4 set without a full config reload; called from `container_ops_ui._track_extension`.
+- [x] Tests in `IgnoreScope/tests/test_gui/test_l4_auth_stencil.py` (14 cases): emission, idempotency, synthetic state, tier role, silent-no-op RMB.
 
 **Complexity:** LOW-MEDIUM
 
-**Dependencies:** 4.1 (stencil vocabulary).
+**Dependencies:** 4.1 (stencil vocabulary), 4.4 (`stencil.auth` palette key shipped during STENCIL rename in Task 4.1; runtime wiring landed here).
 
 ---
 

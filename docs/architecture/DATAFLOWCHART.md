@@ -351,6 +351,7 @@ ConfigManager (listens to MountDataTree.mountSpecsChanged)
 - `host_path=None` is the single indicator of container-only provenance — enforced by `add_stencil_folder` / `add_stencil_volume`, cross-checked by validators in `MountSpecPath.validate`.
 - Volume Mount is the only scope-side gesture that emits `recreateRequested`; all others are config-only mutations that downstream execute paths (container refresh, compose regen) handle natively.
 - Header RMB and empty-area RMB both fall back to a disabled "No valid actions" entry when the state machine contributes no gestures (Phase 2 silent-no-op fix extended to scope side).
+- **L4 auth stencil nodes (Task 4.9)** are read-only in the GUI — `_show_context_menu` short-circuits when `node.is_stencil_node and node.stencil_tier == "auth"`, leaving the menu empty so the silent-no-op fallback is the only entry. Container_lifecycle owns the lifecycle of named isolation volumes; the GUI only renders their container-side mount points.
 
 ### Preflight Checks
 
@@ -447,7 +448,16 @@ MountDataTree.load_config(config)
     ├── Apply project states (mount_specs → mounts/masked/revealed via @property)
     ├── Set file tracking (pushed_files, container_files)
     ├── Add siblings (scan filesystem + apply sibling states)
-    └── Add virtual nodes (auth volume)
+    └── _rebuild_l4_stencil_nodes()      ← L4 auth stencils from extensions
+          One synthetic MountDataNode per ExtensionConfig.isolation_paths entry:
+            is_stencil_node=True, stencil_tier="auth",
+            source=NodeSource.STENCIL, container_path=str
+          Appended to root_node.children; never lazy-loads
+          (children_loaded=True on construction)
+
+          Phase 3 Task 4.9: container_ops_ui calls
+          MountDataTree.set_extensions(config.extensions) after install /
+          uninstall to refresh the L4 set without a full config reload.
 ```
 
 ---
