@@ -141,6 +141,8 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 
 **Dependencies:** 4.2.
 
+**Scope-creep notes (audit, retro):** Two cross-field validators on `MountSpecPath.validate` actually landed in 4.3 (not 4.2 as the original split suggested) — `delivery="volume" ⇒ content_seed="folder"` and `preserve_on_update=True ⇒ delivery="detached" + content_seed="folder"`. 4.2 shipped the schema fields; 4.3 shipped the runtime branching plus the validators that the runtime relies on.
+
 ---
 
 ### 4.4: Core — `delivery="volume"` compose emit
@@ -190,6 +192,8 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 
 **Dependencies:** 4.3.
 
+**Scope-creep notes (audit, retro):** Two helpers shipped (not one): Phase 4b `_preserve_detached_folders` (fail-safe stage — abort on cp-out failure) and Phase 8b `_restore_detached_folders` (non-fatal — warn on cp-back failure). The original plan named a single `_preserve_and_recreate()` helper; actual shipping split into preserve + restore around the recreate. The execute_update phase list grew to 14 numbered phases (4b/8b/8a interleaved with the existing 1-12). New `docker/container_ops.py` primitive `push_directory_contents_to_container` (the `/.` merge idiom) added to support Phase 8b. Tmp staging cleanup runs in a `finally` block whether restore succeeds or not.
+
 ---
 
 ### 4.6: GUI — Scope Config Tree RMB gestures
@@ -215,6 +219,8 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 
 **Dependencies:** 4.2.
 
+**Scope-creep notes (audit, retro):** Six new MountDataTree mutators landed alongside the RMB state machine (vs the planned thin pass-through to `config_manager.py`); `ScopeView` emits the new `recreateRequested` Qt signal that the host app slot wires to the existing recreate-confirmation dialog (cross-task — also referenced by 4.5's update flow). Cross-task dependency: 4.6 gestures only round-trip across session reload after 4.8's `MountSpecPath.from_dict` fix lands (Windows drive-letter prepend on container-only `mount_root`).
+
 ---
 
 ### 4.7: GUI — LocalHost Virtual Folder gesture (6th gesture)
@@ -234,6 +240,8 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 **Complexity:** LOW-MEDIUM
 
 **Dependencies:** 4.2.
+
+**Scope-creep notes (audit, retro):** Picked up a Phase 1 `host_path`-omission fix in `_toggle_mount_with_delivery` (the existing 5-gesture flow was failing to set `host_path` on the new MountSpecPath; required by 4.2's auto-fill rule for bind specs). `GUI_LAYOUT_SPECS.md` Section G demoted to Section H to make room for the new 6-gesture state machine.
 
 ---
 
@@ -306,14 +314,21 @@ Maintain a running `planning/tasks/virtual-mount-phase-3-deferred.md` list durin
 - `CLAUDE.md` Key Concepts / Agent Zones
 
 **Acceptance Criteria:**
-- [ ] Deferred-canonicalization list reviewed item-by-item; each either canonicalized into a blueprint or filed to backlog as a future concept.
-- [ ] No conflicting or obsolete references to `virtual` (root form) where `stencil` or `detached` should be used — sweep pass across all blueprints.
-- [ ] `planning/tasks/virtual-mount-phase-3-deferred.md` emptied (all items resolved) or archived with resolution notes.
-- [ ] **No general doc catch-up occurs here** — if a doc update is missing that belongs to 4.1-4.9, return to that task and close it there.
+- [x] Deferred-canonicalization list reviewed item-by-item; each either canonicalized into a blueprint or filed to backlog as a future concept. (Driven by `memory/project_virtual_mount_phase_3_deviation_audit.md`; 8 items canonicalized into `ARCHITECTUREGLOSSARY.md`.)
+- [x] No conflicting or obsolete references to `virtual` (root form) where `stencil` or `detached` should be used — sweep pass across all blueprints. (Glossary line 165 fixed `retained → volume`; no other live misuses found.)
+- [x] `planning/tasks/virtual-mount-phase-3-deferred.md` emptied (all items resolved) or archived with resolution notes. (Created with archived resolution notes pointing to deviation audit memory.)
+- [x] **No general doc catch-up occurs here** — if a doc update is missing that belongs to 4.1-4.9, return to that task and close it there.
 
 **Complexity:** LOW-MEDIUM
 
 **Dependencies:** 4.1-4.9 complete with their own doc ACs ticked.
+
+**Implementation notes (2026-04-21):**
+- New canonical entries in `ARCHITECTUREGLOSSARY.md`: `stencil_tier` taxonomy table (under STENCIL); read-only stencil RMB rule (silent-no-op pattern, 3 sites named); `Update lifecycle (execute_update phases)` with Phase 4b `_preserve_detached_folders` + Phase 8b `_restore_detached_folders`; soft-permanent vs hard-permanent tier definition; `push_directory_contents_to_container` `/.` merge idiom; `recreateRequested` signal (on `ScopeView`).
+- STENCIL identifiers extended with `NodeStencilTierRole` (Qt UserRole+3), `MountDataTree.set_extensions()`, `_rebuild_l4_stencil_nodes()`, and the synthetic NodeState injection idiom (`replace(_DEFAULT_NODE_STATE, visibility="virtual")` in `mount_data_tree._recompute_states`).
+- STENCIL item 5 fixed: `delivery="retained"; reserved` → `delivery="volume"` (Task 4.4 shipped).
+- Test sentinels at `test_cmd_add_mount.py:82,167` annotated with comments — kept as invalid-value assertions (canonical: bind/detached/volume).
+- No COREFLOWCHART changes needed (already consistent post-4.5).
 
 ---
 
@@ -322,13 +337,18 @@ Maintain a running `planning/tasks/virtual-mount-phase-3-deferred.md` list durin
 **What:** Tick ACs, file bugs for anything uncovered, update backlog pointers.
 
 **Acceptance Criteria:**
-- [ ] All 4.1-4.10 AC boxes ticked.
-- [ ] Container-Diff remains in backlog as a distinct feature spec (`planning/backlog/container-diff.md` to be created by this task).
-- [ ] Any discovered UX friction filed via `/zev-bug` or `/zev-feedback`.
+- [x] All 4.1-4.10 AC boxes ticked. (Verified — all task ACs were closed inline as each task shipped; 4.11 audit added scope-creep notes inline to the affected sections rather than ticking new boxes.)
+- [x] Container-Diff remains in backlog as a distinct feature spec (`planning/backlog/container-diff.md` to be created by this task). (Created — references the recreate-warning UX integration and the per-spec delivery vocabulary as the consuming surfaces.)
+- [x] Any discovered UX friction filed via `/zev-bug` or `/zev-feedback`. (None surfaced during 4.1-4.10 — audits flagged doc/canonicalization gaps only, not UX friction. One additional backlog item filed: `planning/backlog/stencil-tier-volume-gui-route.md` for the documented-but-unwired volume-tier GUI synthesizer caught by the 4.10 audit.)
 
 **Complexity:** LOW
 
 **Dependencies:** 4.1-4.10.
+
+**Implementation notes (2026-04-21):**
+- Scope-creep notes added inline to 4.3, 4.5, 4.6, 4.7 sections per Phase 3 deviation audit memory.
+- Glossary fix applied during this task (post-Task-4.10): `_preserve_and_recreate`/`_restore_preserved_contents` → actual shipped names `_preserve_detached_folders`/`_restore_detached_folders` (also corrected `docker/file_ops.py` → `docker/container_ops.py` for `push_directory_contents_to_container`).
+- 4.10 audit caught the phantom-symbol bug before final tick-and-close — a successful demonstration of the per-phase deviation-tracking workflow.
 
 ---
 
@@ -343,14 +363,14 @@ Maintain a running `planning/tasks/virtual-mount-phase-3-deferred.md` list durin
 
 ## Success criteria (Phase 3 complete)
 
-- [ ] STENCIL rename lands cleanly; `virtual` only appears in UX strings and the `visibility="virtual"` axis value.
-- [ ] Schema supports container-only specs, folder-seed delivery, soft permanence, and named-volume delivery.
-- [ ] Scope Config Tree RMB gestures wire through to the new schema end-to-end.
-- [ ] LocalHost gains Virtual Folder as 6th gesture.
-- [ ] CLI surface mirrors every GUI gesture.
-- [ ] L4 auth volumes render in Scope Config Tree.
-- [ ] Blueprints reconciled.
-- [ ] All tests passing; any pre-existing docker integration failures tracked separately.
+- [x] STENCIL rename lands cleanly; `virtual` only appears in UX strings and the `visibility="virtual"` axis value. (Task 4.1, PR #19)
+- [x] Schema supports container-only specs, folder-seed delivery, soft permanence, and named-volume delivery. (Task 4.2, PR #20)
+- [x] Scope Config Tree RMB gestures wire through to the new schema end-to-end. (Task 4.6, PR #24)
+- [x] LocalHost gains Virtual Folder as 6th gesture. (Task 4.7)
+- [x] CLI surface mirrors every GUI gesture. (Task 4.8)
+- [x] L4 auth volumes render in Scope Config Tree. (Task 4.9, PR #27)
+- [x] Blueprints reconciled. (Tasks 4.10/4.11, PR #28 + this one — note volume-tier GUI synth deferred to backlog `stencil-tier-volume-gui-route.md`.)
+- [x] All tests passing; any pre-existing docker integration failures tracked separately. (Pre-existing test_integration.py Docker pattern-validator failures noted in deviation audit; unrelated to GUI work.)
 
 ---
 
