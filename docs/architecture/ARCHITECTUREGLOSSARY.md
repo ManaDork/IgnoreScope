@@ -619,7 +619,7 @@ Soft-permanent variant. Update lifecycle cp's folder contents to a host tmp stag
 **Persistence:** Lifecycle-preserved. Lost on explicit Remove.
 **Tradeoff vs. volume tier:** cheaper (no volume bookkeeping), but cp-copy overhead on every update.
 
-**Domains:** Lifecycle (`_preserve_and_recreate` hook), Config (`preserve_on_update` field)
+**Domains:** Lifecycle (`_preserve_detached_folders` hook), Config (`preserve_on_update` field)
 
 ---
 
@@ -716,8 +716,8 @@ Detached delivery uses a conservative policy for host symlinks and Windows junct
 
 Container update flow recreates the container while preserving content for `preserve_on_update` specs and the named-volume L_volume tier. Numbered phases from `docker/container_lifecycle.py` (canonical numbering — narrative descriptions in `COREFLOWCHART.md` may use prose names alongside these numbers):
 
-- **Phase 4b — `_preserve_and_recreate`** — fail-safe stage. Iterates `mount_specs` for `delivery="detached" + content_seed="folder" + preserve_on_update=True` entries; cp's contents from old container to a host tmp staging area. **Aborts the entire update on cp-out failure** — the old container is left running so no data is destroyed.
-- **Phase 8b — `_restore_preserved_contents`** — restore stage. Re-cp's the staged contents into the freshly recreated container via `push_directory_contents_to_container`. Failure here is **non-fatal**: warns the user, leaves the new container running with empty content for that spec. Tmp staging is cleaned up in a `finally` block whether restore succeeds or not.
+- **Phase 4b — `_preserve_detached_folders`** — fail-safe stage. Iterates `mount_specs` for `delivery="detached" + content_seed="folder" + preserve_on_update=True` entries; cp's contents from old container to a host tmp staging area. **Aborts the entire update on cp-out failure** — the old container is left running so no data is destroyed.
+- **Phase 8b — `_restore_detached_folders`** — restore stage. Re-cp's the staged contents into the freshly recreated container via `push_directory_contents_to_container`. Failure here is **non-fatal**: warns the user, leaves the new container running with empty content for that spec. Tmp staging is cleaned up in a `finally` block whether restore succeeds or not.
 
 **Soft-permanent vs hard-permanent tier:**
 - *Soft-permanent* — `delivery="detached" + content_seed="folder" + preserve_on_update=True`. Survives `execute_update` recreate via the Phase 4b/8b cp staging hop. Destroyed by `docker compose down`. UX label: "Make Permanent Folder → No Recreate" / "Mark Permanent".
@@ -729,9 +729,9 @@ Container update flow recreates the container while preserving content for `pres
 
 ### `push_directory_contents_to_container` (`/.` merge idiom)
 
-`docker/file_ops.py` primitive used by Phase 8b restore (and any other "merge contents into existing container directory" path). Wraps `docker cp <src>/. <container>:<dst>` — the trailing `/.` tells Docker to copy directory **contents** rather than the directory itself, so the destination merges with existing children instead of nesting under a same-named subdirectory. Distinct from `push_file_to_container` (single file) and `_detached_init`'s tree cp (whole-subtree initial seeding).
+`docker/container_ops.py` primitive used by Phase 8b restore (and any other "merge contents into existing container directory" path). Wraps `docker cp <src>/. <container>:<dst>` — the trailing `/.` tells Docker to copy directory **contents** rather than the directory itself, so the destination merges with existing children instead of nesting under a same-named subdirectory. Distinct from `push_file_to_container` (single file) and `_detached_init`'s tree cp (whole-subtree initial seeding).
 
-**Domains:** Lifecycle (`docker/file_ops.py`)
+**Domains:** Lifecycle (`docker/container_ops.py`)
 
 ---
 
@@ -1080,6 +1080,6 @@ Two-phase pattern for all file and container operations. Separates validation fr
 | GUI batch | Error summary dialog | Warning summary + single confirm | `execute_*_batch(force=True)` |
 | CLI | Print + exit | Print + "Use --force" | `execute_*_batch(force=True)` |
 
-**Modules:** `docker/file_ops.py` (file operations), `docker/container_lifecycle.py` (container operations)
+**Modules:** `docker/container_ops.py` (file operations), `docker/container_lifecycle.py` (container operations)
 
 **Domains:** Orchestration (Phase 7)
