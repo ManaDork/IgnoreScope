@@ -651,6 +651,32 @@ One menu builder. Both panels. RMB never duplicates checkbox actions.
 | Scope Configuration (folder) | True | Folders | Expand, Collapse, [Pull All if pushed inside] |
 | Scope Configuration (file) | True | Files | Pull File(s) |
 
+### G. Scope Config Tree RMB — Stencil Gesture State Machine (Phase 3 Task 4.6)
+
+The Scope Config Tree RMB surfaces container-only folder gestures with no LocalHost analogue. Parallels the LocalHost 5-gesture state machine but is keyed off the `MountSpecPath.delivery` + `content_seed` + `preserve_on_update` triple rather than host-backed tier checks. Header RMB follows the Phase 2 silent-no-op fix pattern (disabled "No valid actions" when empty).
+
+Gesture matrix:
+
+| Click Target | Gestures Offered | Schema Effect |
+|---|---|---|
+| Empty viewport area | Make Folder, Make Permanent Folder ▸ (No Recreate / Volume Mount) | `add_stencil_folder` (→ detached/folder) or `add_stencil_volume` (→ volume/folder) |
+| Non-spec folder node | Same as empty area | Same as empty area |
+| Existing detached+folder spec (`preserve_on_update=False`) | Mark Permanent • Remove | `mark_permanent` flips flag; `remove_spec_at` drops the spec |
+| Existing detached+folder spec (`preserve_on_update=True`) | Unmark Permanent • Remove | `unmark_permanent` flips flag; `remove_spec_at` drops the spec |
+| Existing volume spec (`delivery="volume"`) | Remove | `remove_spec_at` drops the spec — no mid-tier transitions supported in Phase 3 |
+| File node | File gestures (Push/Sync/Pull/Remove) — unchanged | — |
+
+Dialog contracts:
+
+- **Make Folder / No Recreate / Volume Mount**: `QInputDialog.getText` prompts for the container-side absolute path; empty / whitespace / cancel → no-op.
+- **Volume Mount when container exists**: `QMessageBox.question` recreate-confirmation gate. On Yes, spec is appended and `ScopeView.recreateRequested` signal fires for the app layer to call `execute_update`.
+
+Parity notes vs LocalHost RMB:
+
+- LocalHost gestures run in `_add_delivery_gestures(menu, path)` keyed off `is_in_raw_set("mounted", path)` / `is_in_raw_set("detached_mounted", path)`. ScopeView gestures run in `_add_scope_config_gestures(menu, node)` keyed off `self._tree.get_spec_at(node.path)` — exact-match only at the `mount_root` boundary.
+- Both views append disabled "No valid actions" via a `_append_fallback_if_empty` / equivalent helper so RMB is always discoverable.
+- ScopeView exposes a new `recreateRequested` signal (no LocalHost analogue — bind/detached conversions use the existing `convertDeliveryRequested` path). Volume Mount is the only scope-side gesture that triggers a container recreate.
+
 ---
 
 ## Section 12: Session History Panel

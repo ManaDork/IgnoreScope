@@ -292,6 +292,66 @@ cmd_push(host_project_root, scope_name, files, force=False)
     └── Print results
 ```
 
+### Scope Config Tree RMB — Stencil Gesture Flow (Phase 3 Task 4.6)
+
+The Scope Config Tree RMB mutates `MountDataTree._mount_specs` directly (parallel to LocalHost's `toggle_mounted` / `toggle_detached_mount` flow) rather than going through a Handler class. Empty-area clicks and stencil-spec clicks both dispatch via `ScopeView._add_scope_config_gestures`.
+
+```
+User RMB on empty area or stencil spec node in ScopeView
+    │
+    ▼
+ScopeView._show_context_menu(pos)
+    ├── indexAt(pos) invalid? → _add_scope_config_gestures(node=None)
+    └── single folder + spec exists? → _add_scope_config_gestures(node=<spec-node>)
+         │
+         ▼
+    State machine picks menu entries based on spec.delivery / content_seed / preserve_on_update:
+         │
+         ├── Empty area → Make Folder / Make Permanent Folder ▸ (No Recreate | Volume Mount)
+         ├── detached+folder+!preserve → Mark Permanent | Remove
+         ├── detached+folder+preserve  → Unmark Permanent | Remove
+         └── volume                    → Remove
+    │
+    ▼
+User triggers gesture
+    │
+    ├── Make Folder / No Recreate / Volume Mount
+    │     │
+    │     ├── QInputDialog.getText → container-side Path (cancel/empty = no-op)
+    │     ├── (Volume Mount + container exists) → QMessageBox.question recreate gate
+    │     ├── MountDataTree.add_stencil_folder(path, preserve_on_update=...)
+    │     │     or .add_stencil_volume(path)
+    │     │         │
+    │     │         ├── overlap guard → False (no-op) on collision with existing spec
+    │     │         ├── aboutToMutate.emit()  ← undo snapshot
+    │     │         ├── append MountSpecPath(delivery=..., host_path=None, ...)
+    │     │         ├── _recompute_states()   ← CORE apply_node_states_from_scope
+    │     │         └── mountSpecsChanged.emit()
+    │     │
+    │     └── (Volume Mount only) ScopeView.recreateRequested.emit()
+    │           └── App.on_recreateRequested → execute_update pipeline
+    │
+    ├── Mark Permanent / Unmark Permanent
+    │     └── MountDataTree.mark_permanent(path) / .unmark_permanent(path)
+    │           (aboutToMutate → flip flag → recompute → mountSpecsChanged)
+    │
+    └── Remove
+          └── MountDataTree.remove_spec_at(path)
+                (aboutToMutate → pop spec → recompute → mountSpecsChanged)
+
+    │
+    ▼
+ConfigManager (listens to MountDataTree.mountSpecsChanged)
+    └── scopeConfigChanged.emit()  ← app-level persist trigger
+```
+
+**Key invariants for scope-side RMB:**
+
+- Mutations always emit `aboutToMutate` before changing state (undo snapshot guarantee).
+- `host_path=None` is the single indicator of container-only provenance — enforced by `add_stencil_folder` / `add_stencil_volume`, cross-checked by validators in `MountSpecPath.validate`.
+- Volume Mount is the only scope-side gesture that emits `recreateRequested`; all others are config-only mutations that downstream execute paths (container refresh, compose regen) handle natively.
+- Header RMB and empty-area RMB both fall back to a disabled "No valid actions" entry when the state machine contributes no gestures (Phase 2 silent-no-op fix extended to scope side).
+
 ### Preflight Checks
 
 | Check | Returns | Op |
