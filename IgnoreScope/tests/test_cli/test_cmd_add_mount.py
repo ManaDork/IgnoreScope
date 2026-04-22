@@ -79,6 +79,7 @@ class TestCmdAddMount:
         src = tmp_path / "src"
         src.mkdir()
 
+        # "retained" is not a valid delivery value (canonical: bind/detached/volume).
         success, msg = cmd_add_mount(tmp_path, "dev", src, delivery="retained")
         assert success is False
         assert "invalid" in msg.lower()
@@ -164,6 +165,7 @@ class TestCmdConvert:
         src = tmp_path / "src"
         src.mkdir()
 
+        # "retained" is not a valid target (canonical: bind/detached/volume).
         success, msg = cmd_convert(tmp_path, "dev", src, target="retained")
         assert success is False
         assert "invalid" in msg.lower()
