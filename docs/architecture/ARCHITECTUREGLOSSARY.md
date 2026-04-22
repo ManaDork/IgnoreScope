@@ -482,19 +482,27 @@ For each MountSpecPath:
   1. Layer 1 — emitted iff delivery == "bind":
        Bind mount (mount_root)                  — base visibility, live host link
      (If delivery == "detached", Layer 1 is NOT emitted.
-      Content is cp'd into the container at init time instead — container-only copy.)
-  2. For each pattern in order (applies to both delivery modes):
+      Content is cp'd into the container at init time instead — container-only copy.
+      If delivery == "volume", Layer 1 is NOT emitted.
+      A named Docker volume is emitted in the L_volume tier instead.)
+  2. For each pattern in order (applies to bind + detached delivery):
      - Non-negated (e.g., "vendor/")            — named mask volume (hides)
      - Negated (e.g., "!vendor/public/")        — bind mount punch-through (reveals)
      - Non-negated (e.g., "vendor/public/tmp/") — named mask volume (re-hides)
   ...
 For each Sibling (same pattern-order structure)
-Final: Isolation volumes                         — persistent, container-owned (Layer 4)
+L_volume: Stencil volumes                        — named Docker volumes for
+                                                    delivery="volume" specs,
+                                                    emitted in mount_specs order
+                                                    after L1-L3 and before L4
+Final:    Isolation volumes                      — persistent, container-owned (Layer 4)
 ```
 
 Pattern order = volume declaration order = correct nested layering. A reveal after a mask re-exposes content; a mask after a reveal re-hides a subfolder within it.
 
 **Detached delivery mechanics:** masks within a detached mount are enforced post-cp via `docker exec rm -rf` of the masked subtree; reveals are included in the initial cp walk. See **Mount Delivery Terms** for the full gesture set.
+
+**Stencil volumes (L_volume):** Named volumes backing `delivery="volume"` specs (the Permanent Folder → Volume Mount UX tier). Volume naming: `stencil_{spec_index}_{sanitized_container_path}`. `spec_index` is the position of the spec within `mount_specs` (in-scope ordering), giving stable names across config round-trip. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration — matches the mask-volume pattern, not the auth-volume pattern). `content_seed="folder"` is required; tree-seed into a named volume is not supported at this phase.
 
 **Isolation (Layer 4):** Named volumes backing extension install paths (e.g., `/root/.local` for Claude). Declared via `ExtensionConfig.isolation_paths`. Volume naming: `iso_{sanitized_ext_name}_{sanitized_path}`. Nothing punches through isolation — it is the final overlay. Orthogonal to `delivery` — Layer 4 volumes are emitted regardless of mount_specs delivery modes.
 
@@ -610,7 +618,7 @@ Hard-permanent variant. Backed by a Docker named volume emitted in compose. Surv
 **UX label:** "Make Permanent Folder → Volume Mount" (Scope Config RMB). Container-only (no host_path). Does not support host-backed volume-tier specs in Phase 3.
 **Persistence:** Native Docker volume persistence.
 **Constraints:** `content_seed` must be `"folder"` — no tree-seeding into a named volume at this phase. `preserve_on_update` is meaningless (volume survives natively) and validator-rejected.
-**Volume naming:** auto-derived from scope + spec index + sanitized container path (see Task 4.4).
+**Volume naming:** `stencil_{spec_index}_{sanitized_container_path}` — `spec_index` is the position within `mount_specs`, `sanitized_container_path` is the container-logical path with slashes flattened and sanitized via `sanitize_volume_name`. Names are stable across config round-trip. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration). See also **volume layering order → Stencil volumes (L_volume)**.
 
 **Domains:** Generation (compose — named volume entry + top-level `volumes:`), Config (`add_stencil_volume()` constructor)
 

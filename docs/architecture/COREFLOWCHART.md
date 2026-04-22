@@ -278,10 +278,42 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                                  (host_path=None) require content_seed
                                  == "folder".
 
-    delivery == "volume" ─── (Task 4.4) compose YAML emits a named
-                             Docker volume entry; no Phase 6a cp is
-                             needed. Survives ordinary update natively.
-                             Only `content_seed="folder"` is supported.
+    delivery == "volume" ─── L_volume tier (stencil-named Docker volume).
+                             hierarchy.py: `_compute_stencil_volumes`
+                             walks mount_specs in order; each
+                             delivery="volume" spec yields
+                             `stencil_{spec_idx}_{sanitized_container_path}`
+                             as volume name (see glossary → "volume
+                             layering order"). Cross-scope uniqueness
+                             comes from docker compose project
+                             namespacing (no explicit `name:` on the
+                             declaration — matches the mask volume
+                             pattern, not the auth volume pattern).
+
+                             compose.py: per-spec `- "{name}:{container_path}"`
+                             appears in services.volumes between L1-L3
+                             and Layer 4 isolation blocks; `name:`
+                             appears in the top-level `volumes:`
+                             section without extra options (empty
+                             declaration → Docker creates/reattaches
+                             persistent local volume).
+
+                             Validator gates: `delivery="volume"` ⇒
+                             `content_seed="folder"`; no tree-seed cp
+                             walk into a named volume at this phase.
+                             host_path=None (container-only) is the
+                             Phase 3 shape; host-backed volume-delivery
+                             deferred.
+
+                             Lifecycle: no Phase 6a cp is needed —
+                             volume is empty on first create, content
+                             filled via `pushed_files` or in-container
+                             writes. Survives `docker compose down` +
+                             `up` natively (Docker retains the volume
+                             unless `-v` is passed). Update path emits
+                             an identical compose file, so the volume
+                             name matches across the down/up cycle and
+                             content persists without staging.
 
     Layer 4 (isolation volumes for extensions — auth, Claude, Git)
     are emitted regardless of any mount_spec delivery. They are

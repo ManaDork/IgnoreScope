@@ -25,6 +25,8 @@ from IgnoreScope.core.hierarchy import (
     _compute_volume_entries,
     _compute_revealed_parents,
     _compute_mirrored_parents,
+    _compute_stencil_volumes,
+    _derive_stencil_volume_name,
     _validate_hierarchy,
     _walk_mirrored_intermediates,
 )
@@ -1335,5 +1337,125 @@ class TestPerSpecDelivery:
         assert masks_legacy == masks_explicit
         assert vis_legacy == vis_explicit
         assert hid_legacy == hid_explicit
+
+
+# =============================================================================
+# Stencil volume emission (Task 4.4)
+# =============================================================================
+
+class TestStencilVolumes:
+    """_compute_stencil_volumes emits L_volume entries for delivery='volume' specs."""
+
+    def test_no_volume_specs_returns_empty(self, tmp_path: Path):
+        """Bind-only mount_specs produce no stencil volumes."""
+        specs = [MountSpecPath(mount_root=tmp_path / "src", delivery="bind")]
+        entries, names = _compute_stencil_volumes(specs, "/workspace", tmp_path)
+        assert entries == []
+        assert names == []
+
+    def test_volume_spec_container_only(self, tmp_path: Path):
+        """Container-only volume-delivery spec emits entry at mount_root posix path."""
+        spec = MountSpecPath(
+            mount_root=Path("/workspace/cache"),
+            delivery="volume",
+            content_seed="folder",
+            host_path=None,
+        )
+        entries, names = _compute_stencil_volumes([spec], "/workspace", tmp_path)
+        assert len(entries) == 1
+        assert len(names) == 1
+        assert entries[0].endswith(":/workspace/cache")
+        assert names[0].startswith("stencil_0_")
+        # Entry and name share the same volume name prefix
+        assert entries[0].split(":")[0] == names[0]
+
+    def test_volume_name_stable_across_calls(self, tmp_path: Path):
+        """Same spec → same derived name (config round-trip stability)."""
+        spec = MountSpecPath(
+            mount_root=Path("/workspace/data"),
+            delivery="volume",
+            content_seed="folder",
+            host_path=None,
+        )
+        e1, n1 = _compute_stencil_volumes([spec], "/workspace", tmp_path)
+        e2, n2 = _compute_stencil_volumes([spec], "/workspace", tmp_path)
+        assert n1 == n2
+        assert e1 == e2
+
+    def test_multiple_volume_specs_indexed(self, tmp_path: Path):
+        """Multiple volume specs get distinct indexed names."""
+        specs = [
+            MountSpecPath(
+                mount_root=Path("/workspace/a"),
+                delivery="volume",
+                content_seed="folder",
+                host_path=None,
+            ),
+            MountSpecPath(
+                mount_root=Path("/workspace/b"),
+                delivery="volume",
+                content_seed="folder",
+                host_path=None,
+            ),
+        ]
+        entries, names = _compute_stencil_volumes(specs, "/workspace", tmp_path)
+        assert len(names) == 2
+        assert names[0] != names[1]
+        assert names[0].startswith("stencil_0_")
+        assert names[1].startswith("stencil_1_")
+
+    def test_mixed_delivery_only_volume_emits(self, tmp_path: Path):
+        """Mix of bind/detached/volume — only volume specs emit here."""
+        specs = [
+            MountSpecPath(mount_root=tmp_path / "src", delivery="bind"),
+            MountSpecPath(
+                mount_root=Path("/workspace/vol"),
+                delivery="volume",
+                content_seed="folder",
+                host_path=None,
+            ),
+            MountSpecPath(
+                mount_root=tmp_path / "snap",
+                delivery="detached",
+                content_seed="tree",
+                host_path=tmp_path / "snap",
+            ),
+        ]
+        entries, names = _compute_stencil_volumes(specs, "/workspace", tmp_path)
+        assert len(entries) == 1
+        # Index follows original mount_specs order — volume was at idx 1
+        assert names[0].startswith("stencil_1_")
+
+    def test_derive_volume_name_sanitized(self):
+        """_derive_stencil_volume_name strips leading slash and sanitizes."""
+        name = _derive_stencil_volume_name(3, "/workspace/nested/path")
+        assert name.startswith("stencil_3_")
+        # No leading slash in the key portion
+        assert "//" not in name
+
+
+class TestStencilVolumeHierarchyIntegration:
+    """End-to-end: compute_container_hierarchy populates stencil_volume_* fields."""
+
+    def test_hierarchy_exposes_stencil_volumes(self, tmp_path: Path):
+        """Volume-delivery spec surfaces on hierarchy fields for compose consumption."""
+        specs = [
+            MountSpecPath(
+                mount_root=Path("/workspace/perm"),
+                delivery="volume",
+                content_seed="folder",
+                host_path=None,
+            ),
+        ]
+        hierarchy = compute_container_hierarchy(
+            container_root="/workspace",
+            mount_specs=specs,
+            pushed_files=set(),
+            host_project_root=tmp_path,
+            host_container_root=tmp_path,
+        )
+        assert len(hierarchy.stencil_volume_entries) == 1
+        assert len(hierarchy.stencil_volume_names) == 1
+        assert hierarchy.stencil_volume_entries[0].endswith(":/workspace/perm")
 
 
