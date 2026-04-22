@@ -18,6 +18,7 @@ IS NOT: Orchestration (→ container_lifecycle.py: create/update/remove flows)
 
 import json as _json
 import logging
+import os
 import subprocess
 import shutil
 import sys
@@ -636,6 +637,48 @@ def pull_file_from_container(
         return False, f"Timeout pulling {container_path}"
     except Exception as e:
         return False, f"Error pulling {container_path}: {e}"
+
+
+def push_directory_contents_to_container(
+    container_name: str,
+    host_dir: Path,
+    container_path: str,
+    timeout: int = 60,
+) -> Tuple[bool, str]:
+    """Copy CONTENTS of host_dir into container_path using ``docker cp host_dir/. ...``.
+
+    The ``/.`` suffix is the canonical docker-cp pattern for copying a
+    directory's contents into an existing destination (rather than nesting
+    the source directory under it). Required by the Virtual Mount preserve
+    flow, which restores staged content into a freshly-mkdir'd container
+    path.
+
+    Args:
+        container_name: Name of target container
+        host_dir: Host directory whose contents are copied
+        container_path: Destination path in container (must exist)
+        timeout: Command timeout in seconds
+
+    Returns:
+        Tuple of (success, message)
+    """
+    if not host_dir.is_dir():
+        return False, f"Not a directory: {host_dir}"
+
+    src_spec = os.path.join(str(host_dir), ".")
+    try:
+        result = subprocess.run(
+            ['docker', 'cp', src_spec, f'{container_name}:{container_path}'],
+            **get_subprocess_kwargs(timeout),
+        )
+        if result.returncode == 0:
+            return True, f"Pushed contents: {host_dir}"
+        error = _extract_error_message(result, include_stdout=False)
+        return False, error
+    except subprocess.TimeoutExpired:
+        return False, f"Timeout pushing contents of {host_dir}"
+    except Exception as e:
+        return False, f"Error pushing contents of {host_dir}: {e}"
 
 
 def ensure_container_directories(

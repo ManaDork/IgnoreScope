@@ -180,11 +180,11 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 - Tests: `IgnoreScope/tests/test_docker/test_preserve_on_update.py`
 
 **Acceptance Criteria:**
-- [ ] Specs with `preserve_on_update=True` retain contents across update.
-- [ ] cp-out failure aborts the update without destroying the old container.
-- [ ] cp-back failure after successful recreate is logged but non-fatal (contents will regenerate empty; warn user).
-- [ ] Specs with `preserve_on_update=False` or `delivery="volume"` unaffected (volume survives natively; no-preserve detached gets re-cp'd from host if tree-seeded, or stays empty if folder-seeded).
-- [ ] Updated `COREFLOWCHART.md` — update-path narrative describes `_preserve_and_recreate` hook, its invariants (abort if cp-out fails; warn if cp-back fails), and which spec combinations trigger it.
+- [x] Specs with `preserve_on_update=True` retain contents across update.
+- [x] cp-out failure aborts the update without destroying the old container.
+- [x] cp-back failure after successful recreate is logged but non-fatal (contents will regenerate empty; warn user).
+- [x] Specs with `preserve_on_update=False` or `delivery="volume"` unaffected (volume survives natively; no-preserve detached gets re-cp'd from host if tree-seeded, or stays empty if folder-seeded).
+- [x] Updated `COREFLOWCHART.md` — update-path narrative describes `_preserve_and_recreate` hook, its invariants (abort if cp-out fails; warn if cp-back fails), and which spec combinations trigger it.
 
 **Complexity:** MEDIUM-HIGH (lifecycle orchestration, failure modes)
 
