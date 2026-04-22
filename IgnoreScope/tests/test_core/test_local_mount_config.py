@@ -149,6 +149,57 @@ class TestAddDetachedMount:
 
 
 # ──────────────────────────────────────────────
+# LMC-2b: add_detached_folder_mount (Virtual Folder)
+# ──────────────────────────────────────────────
+
+
+class TestAddDetachedFolderMount:
+    def test_adds_host_backed_folder_seed_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        src = tmp_path / "src"
+        src.mkdir()
+        assert config.add_detached_folder_mount(src) is True
+        assert len(config.mount_specs) == 1
+        ms = config.mount_specs[0]
+        assert ms.mount_root == src
+        assert ms.delivery == "detached"
+        assert ms.content_seed == "folder"
+        assert ms.host_path == src  # host-backed (LocalHost gesture)
+        assert ms.preserve_on_update is False
+
+    def test_overlap_with_existing_bind_rejected(self, tmp_path: Path):
+        config = LocalMountConfig()
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        child = parent / "child"
+        config.add_mount(parent)
+        assert config.add_detached_folder_mount(child) is False
+
+    def test_overlap_with_existing_detached_folder_rejected(self, tmp_path: Path):
+        config = LocalMountConfig()
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        child = parent / "child"
+        config.add_detached_folder_mount(parent)
+        assert config.add_detached_folder_mount(child) is False
+        assert config.add_mount(child) is False
+
+    def test_duplicate_mount_root_rejected(self, tmp_path: Path):
+        config = LocalMountConfig()
+        src = tmp_path / "src"
+        src.mkdir()
+        config.add_detached_folder_mount(src)
+        assert config.add_detached_folder_mount(src) is False
+
+    def test_validator_passes_for_resulting_spec(self, tmp_path: Path):
+        config = LocalMountConfig()
+        src = tmp_path / "src"
+        src.mkdir()
+        config.add_detached_folder_mount(src)
+        assert config.mount_specs[0].validate() == []
+
+
+# ──────────────────────────────────────────────
 # LMC-3: convert_delivery
 # ──────────────────────────────────────────────
 

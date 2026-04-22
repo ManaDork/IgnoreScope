@@ -54,6 +54,39 @@ class TestToggleDetachedMount:
         assert tree.is_in_raw_set("detached_mounted", parent / "child") is False
 
 
+class TestToggleDetachedFolderMount:
+    def test_adds_folder_seed_detached_spec(
+        self, tree: MountDataTree, tmp_path: Path,
+    ):
+        src = tmp_path / "src"
+        src.mkdir()
+        tree.toggle_detached_folder_mount(src, True)
+        assert tree.is_in_raw_set("detached_mounted", src) is True
+        ms = tree._mount_specs[0]
+        assert ms.delivery == "detached"
+        assert ms.content_seed == "folder"
+        assert ms.host_path == src
+
+    def test_remove_folder_seed_spec(
+        self, tree: MountDataTree, tmp_path: Path,
+    ):
+        src = tmp_path / "src"
+        src.mkdir()
+        tree.toggle_detached_folder_mount(src, True)
+        tree.toggle_detached_folder_mount(src, False)
+        assert tree.is_in_raw_set("detached_mounted", src) is False
+        assert tree._mount_specs == []
+
+    def test_overlap_blocks_folder_seed(
+        self, tree: MountDataTree, tmp_path: Path,
+    ):
+        parent = tmp_path / "parent"
+        (parent / "child").mkdir(parents=True)
+        tree.toggle_mounted(parent, True)
+        tree.toggle_detached_folder_mount(parent / "child", True)
+        assert tree.is_in_raw_set("detached_mounted", parent / "child") is False
+
+
 class TestIsInRawSetDeliveryFilter:
     def test_bind_not_reported_as_detached(self, tree: MountDataTree, tmp_path: Path):
         src = tmp_path / "src"

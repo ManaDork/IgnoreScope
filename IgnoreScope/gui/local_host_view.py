@@ -172,7 +172,7 @@ class LocalHostView(QWidget):
     # ── Header Context Menu ──────────────────────────────────────
 
     def _show_header_context_menu(self, pos: QPoint) -> None:
-        """Header RMB: full 5-gesture state machine scoped to host_project_root.
+        """Header RMB: full 6-gesture state machine scoped to host_project_root.
 
         When no gestures apply (e.g., the header path is an ancestor of an
         existing mount_spec), fall back to a disabled ``No valid actions``
@@ -191,15 +191,20 @@ class LocalHostView(QWidget):
         menu.exec(self._tree_view.header().mapToGlobal(pos))
 
     def _add_delivery_gestures(self, menu: QMenu, path: Path) -> None:
-        """Append the five-gesture delivery state machine to ``menu``.
+        """Append the six-gesture delivery state machine to ``menu``.
 
         States (UX labels shown; internal delivery values in parens):
-          NONE                  → Mount | Virtual Mount
+          NONE                  → Mount | Virtual Mount | Virtual Folder
           BIND_MOUNTED (bind)   → Unmount | Convert to Virtual Mount
           DETACHED_MOUNTED      → Remove Virtual Mount | Convert to Mount
                                   | Remove But Keep Children
                                   | (if container) Remove Folder from Container
                                   | (if container) Remove Folder Tree from Container
+
+        Virtual Folder produces a host-backed folder-seed detached spec
+        (``delivery="detached", content_seed="folder"``); content is mkdir'd
+        in the container with no cp walk and is filled via ``pushed_files``
+        or inside-container writes.
         """
         is_bind = self._tree.is_in_raw_set("mounted", path)
         is_detached = self._tree.is_in_raw_set("detached_mounted", path)
@@ -211,6 +216,10 @@ class LocalHostView(QWidget):
                 a = menu.addAction(f"Virtual Mount {path.name}")
                 a.triggered.connect(
                     lambda: self._tree.toggle_detached_mount(path, True),
+                )
+                a = menu.addAction(f"Virtual Folder {path.name}")
+                a.triggered.connect(
+                    lambda: self._tree.toggle_detached_folder_mount(path, True),
                 )
         elif is_bind:
             a = menu.addAction(f"Unmount {path.name}")
@@ -294,7 +303,7 @@ class LocalHostView(QWidget):
         state = self._tree.get_node_state(path)
 
         if not node.is_file:
-            # ── Folder actions — 5-gesture delivery state machine ──
+            # ── Folder actions — 6-gesture delivery state machine ──
             self._add_delivery_gestures(menu, path)
 
             ms = self._tree._find_owning_spec(path)
