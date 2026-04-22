@@ -314,8 +314,8 @@ See `GUI_STATE_STYLES.md` Section 8 for full legacy correspondence table.
 **`local_host_view.py`** — Left Panel (Folder Configuration)
 > Sets up the QTreeView inside the Folder Configuration dock: assigns MountDataTreeModel + StyleDelegate(LocalHostDisplayConfig), configures header columns, and provides two RMB surfaces:
 >
-> - **Project Root Header RMB** (`_show_header_context_menu`) — targets `host_project_root` only. Exposes the Mount Delivery five-gesture state machine (see glossary → Mount Delivery Terms): Mount, Virtual Mount, Unmount, Convert to Virtual Mount / Convert to Mount, Remove Virtual Mount, Remove But Keep Children, and container-dependent actions (Remove Folder from Container, Remove Folder Tree from Container) when a container exists. Menu is always non-empty when a scope is loaded — at minimum Mount + Virtual Mount are offered when the root has no mount set.
-> - **Tree Node RMB** (`_show_context_menu`) — targets selected node(s). Same five-gesture state machine as Project Root Header, scoped to the selected path(s). Mount / Virtual Mount visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs). Shift-select supports batch Remove across multiple Virtual Mount entries.
+> - **Project Root Header RMB** (`_show_header_context_menu`) — targets `host_project_root` only. Exposes the Mount Delivery six-gesture state machine (see glossary → Mount Delivery Terms): Mount, Virtual Mount, Virtual Folder, Unmount, Convert to Virtual Mount / Convert to Mount, Remove Virtual Mount, Remove But Keep Children, and container-dependent actions (Remove Folder from Container, Remove Folder Tree from Container) when a container exists. Menu is always non-empty when a scope is loaded — at minimum Mount + Virtual Mount + Virtual Folder are offered when the root has no mount set.
+> - **Tree Node RMB** (`_show_context_menu`) — targets selected node(s). Same six-gesture state machine as Project Root Header, scoped to the selected path(s). Mount / Virtual Mount / Virtual Folder visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs). Shift-select supports batch Remove across multiple Virtual Mount entries.
 >
 > Does NOT own the data model, manage state, or load configs.
 
@@ -651,9 +651,23 @@ One menu builder. Both panels. RMB never duplicates checkbox actions.
 | Scope Configuration (folder) | True | Folders | Expand, Collapse, [Pull All if pushed inside] |
 | Scope Configuration (file) | True | Files | Pull File(s) |
 
-### G. Scope Config Tree RMB — Stencil Gesture State Machine (Phase 3 Task 4.6)
+### G. LocalHost Tree RMB — Six-Gesture Delivery State Machine (Phase 3 Task 4.7)
 
-The Scope Config Tree RMB surfaces container-only folder gestures with no LocalHost analogue. Parallels the LocalHost 5-gesture state machine but is keyed off the `MountSpecPath.delivery` + `content_seed` + `preserve_on_update` triple rather than host-backed tier checks. Header RMB follows the Phase 2 silent-no-op fix pattern (disabled "No valid actions" when empty).
+The LocalHost Tree RMB and Project Root Header RMB share a single helper, `_add_delivery_gestures(menu, path)`, keyed off `is_in_raw_set("mounted", path)` / `is_in_raw_set("detached_mounted", path)`. Header invocation falls back to a disabled "No valid actions" entry when the gesture set is empty (Phase 2 silent-no-op fix).
+
+Gesture matrix (NONE state offers all three host-backed creation gestures; existing-spec states surface tier conversions and removals):
+
+| State | Predicate | Gestures Offered | Schema Effect |
+|---|---|---|---|
+| NONE | `not is_bind and not is_detached` and `can_mount(path)` | Mount • Virtual Mount • Virtual Folder | `toggle_mounted` (bind/tree) • `toggle_detached_mount` (detached/tree) • `toggle_detached_folder_mount` (detached/folder, host-backed) |
+| BIND_MOUNTED | `is_bind` | Unmount • Convert to Virtual Mount | `toggle_mounted(path, False)` • `convertDeliveryRequested.emit(path, "detached")` |
+| DETACHED_MOUNTED | `is_detached` | Remove Virtual Mount • Convert to Mount • Remove But Keep Children • (container-only) Remove Folder from Container • Remove Folder Tree from Container | `toggle_detached_mount(path, False)` • `convertDeliveryRequested.emit(path, "bind")` • `remove_but_keep_children` • container removal signals |
+
+Virtual Folder produces a host-backed folder-seed spec (`delivery="detached", content_seed="folder", host_path=mount_root`). The container side mkdir's at create time without a cp walk; content is filled via `pushed_files` or inside-container writes. Distinct from Scope Config "Make Folder" (Section H), which is container-only (`host_path=None`).
+
+### H. Scope Config Tree RMB — Stencil Gesture State Machine (Phase 3 Task 4.6)
+
+The Scope Config Tree RMB surfaces container-only folder gestures with no LocalHost analogue. Parallels the LocalHost six-gesture state machine but is keyed off the `MountSpecPath.delivery` + `content_seed` + `preserve_on_update` triple rather than host-backed tier checks. Header RMB follows the Phase 2 silent-no-op fix pattern (disabled "No valid actions" when empty).
 
 Gesture matrix:
 

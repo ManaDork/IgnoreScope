@@ -131,15 +131,32 @@ class LocalMountConfig:
         """
         return self._add_mount_with_delivery(path, delivery="detached")
 
+    def add_detached_folder_mount(self, path: Path) -> bool:
+        """Add a host-backed folder-seed detached mount (UX: "Virtual Folder").
+
+        Creates a MountSpecPath with delivery="detached", host_path=path, and
+        content_seed="folder". Container side is mkdir'd at create time; no
+        cp walk occurs. Overlap rules match add_mount / add_detached_mount —
+        all three deliveries share one mount_specs namespace.
+
+        Returns:
+            True if added, False if already mounted or overlap detected.
+        """
+        return self._add_mount_with_delivery(
+            path, delivery="detached", content_seed="folder",
+        )
+
     def _add_mount_with_delivery(
         self,
         path: Path,
         delivery: Literal["bind", "detached"],
+        content_seed: Literal["tree", "folder"] = "tree",
     ) -> bool:
         """Shared add_mount / add_detached_mount body — overlap guard + append.
 
-        Both gestures originate from LocalHost (host-backed) so host_path mirrors
-        mount_root; content_seed defaults to "tree" (Phase 1 behavior).
+        All three LocalHost gestures originate from a host folder (host-backed)
+        so host_path mirrors mount_root. content_seed defaults to "tree"
+        (Mount + Virtual Mount); "folder" yields the Virtual Folder spec.
         """
         if any(ms.mount_root == path for ms in self.mount_specs):
             return False
@@ -147,7 +164,12 @@ class LocalMountConfig:
             if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
                 return False
         self.mount_specs.append(
-            MountSpecPath(mount_root=path, delivery=delivery, host_path=path)
+            MountSpecPath(
+                mount_root=path,
+                delivery=delivery,
+                host_path=path,
+                content_seed=content_seed,
+            )
         )
         return True
 

@@ -80,6 +80,53 @@ class TestHeaderRmbFallback:
             assert action.text() != "No valid actions"
 
 
+class TestVirtualFolderGesture:
+    """Phase 3 Task 4.7 — 6th gesture (Virtual Folder) on the LocalHost RMB."""
+
+    def test_none_state_offers_three_gestures(
+        self, view: LocalHostView, tmp_path: Path,
+    ):
+        """NONE state on a mountable path offers Mount + Virtual Mount + Virtual Folder."""
+        src = tmp_path / "src"
+        src.mkdir()
+        menu = QMenu()
+        view._add_delivery_gestures(menu, src)
+        labels = [a.text() for a in menu.actions()]
+        assert any(label.startswith("Mount ") for label in labels)
+        assert any(label.startswith("Virtual Mount ") for label in labels)
+        assert any(label.startswith("Virtual Folder ") for label in labels)
+
+    def test_virtual_folder_creates_folder_seed_spec(
+        self, view: LocalHostView, tmp_path: Path,
+    ):
+        """Triggering Virtual Folder produces a host-backed folder-seed spec."""
+        src = tmp_path / "src"
+        src.mkdir()
+        menu = QMenu()
+        view._add_delivery_gestures(menu, src)
+        vf_action = next(
+            a for a in menu.actions() if a.text().startswith("Virtual Folder ")
+        )
+        vf_action.trigger()
+        specs = view._tree._mount_specs
+        assert len(specs) == 1
+        assert specs[0].delivery == "detached"
+        assert specs[0].content_seed == "folder"
+        assert specs[0].host_path == src
+
+    def test_existing_spec_hides_virtual_folder(
+        self, view: LocalHostView, tmp_path: Path,
+    ):
+        """Once a spec exists at the path, Virtual Folder is no longer offered."""
+        src = tmp_path / "src"
+        src.mkdir()
+        view._tree.toggle_mounted(src, True)
+        menu = QMenu()
+        view._add_delivery_gestures(menu, src)
+        labels = [a.text() for a in menu.actions()]
+        assert not any(label.startswith("Virtual Folder ") for label in labels)
+
+
 class TestHeaderContextMenuInvocation:
     """Direct calls on _show_header_context_menu to exercise the guard flip."""
 

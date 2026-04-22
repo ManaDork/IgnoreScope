@@ -451,10 +451,22 @@ class MountDataTree(QObject):
         """
         self._toggle_mount_with_delivery(path, checked, delivery="detached")
 
+    def toggle_detached_folder_mount(self, path: Path, checked: bool) -> None:
+        """Toggle host-backed folder-seed detached mount (UX: "Virtual Folder").
+
+        Add: creates new MountSpecPath with delivery="detached",
+        content_seed="folder", host_path=path — container side is mkdir'd,
+        no cp walk. Remove: deletes entire MountSpecPath.
+        """
+        self._toggle_mount_with_delivery(
+            path, checked, delivery="detached", content_seed="folder",
+        )
+
     def _toggle_mount_with_delivery(
         self, path: Path, checked: bool, delivery: str,
+        content_seed: str = "tree",
     ) -> None:
-        """Shared toggle body for bind / detached deliveries."""
+        """Shared toggle body for bind / detached / virtual-folder deliveries."""
         self.aboutToMutate.emit()
         from ..core.mount_spec_path import MountSpecPath
         if checked:
@@ -462,7 +474,12 @@ class MountDataTree(QObject):
                 if is_descendant(path, ms.mount_root) or is_descendant(ms.mount_root, path):
                     return
             self._mount_specs.append(
-                MountSpecPath(mount_root=path, delivery=delivery),
+                MountSpecPath(
+                    mount_root=path,
+                    delivery=delivery,
+                    host_path=path,
+                    content_seed=content_seed,
+                ),
             )
         else:
             self._mount_specs = [

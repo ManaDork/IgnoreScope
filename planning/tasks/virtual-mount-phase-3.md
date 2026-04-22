@@ -202,14 +202,14 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 - Tests: `IgnoreScope/tests/test_gui/test_scope_view_rmb.py`
 
 **Acceptance Criteria:**
-- [ ] RMB on empty/container-only area → full gesture set visible.
-- [ ] RMB on existing detached-folder spec → Mark/Unmark Permanent visible and reflect current state.
-- [ ] RMB on existing volume spec → only Remove visible (no tier changes supported at this phase).
-- [ ] Make Folder prompts for container-side path (simple dialog).
-- [ ] Make Permanent Folder → Volume Mount triggers `execute_update` recreate confirmation when a container exists.
-- [ ] Header RMB follows the Phase 2 silent-no-op fix pattern (show disabled "No valid actions" when empty).
-- [ ] Updated `GUI_LAYOUT_SPECS.md` — new Scope Config Tree RMB section with gesture list, state transitions, and parity notes vs. LocalHost RMB.
-- [ ] Updated `DATAFLOWCHART.md` — RMB → ConfigManager → MountDataTree signal path documented for the new Scope-side gestures.
+- [x] RMB on empty/container-only area → full gesture set visible.
+- [x] RMB on existing detached-folder spec → Mark/Unmark Permanent visible and reflect current state.
+- [x] RMB on existing volume spec → only Remove visible (no tier changes supported at this phase).
+- [x] Make Folder prompts for container-side path (simple dialog).
+- [x] Make Permanent Folder → Volume Mount triggers `execute_update` recreate confirmation when a container exists.
+- [x] Header RMB follows the Phase 2 silent-no-op fix pattern (show disabled "No valid actions" when empty).
+- [x] Updated `GUI_LAYOUT_SPECS.md` — new Scope Config Tree RMB section with gesture list, state transitions, and parity notes vs. LocalHost RMB.
+- [x] Updated `DATAFLOWCHART.md` — RMB → ConfigManager → MountDataTree signal path documented for the new Scope-side gestures.
 
 **Complexity:** MEDIUM-HIGH
 
@@ -226,10 +226,10 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 - Tests: extend `IgnoreScope/tests/test_gui/test_delivery_tint.py` or sibling
 
 **Acceptance Criteria:**
-- [ ] New RMB entry "Virtual Folder" visible when Virtual Mount would also be offered.
-- [ ] Produces a spec with `content_seed="folder"` (vs Virtual Mount's `"tree"`).
-- [ ] State-machine covers: no existing spec → both Mount + Virtual Mount + Virtual Folder offered; existing spec → only delivery-flip / unmount as appropriate.
-- [ ] Updated `GUI_LAYOUT_SPECS.md` — LocalHost RMB gesture bullets updated from 5-gesture to 6-gesture state machine, Virtual Folder entry conditions documented.
+- [x] New RMB entry "Virtual Folder" visible when Virtual Mount would also be offered.
+- [x] Produces a spec with `content_seed="folder"` (vs Virtual Mount's `"tree"`).
+- [x] State-machine covers: no existing spec → both Mount + Virtual Mount + Virtual Folder offered; existing spec → only delivery-flip / unmount as appropriate.
+- [x] Updated `GUI_LAYOUT_SPECS.md` — LocalHost RMB gesture bullets updated from 5-gesture to 6-gesture state machine, Virtual Folder entry conditions documented.
 
 **Complexity:** LOW-MEDIUM
 
