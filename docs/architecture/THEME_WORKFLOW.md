@@ -208,3 +208,19 @@ Semantic overload note: `visibility.virtual` already tints container-only files 
 Per-scope header tint is a signal of the scope's overall shape — it does NOT imply every spec has that delivery. For fine-grained per-spec visual cues, refer to per-node styling in `GUI_STATE_STYLES.md`.
 
 Selector mechanism is an implementation detail left to the GUI zone — the Blueprint only specifies the input signal (`delivery` mix) and the output theme key above.
+
+---
+
+## Stencil Tier Color Mapping
+
+Stencil nodes (`visibility="virtual"`) are sub-classified by `MountDataNode.stencil_tier` and routed to dedicated theme keys. The model exposes the tier via `NodeStencilTierRole`; `TreeStyleDelegate` forwards it into `resolve_tree_state(node_state, is_folder, stencil_tier)`.
+
+| stencil_tier | Source | Folder state | Theme color key | Font key |
+|---|---|---|---|---|
+| `"mirrored"` | Structural intermediates (CORE Stage 2) | `FOLDER_MIRRORED` (+ revealed/masked variants) | existing mirrored stops | `stencil_mirrored` |
+| `"volume"` | `delivery="volume"` mount specs (L_volume tier) | `FOLDER_STENCIL_VOLUME` | `stencil.volume` | `stencil_volume` |
+| `"auth"` | Extension `isolation_paths` (L4 isolation tier, Task 4.9) | `FOLDER_STENCIL_AUTH` | `stencil.auth` | `stencil_auth` |
+
+**L4 auth tier (Task 4.9):** `MountDataTree._rebuild_l4_stencil_nodes()` synthesizes one `MountDataNode` per `ExtensionConfig.isolation_paths` entry with `stencil_tier="auth"`, `is_stencil_node=True`. The `_recompute_states` step then writes a `visibility="virtual"` synthetic state for each stencil path so `_resolve_folder_state` routes them to `FOLDER_STENCIL_AUTH`. These nodes are read-only in the GUI — RMB silent-no-ops because container_lifecycle owns the named volume lifecycle.
+
+`stencil.auth` and `stencil.volume` palette entries already exist in `glassmorphism_v1_theme.json` (added during the Task 4.1 STENCIL rename); Task 4.9 only wires the runtime path.

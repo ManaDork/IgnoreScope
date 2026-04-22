@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from .display_config import TreeDisplayConfig, ColumnDef, resolve_tree_state
 from .list_display_config import ListDisplayConfig
-from .mount_data_model import NodeStateRole, NodeIsFileRole
+from .mount_data_model import NodeStateRole, NodeIsFileRole, NodeStencilTierRole
 from .session_history import HistoryStateRole
 from .style_engine import StyleGui, StateStyleClass
 
@@ -145,7 +145,8 @@ class TreeStyleDelegate(GradientDelegate):
         is_file = index.data(NodeIsFileRole)
         if is_file is None:
             return None
-        state_name = resolve_tree_state(node_state, not is_file)
+        stencil_tier = index.data(NodeStencilTierRole) or "mirrored"
+        state_name = resolve_tree_state(node_state, not is_file, stencil_tier)
         return self._config.state_styles.get(state_name)
 
     # ── initStyleOption ───────────────────────────────────────────

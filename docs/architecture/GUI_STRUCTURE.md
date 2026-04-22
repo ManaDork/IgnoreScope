@@ -135,7 +135,7 @@ One row per object — every layer, all named.
 | 6a | `scope_containerLayout` | 233 | app.py | QVBoxLayout | — | default margins | variable | Layout manager |
 | 7a | `scopeView` | (injected) | scope_view.py | ScopeView(QWidget) | parent | margins 0,0,0,0 | hardcoded | View widget |
 | 8a | `scope_viewLayout` | 104 | scope_view.py | QVBoxLayout | — | contentsMargins 0,0,0,0 | hardcoded | Layout manager |
-| 9a | `scopeTree` | 96 | scope_view.py | QTreeView | parent | indentation 20px | hardcoded | Tree fills view |
+| 9a | `scopeTree` | 96 | scope_view.py | QTreeView | parent | indentation 20px | hardcoded | Tree fills view; rows = project + sibling + L4 auth stencil children of `MountDataTree.root_node` (see DATAFLOWCHART) |
 | 5b | `configPanel` | 234 | app.py | ContainerRootPanel | splitter | 25% of splitter | variable | Config panel (bottom) |
 | 6b | `config_panelLayout` | 48 | container_root_panel.py | QVBoxLayout | — | contentsMargins 6,6,6,6, spacing 0 | hardcoded | Layout manager |
 | 7b | `configHeaderFrame` | 53 | container_root_panel.py | QFrame | children | auto from label + margins | derived | Header clickable area |

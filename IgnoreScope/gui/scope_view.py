@@ -197,7 +197,11 @@ class ScopeView(QWidget):
         if len(nodes) == 1:
             node = nodes[0]
             proxy_index = selected_indexes[0]
-            if node.is_file:
+            if node.is_stencil_node and node.stencil_tier == "auth":
+                # L4 auth volumes are extension-managed — read-only in GUI.
+                # Empty menu falls through to _append_fallback_if_empty.
+                pass
+            elif node.is_file:
                 self._build_file_menu(menu, node)
             elif self._tree.get_spec_at(node.path) is not None:
                 self._add_scope_config_gestures(menu, node=node)

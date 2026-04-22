@@ -236,7 +236,11 @@ class MountDataTree(QObject):
 
         Stencil detection: handled by CORE config-native queries (no tree walk).
         The hierarchy call is for path INCLUSION only, not stencil detection.
+
+        L4 auth stencils (extension isolation_paths) get a synthetic
+        visibility="virtual" NodeState so the FOLDER_STENCIL_AUTH style fires.
         """
+        from dataclasses import replace
         from ..core.local_mount_config import LocalMountConfig
 
         config = LocalMountConfig(
@@ -257,6 +261,14 @@ class MountDataTree(QObject):
 
         all_paths = self._collect_all_paths(mirrored_intermediates)
         self._states = apply_node_states_from_scope(config, all_paths)
+
+        # Synthesize visibility="virtual" state for L4 auth stencil nodes —
+        # they have no host filesystem presence and CORE never sees them.
+        for node in self._stencil_nodes:
+            self._states[node.path] = replace(
+                _DEFAULT_NODE_STATE, visibility="virtual",
+            )
+
         self._emit_state_changed()
 
     def _collect_all_paths(self, mirrored_intermediates: set[Path] | None = None) -> set[Path]:
@@ -698,6 +710,18 @@ class MountDataTree(QObject):
                 return ms
         return None
 
+    def set_extensions(self, extensions: list) -> None:
+        """Replace tracked extensions and re-emit L4 auth stencils.
+
+        Called from container_ops_ui after extension install/uninstall so the
+        Scope Config Tree refreshes its L4 stencil node set without a full
+        config reload.
+        """
+        self._extensions = list(extensions)
+        self._rebuild_l4_stencil_nodes()
+        self._recompute_states()
+        self.structureChanged.emit()
+
     def restore_mount_specs(self, specs_data: list[dict]) -> None:
         """Restore mount_specs from serialized dicts (undo/redo).
 
@@ -856,8 +880,44 @@ class MountDataTree(QObject):
             self._mount_specs.extend(sibling.mount_specs)
             self._pushed_files.update(sibling.pushed_files)
 
+        # L4 auth stencils — emit synthetic nodes for extension isolation_paths
+        self._rebuild_l4_stencil_nodes()
+
         self._recompute_states()
         self.mountSpecsChanged.emit()
+
+    def _rebuild_l4_stencil_nodes(self) -> None:
+        """Emit synthetic stencil nodes for each extension's isolation_paths.
+
+        L4 auth stencils represent container paths backed by named Docker
+        volumes that overlay all other layers (extension-managed, persistent).
+        Read-only in the GUI — no RMB gestures, container_lifecycle owns them.
+        """
+        # Drop any prior L4 nodes from root_node.children (rebuild idempotency)
+        if self._root_node:
+            self._root_node.children = [
+                c for c in self._root_node.children
+                if not (c.is_stencil_node and c.stencil_tier == "auth")
+            ]
+        self._stencil_nodes.clear()
+
+        if not self._root_node:
+            return
+
+        for ext in self._extensions:
+            ext_name = getattr(ext, "name", "")
+            for container_path in getattr(ext, "isolation_paths", []):
+                node = MountDataNode(
+                    path=Path(container_path),
+                    parent=self._root_node,
+                    is_stencil_node=True,
+                    stencil_tier="auth",
+                    source=NodeSource.STENCIL,
+                    container_path=container_path,
+                )
+                node.children_loaded = True  # synthetic — never lazy-load
+                self._stencil_nodes.append(node)
+                self._root_node.children.append(node)
 
     def build_config(
         self,

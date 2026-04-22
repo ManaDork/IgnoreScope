@@ -738,7 +738,8 @@ class ContainerOperations:
             )
             save_config(config)
             # Update in-memory tree so GUI reflects the change immediately
-            self._app._mount_data_tree._extensions = list(config.extensions)
+            # (also rebuilds L4 auth stencil nodes — Phase 3 Task 4.9)
+            self._app._mount_data_tree.set_extensions(config.extensions)
         except Exception:
             pass  # Tracking failure is non-fatal
 
