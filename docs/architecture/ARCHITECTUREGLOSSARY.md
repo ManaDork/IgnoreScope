@@ -162,7 +162,7 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 2. **Detached mount roots** — `MountSpecPath` entries with `delivery="detached"` whose container content is cp-delivered (UX label: "Virtual Mount").
 3. **L4 auth volume nodes** — per-extension auth mount points injected by container extensions (see `auth volume`).
 4. **Container-only folders** — directory entries discovered by container scan diff that have no host counterpart (see `container_only`; distinct bool field, still a stencil category at the tree layer).
-5. **Permanent / retained volume nodes** — named-volume stencils (Phase 3+ `delivery="retained"`; reserved).
+5. **Permanent volume nodes** — named-volume stencils for `MountSpecPath` entries with `delivery="volume"` (Phase 3 Task 4.4 shipped). Routed to `FOLDER_STENCIL_VOLUME` via `stencil_tier="volume"`. UX label: "Volume Mount".
 
 **Identifiers (internal — NOT UX):**
 - `NodeSource.STENCIL` — MountDataTree source discriminator
@@ -172,6 +172,18 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 - `display_stencil_nodes: bool` on TreeDisplayConfig
 - Theme variables: `stencil.volume`, `stencil.auth`, `inherited.stencil_volume`, `inherited.stencil_auth`, `text_stencil_purple`
 - Folder states: `FOLDER_STENCIL_VOLUME`, `FOLDER_STENCIL_AUTH`
+- GUI tier routing: `MountDataTreeModel.NodeStencilTierRole` (Qt UserRole+3) returns `node.stencil_tier` for stencil nodes, `"mirrored"` otherwise. `TreeStyleDelegate._resolve_style` reads it and forwards into `resolve_tree_state(state, is_folder, stencil_tier)`.
+- L4 auth synthesizer: `MountDataTree._rebuild_l4_stencil_nodes()` (idempotent — drops auth-tier stencils from `root_node.children` then re-emits one per `ExtensionConfig.isolation_paths` entry). Public refresh hook `MountDataTree.set_extensions(list)` for hot install/uninstall.
+- Synthetic NodeState injection (GUI-only): for stencil paths CORE never sees, `mount_data_tree._recompute_states` writes `replace(_DEFAULT_NODE_STATE, visibility="virtual")` post-`apply_node_states_from_scope`. Keeps the GUI route through `_resolve_folder_state` without polluting the CORE state pipeline.
+
+**`stencil_tier` taxonomy** (three values; surfaced via `NodeStencilTierRole`, consumed by `resolve_tree_state`):
+| Value | Source | Folder state | Theme key |
+|---|---|---|---|
+| `"mirrored"` | Structural intermediates (CORE Stage 2 — see `mirrored`) | `FOLDER_MIRRORED` family | mirrored stops |
+| `"volume"` | `delivery="volume"` mount specs (L_volume tier) | `FOLDER_STENCIL_VOLUME` | `stencil.volume` |
+| `"auth"` | Extension `isolation_paths` (L4 — `_rebuild_l4_stencil_nodes`) | `FOLDER_STENCIL_AUTH` | `stencil.auth` |
+
+**Read-only stencil RMB rule (silent-no-op pattern):** Stencil nodes whose lifecycle is owned outside the GUI never expose RMB gestures — the context menu falls through to `_append_fallback_if_empty` ("No valid actions", disabled). Three sites apply this rule today: (a) Project Root Header on LocalHost when no host node is targetable (Phase 2 silent-no-op fix), (b) Project Root Header on Scope Config Tree (Task 4.6), (c) L4 auth stencil nodes in Scope Config Tree (Task 4.9 — container_lifecycle owns the named-volume lifecycle). Mirrored intermediates and `delivery="volume"` stencils route through their normal RMB branches; only auth-tier and header-empty cases short-circuit.
 
 **Distinction from `visibility="virtual"`:** `visibility` is the per-node MatrixState axis returned by `compute_visibility()`; it stays `"virtual"` to preserve the CORE/GUI coloring contract. STENCIL is the category label for *why a node exists*; `visibility="virtual"` is the container-side *state* of that (or any other restricted-with-structure) node. Many stencils end up with `visibility="virtual"`, but the two axes are not interchangeable.
 
@@ -697,6 +709,37 @@ Detached delivery uses a conservative policy for host symlinks and Windows junct
 **Deferred Presentation (Phase 2+):** a dedicated deferred-style node state can indicate a placeholder directory that exists in the container but has not been populated. Not shipped in Phase 1.
 
 **Domains:** Lifecycle (detached init), Presentation (future deferred-style state for symlink nodes)
+
+---
+
+### Update lifecycle (`execute_update` phases)
+
+Container update flow recreates the container while preserving content for `preserve_on_update` specs and the named-volume L_volume tier. Numbered phases from `docker/container_lifecycle.py` (canonical numbering — narrative descriptions in `COREFLOWCHART.md` may use prose names alongside these numbers):
+
+- **Phase 4b — `_preserve_and_recreate`** — fail-safe stage. Iterates `mount_specs` for `delivery="detached" + content_seed="folder" + preserve_on_update=True` entries; cp's contents from old container to a host tmp staging area. **Aborts the entire update on cp-out failure** — the old container is left running so no data is destroyed.
+- **Phase 8b — `_restore_preserved_contents`** — restore stage. Re-cp's the staged contents into the freshly recreated container via `push_directory_contents_to_container`. Failure here is **non-fatal**: warns the user, leaves the new container running with empty content for that spec. Tmp staging is cleaned up in a `finally` block whether restore succeeds or not.
+
+**Soft-permanent vs hard-permanent tier:**
+- *Soft-permanent* — `delivery="detached" + content_seed="folder" + preserve_on_update=True`. Survives `execute_update` recreate via the Phase 4b/8b cp staging hop. Destroyed by `docker compose down`. UX label: "Make Permanent Folder → No Recreate" / "Mark Permanent".
+- *Hard-permanent* — `delivery="volume" + content_seed="folder"`. Survives recreate natively (Docker named volume). Destroyed only by `docker compose down -v`. UX label: "Make Permanent Folder → Volume Mount".
+
+**Domains:** Lifecycle (`docker/container_lifecycle.py`), Config (`MountSpecPath.preserve_on_update` validator)
+
+---
+
+### `push_directory_contents_to_container` (`/.` merge idiom)
+
+`docker/file_ops.py` primitive used by Phase 8b restore (and any other "merge contents into existing container directory" path). Wraps `docker cp <src>/. <container>:<dst>` — the trailing `/.` tells Docker to copy directory **contents** rather than the directory itself, so the destination merges with existing children instead of nesting under a same-named subdirectory. Distinct from `push_file_to_container` (single file) and `_detached_init`'s tree cp (whole-subtree initial seeding).
+
+**Domains:** Lifecycle (`docker/file_ops.py`)
+
+---
+
+### `recreateRequested` signal
+
+Qt signal emitted by `ScopeView` when a Scope Config Tree gesture (Task 4.6) produces a config change that requires container recreate (e.g., "Make Permanent Folder → Volume Mount" on a scope with an existing container). The host application connects it to the existing recreate-confirmation dialog. Decouples config mutation from lifecycle invocation — config writes are immediate; recreate is gated on user confirm.
+
+**Domains:** Presentation (`gui/scope_view.py` emit, host app slot)
 
 ---
 
