@@ -243,7 +243,11 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
     delivery == "detached" ─ compose YAML emits NO Layer 1 for this
                              spec (and no L2/L3 project-content volumes
                              backing it). Lifecycle runs a per-spec
-                             init after `compose up`:
+                             init (`_detached_init`) after `compose up`
+                             that branches on `content_seed` and
+                             `host_path`:
+
+                             content_seed == "tree" (host_path set):
                                • Walk mount_root's content on the host
                                  (respecting mask/reveal patterns) and
                                  `docker cp` into the container.
@@ -255,14 +259,40 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                                • Symlinks/junctions get a mkdir stub;
                                  contents are not traversed.
 
+                             content_seed == "folder" (host-backed):
+                               • `docker exec mkdir -p <container_path>`;
+                                 no cp walk, no host read.
+                               • Validator gate: patterns must be empty
+                                 on folder-seed specs (folder-seed has
+                                 no walk to mask/reveal over).
+                               • `pushed_files` replay still applies.
+
+                             content_seed == "folder" (host_path is None,
+                             container-only):
+                               • mount_root is interpreted as a
+                                 container-logical path (no host-side
+                                 translation via host_container_root).
+                               • `docker exec mkdir -p <mount_root>`;
+                                 no cp, no host read.
+                               • Validator gate: container-only specs
+                                 (host_path=None) require content_seed
+                                 == "folder".
+
+    delivery == "volume" ─── (Task 4.4) compose YAML emits a named
+                             Docker volume entry; no Phase 6a cp is
+                             needed. Survives ordinary update natively.
+                             Only `content_seed="folder"` is supported.
+
     Layer 4 (isolation volumes for extensions — auth, Claude, Git)
     are emitted regardless of any mount_spec delivery. They are
     orthogonal to per-spec delivery choice.
 
-    Both deliveries share the `pushed_files` replay and extension
+    All deliveries share the `pushed_files` replay and extension
     reconciliation steps that follow. On container recreate, detached
-    content is ephemeral (writable layer) and must replay every time;
-    bind content re-attaches host state automatically.
+    tree-seed content is ephemeral (writable layer) and must replay
+    every time; folder-seed content is empty until pushed_files or
+    in-container writes fill it; bind content re-attaches host state
+    automatically; volume content survives recreate natively.
 
     See glossary → "Mount Delivery Terms" for vocabulary.
 

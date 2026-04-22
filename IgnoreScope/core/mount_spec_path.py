@@ -239,6 +239,22 @@ class MountSpecPath:
                 "need a host source)"
             )
 
+        # Container-only specs must be folder-seed — tree-seed needs a host
+        # subtree to cp-walk, which container-only specs don't have.
+        if self.host_path is None and self.delivery != "bind" and self.content_seed != "folder":
+            errors.append(
+                "container-only specs (host_path=None) require "
+                "content_seed='folder'; no host subtree to cp-walk for tree-seed"
+            )
+
+        # Folder-seed specs cannot carry mask/reveal patterns — there's no
+        # cp walk to mask/reveal over.
+        if self.content_seed == "folder" and self.patterns:
+            errors.append(
+                f"folder-seed specs disallow mask/reveal patterns; "
+                f"got {len(self.patterns)} pattern(s) on content_seed='folder'"
+            )
+
         # delivery='volume' requires folder seeding — no tree-seeding into a
         # named volume at this phase.
         if self.delivery == "volume" and self.content_seed != "folder":

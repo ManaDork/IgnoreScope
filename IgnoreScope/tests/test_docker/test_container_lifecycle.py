@@ -708,7 +708,9 @@ class TestPushedFilesReplay:
 
         config = _make_config(tmp_path=tmp_path)
         config.mount_specs = [
-            MountSpecPath(mount_root=src, patterns=[], delivery="detached"),
+            MountSpecPath(
+                mount_root=src, patterns=[], delivery="detached", host_path=src,
+            ),
         ]
         config.pushed_files = {pushed}
 
