@@ -326,6 +326,50 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
     in-container writes fill it; bind content re-attaches host state
     automatically; volume content survives recreate natively.
 
+    UPDATE PATH — preserve_on_update hook
+    ──────────────────────────────────────
+
+    The update path (`execute_update`) adds two hooks around recreate
+    for `delivery="detached" + content_seed="folder" + preserve_on_update=True`
+    specs. These are the "soft permanent" tier — lighter than a named
+    volume but persistent across ordinary updates.
+
+    Phase 4b  `_preserve_detached_folders` — runs BEFORE `docker compose
+                down`. For each spec with `preserve_on_update=True`:
+                  • `docker exec test -e <cpath>`: missing path is
+                    treated as first-ever update (empty snapshot placeholder).
+                  • `docker cp cname:<cpath> <tmp_stage>/spec_{idx}` pulls
+                    the live container contents to a host tmp staging dir
+                    (tempfile.mkdtemp with prefix "ignorescope_preserve_").
+                  • FAIL-SAFE: any cp-out failure aborts the update
+                    BEFORE compose-down. The old container stays intact
+                    and the caller receives an OpResult(success=False).
+                    No mid-state is possible — either every preserve
+                    snapshot is on disk or the update never started.
+
+    Phase 8b  `_restore_detached_folders` — runs AFTER `_detached_init`
+                has mkdir'd each folder-seed path. For each snapshot:
+                  • `docker cp <stage>/spec_{idx}/. cname:<cpath>` merges
+                    the preserved contents into the fresh (empty) folder
+                    using the canonical `/.` "copy contents" pattern.
+                  • NON-FATAL: cp-back failure is logged as a warning
+                    note in OpResult.details and the outer update
+                    continues. A failed restore leaves the folder empty
+                    (mkdir stub intact) — user can re-push manually.
+                    Rationale: at this point the container is already
+                    recreated; aborting would waste work and leave the
+                    user in an even worse state.
+
+    Staging cleanup runs in a `finally` block wrapping Phase 5-12, so
+    the temp dir is removed whether the update succeeds, aborts mid-way,
+    or raises. Cleanup errors are swallowed — never mask a real op failure.
+
+    Why only `detached + folder + preserve=True`? Tree-seed specs re-read
+    from host on update (no need to preserve writable-layer deltas);
+    `delivery="volume"` survives update natively via Docker's named
+    volume retention. Validator rejects `preserve_on_update=True` on
+    any other combination.
+
     See glossary → "Mount Delivery Terms" for vocabulary.
 
 
@@ -446,10 +490,11 @@ docker/
 
   container_lifecycle.py → Container lifecycle orchestrators
                             preflight_create / execute_create (6-phase: preflight→hierarchy→compose→build→deploy→reconcile→save)
-                            preflight_update / execute_update (12-phase: load old→preflight→hierarchy→orphan detect→down→compose→build→up→prune→dirs→reconcile→save)
+                            preflight_update / execute_update (14-phase: load old→preflight→hierarchy→orphan detect→preserve→down→compose→build→up→detached init→restore→prune→dirs→reconcile→save)
                             preflight_remove_container / execute_remove_container
                             reconcile_extensions — post-start verify/re-deploy loop (state × presence matrix)
                             _collect_isolation_paths — extracts extension isolation paths for Layer 4 volumes
+                            _preserve_detached_folders / _restore_detached_folders — preserve_on_update hook pair
                             Shared by GUI and CLI — neither owns orchestration
 
   container_ops.py       → PHASE 7, 8: Container_Ops (subprocess layer)
