@@ -624,13 +624,37 @@ Hard-permanent variant. Backed by a Docker named volume emitted in compose. Surv
 
 ---
 
-### Five RMB gestures (tree node + Project Root Header)
+### CLI surface (mount delivery)
+
+Phase 3 Task 4.8 surfaces every Mount Delivery gesture on the `python -m IgnoreScope` CLI. Each command mirrors a GUI gesture and persists via `save_config` only — no implicit container recreate. Container-affecting gestures append a recreate hint to the success message when a container exists.
+
+| UX gesture | CLI invocation |
+|---|---|
+| Mount | `add-mount <host_path>` (default `--delivery bind --seed tree`) |
+| Virtual Mount | `add-mount <host_path> --delivery detached` |
+| Virtual Folder | `add-mount <host_path> --delivery detached --seed folder` |
+| Make Folder | `add-folder <container_path>` |
+| Make Permanent Folder → No Recreate | `add-folder <container_path> --permanent` |
+| Make Permanent Folder → Volume Mount | `add-folder <container_path> --volume` |
+| Mark Permanent (existing detached folder) | `mark-permanent <container_path>` |
+| Unmark Permanent | `unmark-permanent <container_path>` |
+| Convert to Mount / Virtual Mount | `convert <host_path> --to {bind,detached}` |
+
+`--permanent` and `--volume` are mutually exclusive on `add-folder`. `--seed folder` requires `--delivery detached` on `add-mount`. `mark-permanent` / `unmark-permanent` reject any spec that is not `delivery="detached" + content_seed="folder"` with a clear message — volume specs and tree-seed specs cannot be flipped.
+
+**Persistence parity:** Container-only `mount_root` paths (`host_path is None`) are stored as-written and round-trip correctly through `MountSpecPath.from_dict` (no host-path resolution that would prepend a Windows drive letter). This parity is required for `mark-permanent` / `unmark-permanent` to find the spec across reload boundaries.
+
+**Domains:** CLI (commands.py + interactive.py wrappers), Config (delegates to LocalMountConfig constructors)
+
+---
+
+### Six RMB gestures (tree node + Project Root Header)
 
 The RMB action set at both the tree-node level and the Project Root Header depends on the current state of the target path:
 
 | State | Container exists? | Actions available |
 |---|---|---|
-| Neither Mount nor Virtual Mount set | — | **Mount**, **Virtual Mount** |
+| Neither Mount nor Virtual Mount set | — | **Mount**, **Virtual Mount**, **Virtual Folder** |
 | Mount | no | **Unmount**, **Convert to Virtual Mount** |
 | Mount | yes | **Unmount**, **Convert to Virtual Mount** ⚠️ recreates container |
 | Virtual Mount | no | **Remove Virtual Mount**, **Convert to Mount**, **Remove But Keep Children** |
@@ -882,7 +906,7 @@ Key fields: `header`, `width`, `check_field`, `files_only`, `folders_only`, `sym
 
 The `QHeaderView` band atop the `localHostTree` QTreeView in `LocalHostView`. Provides its own RMB context menu (`_show_header_context_menu`) distinct from the node-level RMB. Targets `host_project_root` only — the folder configured as the project root.
 
-**Actions follow the five-gesture state machine** documented in `Mount Delivery Terms`. The header RMB offers the same gesture set as a tree-node RMB, scoped to `host_project_root`:
+**Actions follow the six-gesture state machine** documented in `Mount Delivery Terms`. The header RMB offers the same gesture set as a tree-node RMB, scoped to `host_project_root`:
 
 - No mount set on root → **Mount**, **Virtual Mount** (both apply to the entire project)
 - Mount set on root → **Unmount**, **Convert to Virtual Mount**
@@ -893,7 +917,7 @@ The header never hides when a scope is loaded — gestures always include at lea
 **Contrast with tree node RMB:** Node RMB checks the same gate flags per selected node; header RMB always targets `host_project_root`. Multi-select (shift-click in the tree) does not apply to the header.
 
 **Domains:** Presentation (LocalHostView header interaction)  
-**See:** `Mount Delivery Terms § Five RMB gestures`, `local_host_view.py → _show_header_context_menu`, `GUI_LAYOUT_SPECS.md § Module Ownership Map`
+**See:** `Mount Delivery Terms § Six RMB gestures`, `local_host_view.py → _show_header_context_menu`, `GUI_LAYOUT_SPECS.md § Module Ownership Map`
 
 ---
 

@@ -15,6 +15,7 @@ from .commands import (
     cmd_install_git, cmd_install_p4_mcp,
     cmd_list, cmd_status, cmd_cp,
     cmd_add_mount, cmd_convert,
+    cmd_add_folder, cmd_mark_permanent, cmd_unmark_permanent,
 )
 
 
@@ -467,8 +468,20 @@ def _parse_flag_value(args: list[str], flag: str) -> str | None:
     return None
 
 
-def _collect_positional(args: list[str], start: int = 2) -> list[str]:
-    """Collect non-flag positional args, skipping ``--flag value`` pairs."""
+def _collect_positional(
+    args: list[str],
+    start: int = 2,
+    bool_flags: set[str] | None = None,
+) -> list[str]:
+    """Collect non-flag positional args, skipping ``--flag value`` pairs.
+
+    Args:
+        args: argv-style list.
+        start: index to begin scanning from (default 2 — past command name).
+        bool_flags: flag names that take no value (e.g. ``{"--permanent"}``).
+            These are skipped without consuming the next arg.
+    """
+    bool_flags = bool_flags or set()
     positional: list[str] = []
     skip_next = False
     for i, arg in enumerate(args[start:], start=start):
@@ -476,7 +489,9 @@ def _collect_positional(args: list[str], start: int = 2) -> list[str]:
             skip_next = False
             continue
         if arg.startswith("--"):
-            if "=" not in arg and i + 1 < len(args):
+            if arg in bool_flags or "=" in arg:
+                continue
+            if i + 1 < len(args):
                 skip_next = True
             continue
         positional.append(arg)
@@ -488,18 +503,85 @@ def cmd_add_mount_wrapper(host_project_root: Path, args: list[str]) -> None:
 
     Usage: python -m IgnoreScope add-mount <path> [--container NAME]
                                                    [--delivery bind|detached]
+                                                   [--seed tree|folder]
     """
     scope_name = _parse_container_arg(args)
     delivery = _parse_flag_value(args, "--delivery") or "bind"
+    seed = _parse_flag_value(args, "--seed") or "tree"
 
     positional = _collect_positional(args)
     if not positional:
         print("[ERROR] Usage: python -m IgnoreScope add-mount [--container NAME] "
-              "[--delivery bind|detached] <path>")
+              "[--delivery bind|detached] [--seed tree|folder] <path>")
         sys.exit(1)
 
     path = Path(positional[0])
-    success, msg = cmd_add_mount(host_project_root, scope_name, path, delivery)
+    success, msg = cmd_add_mount(host_project_root, scope_name, path, delivery, seed)
+    print(f"[{'OK' if success else 'ERROR'}] {msg}")
+    sys.exit(0 if success else 1)
+
+
+def cmd_add_folder_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for add-folder command.
+
+    Usage: python -m IgnoreScope add-folder <container_path> [--container NAME]
+                                                              [--permanent | --volume]
+    """
+    scope_name = _parse_container_arg(args)
+    permanent = "--permanent" in args
+    volume = "--volume" in args
+
+    positional = _collect_positional(
+        args, bool_flags={"--permanent", "--volume"},
+    )
+    if not positional:
+        print("[ERROR] Usage: python -m IgnoreScope add-folder [--container NAME] "
+              "[--permanent | --volume] <container_path>")
+        sys.exit(1)
+
+    container_path = Path(positional[0])
+    success, msg = cmd_add_folder(
+        host_project_root, scope_name, container_path,
+        permanent=permanent, volume=volume,
+    )
+    print(f"[{'OK' if success else 'ERROR'}] {msg}")
+    sys.exit(0 if success else 1)
+
+
+def cmd_mark_permanent_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for mark-permanent command.
+
+    Usage: python -m IgnoreScope mark-permanent <container_path> [--container NAME]
+    """
+    scope_name = _parse_container_arg(args)
+
+    positional = _collect_positional(args)
+    if not positional:
+        print("[ERROR] Usage: python -m IgnoreScope mark-permanent "
+              "[--container NAME] <container_path>")
+        sys.exit(1)
+
+    container_path = Path(positional[0])
+    success, msg = cmd_mark_permanent(host_project_root, scope_name, container_path)
+    print(f"[{'OK' if success else 'ERROR'}] {msg}")
+    sys.exit(0 if success else 1)
+
+
+def cmd_unmark_permanent_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for unmark-permanent command.
+
+    Usage: python -m IgnoreScope unmark-permanent <container_path> [--container NAME]
+    """
+    scope_name = _parse_container_arg(args)
+
+    positional = _collect_positional(args)
+    if not positional:
+        print("[ERROR] Usage: python -m IgnoreScope unmark-permanent "
+              "[--container NAME] <container_path>")
+        sys.exit(1)
+
+    container_path = Path(positional[0])
+    success, msg = cmd_unmark_permanent(host_project_root, scope_name, container_path)
     print(f"[{'OK' if success else 'ERROR'}] {msg}")
     sys.exit(0 if success else 1)
 
@@ -581,23 +663,30 @@ Usage:
                                          [--project-dir DIR] [--scope-dir DIR]
                                          [--p4port HOST] [--p4user USER] [--p4client WS]
     python -m IgnoreScope add-mount [--project PATH] [--container NAME]
-                                    [--delivery bind|detached] <path>
+                                    [--delivery bind|detached] [--seed tree|folder] <path>
+    python -m IgnoreScope add-folder [--project PATH] [--container NAME]
+                                     [--permanent | --volume] <container_path>
+    python -m IgnoreScope mark-permanent [--project PATH] [--container NAME] <container_path>
+    python -m IgnoreScope unmark-permanent [--project PATH] [--container NAME] <container_path>
     python -m IgnoreScope convert [--project PATH] [--container NAME]
                                   <path> --to {bind,detached}
 
 Commands:
-    gui             Launch graphical configuration editor (PyQt6)
-    create          Interactive CLI setup: mounts, masks, reveals
-    list            List all containers for a project with status
-    status          Show detailed status of a single container
-    push            Push tracked files to container (workflow — tracks files)
-    pull            Pull tracked files from container (./Pulled/ or overwrite)
-    cp              Copy file or directory to container (raw docker cp — no tracking)
-    remove          Remove container and volumes
-    install-git     Install Git into a running container
-    install-p4-mcp  Install P4 MCP Server from devenv mount
-    add-mount       Add a mount spec (bind or detached delivery)
-    convert         Flip a mount spec's delivery (bind <-> detached)
+    gui              Launch graphical configuration editor (PyQt6)
+    create           Interactive CLI setup: mounts, masks, reveals
+    list             List all containers for a project with status
+    status           Show detailed status of a single container
+    push             Push tracked files to container (workflow — tracks files)
+    pull             Pull tracked files from container (./Pulled/ or overwrite)
+    cp               Copy file or directory to container (raw docker cp — no tracking)
+    remove           Remove container and volumes
+    install-git      Install Git into a running container
+    install-p4-mcp   Install P4 MCP Server from devenv mount
+    add-mount        Add a mount spec — Mount / Virtual Mount / Virtual Folder (host-backed)
+    add-folder       Add a container-only folder spec — Make Folder / Permanent / Volume
+    mark-permanent   Set preserve_on_update=True on a detached folder spec
+    unmark-permanent Set preserve_on_update=False on a detached folder spec
+    convert          Flip a mount spec's delivery (bind <-> detached)
 
 Options:
     --project PATH     Project root directory (default: current directory)
@@ -610,6 +699,10 @@ Options:
     --email EMAIL     Git user.email (with --configure)
     --devenv-mount PATH  Container devenv mount path for install-p4-mcp (default: /devenv)
     --delivery MODE    Mount delivery mode for add-mount (bind or detached; default: bind)
+    --seed MODE        Content seed for add-mount (tree or folder; default: tree).
+                       'folder' requires --delivery detached (Virtual Folder gesture).
+    --permanent        add-folder: soft-permanent (preserve_on_update=True; cp out/in across update)
+    --volume           add-folder: hard-permanent named Docker volume (delivery=volume)
     --to MODE          Target delivery mode for convert (bind or detached; required)
 
   Config Deploy Options (optional — deploys default config files after binary install):

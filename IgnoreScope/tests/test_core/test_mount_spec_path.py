@@ -219,15 +219,17 @@ class TestDeliveryField:
         assert spec.delivery == "bind"
 
     def test_from_dict_round_trip_detached(self, tmp_path: Path):
-        """Detached delivery survives to_dict / from_dict."""
+        """Host-backed detached delivery survives to_dict / from_dict."""
         original = MountSpecPath(
             mount_root=tmp_path / "src",
             patterns=["vendor/"],
             delivery="detached",
+            host_path=tmp_path / "src",
         )
         restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
         assert restored.delivery == "detached"
         assert restored.mount_root == original.mount_root
+        assert restored.host_path == original.host_path
         assert restored.patterns == original.patterns
 
     def test_validate_rejects_invalid_delivery(self, tmp_path: Path):

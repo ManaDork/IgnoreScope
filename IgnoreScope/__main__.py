@@ -29,6 +29,9 @@ from .cli.interactive import (
     cmd_cp_wrapper,
     cmd_add_mount_wrapper,
     cmd_convert_wrapper,
+    cmd_add_folder_wrapper,
+    cmd_mark_permanent_wrapper,
+    cmd_unmark_permanent_wrapper,
     print_usage,
 )
 
@@ -89,6 +92,12 @@ def main() -> None:
             cmd_install_p4_mcp_wrapper(host_project_root, sys.argv)
         elif command == 'add-mount':
             cmd_add_mount_wrapper(host_project_root, sys.argv)
+        elif command == 'add-folder':
+            cmd_add_folder_wrapper(host_project_root, sys.argv)
+        elif command == 'mark-permanent':
+            cmd_mark_permanent_wrapper(host_project_root, sys.argv)
+        elif command == 'unmark-permanent':
+            cmd_unmark_permanent_wrapper(host_project_root, sys.argv)
         elif command == 'convert':
             cmd_convert_wrapper(host_project_root, sys.argv)
         else:
