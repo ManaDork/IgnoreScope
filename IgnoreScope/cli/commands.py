@@ -446,15 +446,16 @@ def cmd_add_mount(
     scope_name: str,
     path: Path,
     delivery: str = "bind",
+    seed: str = "tree",
 ) -> tuple[bool, str]:
     """Add a mount spec (bind or detached delivery) to a scope config.
 
-    Mirrors the GUI Mount / Virtual Mount RMB gestures. Loads the scope
-    config, appends a MountSpecPath via the appropriate LocalMountConfig
-    API, and persists the result. Overlap with an existing mount spec
-    rejects with a non-zero exit code. Does not create or mutate the
-    container — a subsequent create/update is required for the change to
-    take effect.
+    Mirrors the GUI Mount / Virtual Mount / Virtual Folder RMB gestures.
+    Loads the scope config, appends a MountSpecPath via the appropriate
+    LocalMountConfig API, and persists the result. Overlap with an
+    existing mount spec rejects with a non-zero exit code. Does not
+    create or mutate the container — a subsequent create/update is
+    required for the change to take effect.
 
     Args:
         host_project_root: Project root directory
@@ -462,12 +463,19 @@ def cmd_add_mount(
         path: Host path to mount (absolute)
         delivery: "bind" (default — live bind mount) or "detached"
                   (content cp'd at container create)
+        seed: "tree" (default — whole subtree cp'd) or "folder"
+              (mkdir only; pushed_files fill content). "folder" requires
+              delivery="detached" — the Virtual Folder gesture.
 
     Returns:
         Tuple of (success, message)
     """
     if delivery not in ("bind", "detached"):
         return False, f"Invalid --delivery value: {delivery!r} (expected 'bind' or 'detached')"
+    if seed not in ("tree", "folder"):
+        return False, f"Invalid --seed value: {seed!r} (expected 'tree' or 'folder')"
+    if seed == "folder" and delivery != "detached":
+        return False, "--seed folder requires --delivery detached (Virtual Folder gesture)"
 
     mount_path = path if path.is_absolute() else (host_project_root / path).resolve()
     if not mount_path.exists():
@@ -478,11 +486,16 @@ def cmd_add_mount(
     except Exception as e:
         return False, f"Failed to load config: {e}"
 
-    added = (
-        config.add_detached_mount(mount_path)
-        if delivery == "detached"
-        else config.add_mount(mount_path)
-    )
+    if seed == "folder":
+        added = config.add_detached_folder_mount(mount_path)
+        label = "Virtual Folder"
+    elif delivery == "detached":
+        added = config.add_detached_mount(mount_path)
+        label = "Virtual Mount"
+    else:
+        added = config.add_mount(mount_path)
+        label = "Mount"
+
     if not added:
         return False, (
             f"Mount rejected: {mount_path} overlaps an existing mount spec "
@@ -490,8 +503,157 @@ def cmd_add_mount(
         )
 
     save_config(config)
-    label = "Virtual Mount" if delivery == "detached" else "Mount"
-    return True, f"{label} added: {mount_path} (delivery={delivery})"
+    return True, f"{label} added: {mount_path} (delivery={delivery}, seed={seed})"
+
+
+def cmd_add_folder(
+    host_project_root: Path,
+    scope_name: str,
+    container_path: Path,
+    *,
+    permanent: bool = False,
+    volume: bool = False,
+) -> tuple[bool, str]:
+    """Add a container-only folder spec to a scope config.
+
+    Mirrors the Scope Config Tree "Make Folder" / "Make Permanent Folder"
+    RMB gestures. Container-only specs have ``host_path=None`` — the
+    folder lives only inside the container.
+
+      default          → ``add_stencil_folder`` (delivery=detached, content_seed=folder, preserve_on_update=False)
+      ``--permanent``  → ``add_stencil_folder`` (..., preserve_on_update=True) — soft-permanent (cp out/in across update)
+      ``--volume``     → ``add_stencil_volume`` (delivery=volume, content_seed=folder) — hard-permanent (named Docker volume)
+
+    ``--permanent`` and ``--volume`` are mutually exclusive.
+
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+        container_path: Container-side absolute path (e.g. /api/cache)
+        permanent: Soft-permanent folder (preserve_on_update=True)
+        volume: Hard-permanent named volume (delivery="volume")
+
+    Returns:
+        Tuple of (success, message)
+    """
+    if permanent and volume:
+        return False, "--permanent and --volume are mutually exclusive"
+
+    cpath_posix = container_path.as_posix()
+    if not cpath_posix.startswith("/"):
+        return False, (
+            f"Container path must be absolute (start with '/'): {cpath_posix!r}"
+        )
+
+    try:
+        config = load_config(host_project_root, scope_name)
+    except Exception as e:
+        return False, f"Failed to load config: {e}"
+
+    if volume:
+        added = config.add_stencil_volume(container_path)
+        label = "Permanent Folder (Volume Mount)"
+    elif permanent:
+        added = config.add_stencil_folder(container_path, preserve_on_update=True)
+        label = "Permanent Folder (No Recreate)"
+    else:
+        added = config.add_stencil_folder(container_path)
+        label = "Folder"
+
+    if not added:
+        return False, (
+            f"Folder rejected: {container_path} overlaps an existing mount spec "
+            f"(duplicate, ancestor, or descendant)"
+        )
+
+    save_config(config)
+
+    docker_name = build_docker_name(host_project_root, scope_name)
+    recreate_note = ""
+    if volume and container_exists(docker_name):
+        recreate_note = (
+            "\nNote: container exists — run `create` (or GUI Recreate) to "
+            "emit the new named volume."
+        )
+    return True, f"{label} added: {container_path}{recreate_note}"
+
+
+def cmd_mark_permanent(
+    host_project_root: Path,
+    scope_name: str,
+    container_path: Path,
+) -> tuple[bool, str]:
+    """Flip preserve_on_update False→True on a detached folder-seed spec.
+
+    Mirrors the Scope Config Tree "Mark Permanent" RMB gesture. The spec
+    must already be ``delivery="detached", content_seed="folder"`` —
+    tree-seed and volume specs are rejected with a clear message.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        config = load_config(host_project_root, scope_name)
+    except Exception as e:
+        return False, f"Failed to load config: {e}"
+
+    existing = next(
+        (ms for ms in config.mount_specs if ms.mount_root == container_path),
+        None,
+    )
+    if existing is None:
+        return False, f"No mount spec found for path: {container_path}"
+    if existing.delivery != "detached" or existing.content_seed != "folder":
+        return False, (
+            f"mark-permanent requires delivery='detached' + content_seed='folder'; "
+            f"got delivery={existing.delivery!r}, content_seed={existing.content_seed!r}"
+        )
+    if existing.preserve_on_update:
+        return True, f"Already permanent: {container_path} (no-op)"
+
+    if not config.mark_permanent(container_path):
+        return False, f"Failed to mark permanent: {container_path}"
+
+    save_config(config)
+    return True, f"Marked permanent: {container_path}"
+
+
+def cmd_unmark_permanent(
+    host_project_root: Path,
+    scope_name: str,
+    container_path: Path,
+) -> tuple[bool, str]:
+    """Flip preserve_on_update True→False on a detached folder-seed spec.
+
+    Mirrors the Scope Config Tree "Unmark Permanent" RMB gesture.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        config = load_config(host_project_root, scope_name)
+    except Exception as e:
+        return False, f"Failed to load config: {e}"
+
+    existing = next(
+        (ms for ms in config.mount_specs if ms.mount_root == container_path),
+        None,
+    )
+    if existing is None:
+        return False, f"No mount spec found for path: {container_path}"
+    if existing.delivery != "detached" or existing.content_seed != "folder":
+        return False, (
+            f"unmark-permanent requires delivery='detached' + content_seed='folder'; "
+            f"got delivery={existing.delivery!r}, content_seed={existing.content_seed!r}"
+        )
+    if not existing.preserve_on_update:
+        return True, f"Already not permanent: {container_path} (no-op)"
+
+    if not config.unmark_permanent(container_path):
+        return False, f"Failed to unmark permanent: {container_path}"
+
+    save_config(config)
+    return True, f"Unmarked permanent: {container_path}"
 
 
 def cmd_convert(

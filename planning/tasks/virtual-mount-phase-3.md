@@ -255,15 +255,17 @@ Masks/reveals continue to apply only for `content_seed="tree"` specs (folder-see
 - `scope unmark-permanent <container_path>`
 
 **Acceptance Criteria:**
-- [ ] Each command maps to the equivalent GUI gesture's schema output.
-- [ ] `--permanent` and `--volume` are mutually exclusive.
-- [ ] Conflicts (e.g., mark-permanent on a `content_seed="tree"` spec) fail with clear message.
-- [ ] Updated `CLAUDE.md` Agent Zones CLI row — new commands listed, Phase 3 CLI surface no longer marked deferred.
-- [ ] Updated `ARCHITECTUREGLOSSARY.md` — CLI command names cross-referenced with their equivalent UX gestures in the Mount Delivery Terms block.
+- [x] Each command maps to the equivalent GUI gesture's schema output.
+- [x] `--permanent` and `--volume` are mutually exclusive.
+- [x] Conflicts (e.g., mark-permanent on a `content_seed="tree"` spec) fail with clear message.
+- [x] Updated `CLAUDE.md` Agent Zones CLI row — new commands listed, Phase 3 CLI surface no longer marked deferred.
+- [x] Updated `ARCHITECTUREGLOSSARY.md` — CLI command names cross-referenced with their equivalent UX gestures in the Mount Delivery Terms block.
 
 **Complexity:** MEDIUM
 
 **Dependencies:** 4.2, 4.6.
+
+**Side fix (Task 4.2 reconciliation):** `MountSpecPath.from_dict` was resolving container-only `mount_root` paths against `host_project_root`, prepending a Windows drive letter (`/api → C:/api`) and breaking exact-match lookup across reload. Container-only specs (no `host_path`, non-bind delivery) now keep `mount_root` as-written. Required for `mark-permanent` / `unmark-permanent` to find specs across `load_config` boundaries; also unblocks the GUI Scope Config gestures shipped in 4.6 across session reload.
 
 ---
 

@@ -373,7 +373,6 @@ class MountSpecPath:
             host_project_root: Base path for resolving relative mount_root.
         """
         raw_root = data.get("mount_root", ".")
-        mount_root = (host_project_root / raw_root).resolve()
         patterns = list(data.get("patterns", []))
         delivery = data.get("delivery", "bind")
 
@@ -381,6 +380,15 @@ class MountSpecPath:
         host_path: Optional[Path] = (
             (host_project_root / raw_host).resolve() if raw_host else None
         )
+
+        # Container-only specs (no host_path + non-bind delivery) keep
+        # mount_root as the container-side absolute path as-written.
+        # Resolving against host_project_root would prepend a host drive
+        # letter on Windows and break exact-match lookup.
+        if raw_host is None and delivery != "bind":
+            mount_root = Path(raw_root)
+        else:
+            mount_root = (host_project_root / raw_root).resolve()
         content_seed = data.get("content_seed", "tree")
         preserve_on_update = data.get("preserve_on_update", False)
 
