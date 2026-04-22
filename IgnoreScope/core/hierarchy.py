@@ -51,6 +51,8 @@ class ContainerHierarchy:
     Attributes:
         ordered_volumes: Layer 1-3 + sibling volume entries (project content) for docker-compose.yml
         mask_volume_names: Named mask volumes for compose volumes section
+        stencil_volume_entries: L_volume entries for delivery="volume" specs (stencil tier, survives recreate)
+        stencil_volume_names: Named stencil volumes for compose volumes section (L_volume)
         isolation_volume_entries: Layer 4 volume entries (container-owned, delivery-mode-independent)
         isolation_volume_names: Named isolation volumes for compose volumes section (Layer 4)
         revealed_parents: Container paths needing mkdir -p before docker cp (pushed files)
@@ -67,6 +69,17 @@ class ContainerHierarchy:
 
     # Named mask volumes declared in docker-compose.yml volumes section
     mask_volume_names: list[str] = field(default_factory=list)
+
+    # L_volume: volume entries for delivery="volume" specs (e.g.
+    # "stencil_0_workspace_cache:/workspace/cache"). Backed by named Docker
+    # volumes that survive ordinary compose up/down (destroyed only by
+    # `compose down -v`). Separate from ordered_volumes because volume-
+    # delivery emits different YAML shape and must not participate in
+    # bind-order pattern interleaving.
+    stencil_volume_entries: list[str] = field(default_factory=list)
+
+    # Named stencil volumes declared in docker-compose.yml volumes section (L_volume)
+    stencil_volume_names: list[str] = field(default_factory=list)
 
     # Layer 4 volume entries (e.g. "iso_foo_root_local:/root/.local")
     isolation_volume_entries: list[str] = field(default_factory=list)
@@ -311,6 +324,51 @@ def _compute_volume_entries(
     return entries, mask_names, visible, hidden
 
 
+def _derive_stencil_volume_name(spec_index: int, container_path: str) -> str:
+    """Derive a stable Docker volume name for a delivery='volume' spec.
+
+    Shape: `stencil_{spec_index}_{sanitized_container_path}`. Same spec →
+    same name across config round-trip, matching the AC-4.4 stability
+    contract. Cross-scope uniqueness is provided by docker compose project
+    namespacing (no explicit `name:` set on the volume declaration).
+    """
+    key = sanitize_volume_name(container_path.strip('/').replace('/', '_'))
+    return f"stencil_{spec_index}_{key}"
+
+
+def _compute_stencil_volumes(
+    mount_specs: list['MountSpecPath'],
+    container_root: str,
+    host_container_root: Path,
+) -> tuple[list[str], list[str]]:
+    """Compute L_volume entries for delivery='volume' specs.
+
+    volume-delivery specs emit a single named-volume mount at mount_root;
+    validator guarantees content_seed='folder' so no pattern walk is needed.
+    host_path is None (container-only) for Phase 3; the mount_root is
+    interpreted as a container-logical path directly.
+
+    Returns:
+        Tuple of (stencil_volume_entries, stencil_volume_names) in spec
+        order. Empty lists when no volume-delivery specs exist.
+    """
+    entries: list[str] = []
+    names: list[str] = []
+    for idx, ms in enumerate(mount_specs):
+        if ms.delivery != "volume":
+            continue
+        if ms.host_path is None:
+            container_path = ms.mount_root.as_posix()
+        else:
+            container_path = to_container_path(
+                ms.mount_root, container_root, host_container_root,
+            )
+        vol_name = _derive_stencil_volume_name(idx, container_path)
+        entries.append(f"{vol_name}:{container_path}")
+        names.append(vol_name)
+    return entries, names
+
+
 def _validate_hierarchy(
     mount_specs: list['MountSpecPath'],
     host_container_root: Path | None = None,
@@ -410,7 +468,7 @@ def compute_container_hierarchy(
     """Compute complete container hierarchy from configuration.
 
     Single function computing ALL hierarchy logic. Used by:
-    - compose.py: uses ordered_volumes, mask_volume_names, isolation_volume_entries, isolation_volume_names
+    - compose.py: uses ordered_volumes, mask_volume_names, stencil_volume_entries, stencil_volume_names, isolation_volume_entries, isolation_volume_names
     - validation: checks validation_errors
     - file_ops.py: uses revealed_parents
     - Future UI: uses visible_paths, masked_paths
@@ -460,6 +518,17 @@ def compute_container_hierarchy(
             # Prefix sibling errors with sibling path
             for err in s_errs:
                 hierarchy.validation_errors.append(f"[{sibling.container_path}] {err}")
+
+    # L_volume: Named volumes for delivery="volume" specs (stencil tier).
+    # Iterated over the primary mount_specs only — sibling volume-delivery
+    # is not a Phase 3 gesture. Kept separate from ordered_volumes because
+    # volume-delivery survives recreate natively while L1-L3 do not, and
+    # separate from isolation volumes because these are user-authored.
+    stencil_entries, stencil_names = _compute_stencil_volumes(
+        mount_specs, container_root, host_container_root,
+    )
+    hierarchy.stencil_volume_entries = stencil_entries
+    hierarchy.stencil_volume_names = stencil_names
 
     # Layer 4: Isolation volumes (persistent, container-owned, final overlay).
     # Kept separate from ordered_volumes because L4 is emitted regardless of

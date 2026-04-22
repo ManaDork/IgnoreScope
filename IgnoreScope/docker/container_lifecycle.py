@@ -467,6 +467,8 @@ def execute_create(
             project_name=host_project_root.name,
             isolation_volume_entries=hierarchy.isolation_volume_entries,
             isolation_volume_names=hierarchy.isolation_volume_names,
+            stencil_volume_entries=hierarchy.stencil_volume_entries,
+            stencil_volume_names=hierarchy.stencil_volume_names,
             ports=config.ports if config.ports else None,
         )
     except Exception as e:
@@ -709,6 +711,8 @@ def execute_update(
             project_name=host_project_root.name,
             isolation_volume_entries=new_hierarchy.isolation_volume_entries,
             isolation_volume_names=new_hierarchy.isolation_volume_names,
+            stencil_volume_entries=new_hierarchy.stencil_volume_entries,
+            stencil_volume_names=new_hierarchy.stencil_volume_names,
             ports=config.ports if config.ports else None,
         )
     except Exception as e:

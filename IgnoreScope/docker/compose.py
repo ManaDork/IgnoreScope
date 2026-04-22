@@ -77,6 +77,8 @@ def generate_compose_with_masks(
     container_root: str = DEFAULT_CONTAINER_ROOT,
     isolation_volume_entries: list[str] | None = None,
     isolation_volume_names: list[str] | None = None,
+    stencil_volume_entries: list[str] | None = None,
+    stencil_volume_names: list[str] | None = None,
     ports: list[str] | None = None,
 ) -> str:
     """Generate docker-compose.yml from pre-computed hierarchy data.
@@ -98,6 +100,8 @@ def generate_compose_with_masks(
         container_root: Container root path (default: /workspace)
         isolation_volume_entries: Layer 4 volume entries ("name:container_path"); always emitted
         isolation_volume_names: Named isolation volumes (Layer 4) for the volumes section
+        stencil_volume_entries: L_volume entries for delivery="volume" specs ("name:container_path")
+        stencil_volume_names: Named stencil volumes for the volumes declaration section
         ports: List of port mappings (e.g., ["3900:3900", "8080:8080"])
 
     Returns:
@@ -151,11 +155,14 @@ def generate_compose_with_masks(
             lines.append(f"      - \"{volume}\"{comment}")
 
     # Volume layers: L1-L3 + siblings (ordered_volumes, skipped by caller in Isolation mode)
+    # followed by L_volume stencil entries (delivery="volume" specs)
     # followed by L4 isolation entries (always emitted regardless of mode).
-    if ordered_volumes or isolation_volume_entries:
+    if ordered_volumes or stencil_volume_entries or isolation_volume_entries:
         lines.append("")
-        lines.append("      # === Volume layers (bind mounts, masks, reveals, isolation) ===")
+        lines.append("      # === Volume layers (bind mounts, masks, reveals, stencil volumes, isolation) ===")
         for entry in ordered_volumes:
+            lines.append(f"      - \"{entry}\"")
+        for entry in (stencil_volume_entries or []):
             lines.append(f"      - \"{entry}\"")
         for entry in (isolation_volume_entries or []):
             lines.append(f"      - \"{entry}\"")
@@ -182,6 +189,10 @@ def generate_compose_with_masks(
 
     # Declare mask volumes (nocopy — populated by docker cp at runtime)
     for vol_name in mask_volume_names:
+        lines.append(f"  {vol_name}:")
+
+    # Declare stencil volumes (L_volume — delivery="volume" specs, container-owned)
+    for vol_name in (stencil_volume_names or []):
         lines.append(f"  {vol_name}:")
 
     # Declare isolation volumes (Layer 4 — persistent, container-owned)

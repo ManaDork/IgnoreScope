@@ -179,3 +179,80 @@ class TestIsolationMode:
         assert "iso_claude_root_local:/root/.local" in compose
         assert "# === Volume layers" in compose
         assert "mask_" not in compose
+
+
+# =============================================================================
+# Stencil volume mode — delivery="volume" specs (Task 4.4)
+# =============================================================================
+
+class TestStencilVolumeMode:
+    """delivery='volume' specs emit a named volume entry + top-level declaration."""
+
+    def test_stencil_volume_emits_entry_and_declaration(self, tmp_path: Path):
+        """Single volume-delivery spec emits both mount entry and volumes decl."""
+        compose = generate_compose_with_masks(
+            ordered_volumes=[],
+            mask_volume_names=[],
+            host_project_root=tmp_path,
+            docker_container_name="test-volume",
+            container_root="/workspace",
+            project_name=tmp_path.name,
+            stencil_volume_entries=["stencil_0_workspace_cache:/workspace/cache"],
+            stencil_volume_names=["stencil_0_workspace_cache"],
+        )
+
+        assert "stencil_0_workspace_cache:/workspace/cache" in compose
+        assert "# === Volume layers" in compose
+        volumes_section = _volumes_section(compose)
+        assert any(
+            l.strip().startswith("stencil_0_workspace_cache:")
+            for l in volumes_section.split("\n")
+        )
+
+    def test_stencil_volume_coexists_with_l1_l2_l4(self, tmp_path: Path):
+        """Bind/mask/isolation + stencil all emit in the same compose file."""
+        hierarchy = _rich_hierarchy(tmp_path)
+
+        compose = generate_compose_with_masks(
+            ordered_volumes=hierarchy.ordered_volumes,
+            mask_volume_names=hierarchy.mask_volume_names,
+            host_project_root=tmp_path,
+            docker_container_name="test-mixed",
+            container_root="/workspace",
+            project_name=tmp_path.name,
+            isolation_volume_entries=hierarchy.isolation_volume_entries,
+            isolation_volume_names=hierarchy.isolation_volume_names,
+            stencil_volume_entries=["stencil_1_workspace_data:/workspace/data"],
+            stencil_volume_names=["stencil_1_workspace_data"],
+        )
+
+        assert "mask_" in compose
+        assert "iso_" in compose
+        assert "stencil_1_workspace_data:/workspace/data" in compose
+        volumes_section = _volumes_section(compose)
+        assert any(
+            l.strip().startswith("stencil_1_workspace_data:")
+            for l in volumes_section.split("\n")
+        )
+
+    def test_no_stencil_volumes_omits_nothing_else(self, tmp_path: Path):
+        """Absence of stencil volumes must not disturb other volume blocks."""
+        compose = generate_compose_with_masks(
+            ordered_volumes=[],
+            mask_volume_names=[],
+            host_project_root=tmp_path,
+            docker_container_name="test-bare-container",
+            container_root="/workspace",
+            project_name="plain",
+            isolation_volume_entries=["iso_claude_root_local:/root/.local"],
+            isolation_volume_names=["iso_claude_root_local"],
+        )
+
+        # Stencil tier unused — no stencil_ volume entries or declarations.
+        assert "stencil_0_" not in compose
+        assert "stencil_1_" not in compose
+        volumes_section = _volumes_section(compose)
+        assert not any(
+            l.strip().startswith("stencil_") for l in volumes_section.split("\n")
+        )
+        assert "iso_claude_root_local:/root/.local" in compose
