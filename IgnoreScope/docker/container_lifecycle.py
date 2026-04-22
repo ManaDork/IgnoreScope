@@ -74,14 +74,23 @@ def _detached_init(
     docker_name: str,
     config: ScopeDockerConfig,
 ) -> OpResult:
-    """Populate detached mount_specs via docker cp + rm.
+    """Populate detached mount_specs via docker cp + rm (tree-seed) or mkdir (folder-seed).
 
     For each ``delivery == "detached"`` spec in ``config.mount_specs``:
+
+    Tree-seed (``content_seed == "tree"``, host_path set):
       1. cp the mount_root into its container path.
       2. cp each reveal pattern (negated) target into its container path.
       3. rm -rf each mask pattern target inside the container.
       4. Symlinks / Windows reparse points get a mkdir stub; traversal stops
          at the link so the target is never cp'd.
+
+    Folder-seed (``content_seed == "folder"``):
+      1. mkdir -p the container path. No cp walk. No mask/reveal (validator
+         rejects patterns on folder-seed specs).
+      2. Works for both host-backed folder-seed (``host_path`` set) and
+         container-only (``host_path is None``) — the latter's ``mount_root``
+         is interpreted as a container-logical path.
 
     Caller is responsible for only invoking this when at least one spec has
     ``delivery == "detached"`` (see dispatch site for bind-only skip). An
@@ -117,14 +126,28 @@ def _detached_init(
         )
 
     cp_pairs: list[tuple[Path, str]] = []
+    folder_seed_cpaths: list[str] = []
     rm_container_paths: list[str] = []
 
     for ms in detached_specs:
-        # L1 equivalent: the mount_root itself is cp'd.
-        cp_pairs.append((
-            ms.mount_root,
-            to_container_path(ms.mount_root, config.container_root, config.host_container_root),
-        ))
+        # Resolve this spec's container-side mount_root path. For container-only
+        # specs (host_path is None) mount_root is already container-logical;
+        # for host-backed specs translate via host_container_root → container_root.
+        if ms.host_path is None:
+            root_cpath = ms.mount_root.as_posix()
+        else:
+            root_cpath = to_container_path(
+                ms.mount_root, config.container_root, config.host_container_root,
+            )
+
+        if ms.content_seed == "folder":
+            # Folder-seed: mkdir only. Validator guarantees ms.patterns is empty.
+            folder_seed_cpaths.append(root_cpath)
+            continue
+
+        # Tree-seed: cp walk with mask/reveal. Validator guarantees host_path
+        # is set for tree-seed (container-only is folder-seed only).
+        cp_pairs.append((ms.mount_root, root_cpath))
         for pattern in ms.patterns:
             is_exception = pattern.startswith("!")
             folder = pattern.lstrip("!").rstrip("/")
@@ -143,14 +166,16 @@ def _detached_init(
                 # Mask → post-cp rm inside the container.
                 rm_container_paths.append(cpath)
 
-    # mkdir -p parents so cp targets exist before we copy into them.
-    parents: set[str] = set()
+    # mkdir -p: (a) parents of cp targets so cp can land, (b) full folder-seed
+    # container paths (no cp follows).
+    mkdir_targets: set[str] = set()
     for _, cpath in cp_pairs:
         parent_dir = str(PurePosixPath(cpath).parent)
         if parent_dir and parent_dir != config.container_root and parent_dir != "/":
-            parents.add(parent_dir)
-    if parents:
-        dir_ok, dir_msg = ensure_container_directories(docker_name, sorted(parents))
+            mkdir_targets.add(parent_dir)
+    mkdir_targets.update(folder_seed_cpaths)
+    if mkdir_targets:
+        dir_ok, dir_msg = ensure_container_directories(docker_name, sorted(mkdir_targets))
         if not dir_ok:
             return OpResult(
                 success=False,
@@ -171,6 +196,9 @@ def _detached_init(
         else:
             details.append(f"cp failed: {host_path} -> {cpath}: {msg}")
 
+    for cpath in folder_seed_cpaths:
+        details.append(f"folder-seed: mkdir -p {cpath}")
+
     # Apply masks by removing their container paths after the cp walk.
     for cpath in rm_container_paths:
         ok, _stdout, stderr = exec_in_container(docker_name, ["rm", "-rf", cpath])
@@ -183,7 +211,10 @@ def _detached_init(
 
     return OpResult(
         success=True,
-        message=f"Detached init: {n_ok}/{len(cp_pairs)} pairs cp'd",
+        message=(
+            f"Detached init: {n_ok}/{len(cp_pairs)} cp'd, "
+            f"{len(folder_seed_cpaths)} folder-seeded"
+        ),
         details=details,
     )
 

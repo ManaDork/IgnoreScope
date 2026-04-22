@@ -48,13 +48,30 @@ def _make_config(
     )
 
 
+_HOST_PATH_UNSET = object()
+
+
 def _spec(
     mount_root: Path,
     patterns: list[str],
     delivery: str = "detached",
+    *,
+    host_path: Path | None | object = _HOST_PATH_UNSET,
+    content_seed: str = "tree",
+    preserve_on_update: bool = False,
 ) -> MountSpecPath:
+    """Build a MountSpecPath with Phase 3 fields. host_path defaults to mount_root
+    for backward compat with pre-Phase 3 test authoring; pass ``host_path=None``
+    explicitly for container-only specs.
+    """
+    hp = mount_root if host_path is _HOST_PATH_UNSET else host_path
     return MountSpecPath(
-        mount_root=mount_root, patterns=list(patterns), delivery=delivery,
+        mount_root=mount_root,
+        patterns=list(patterns),
+        delivery=delivery,
+        host_path=hp,
+        content_seed=content_seed,
+        preserve_on_update=preserve_on_update,
     )
 
 
@@ -322,3 +339,127 @@ class TestIsReparsePoint:
 
     def test_missing_path_not_reparse(self, tmp_path: Path):
         assert _is_reparse_point(tmp_path / "nonexistent") is False
+
+
+# ──────────────────────────────────────────────
+# Phase 3: folder-seed + container-only branching
+# ──────────────────────────────────────────────
+
+
+class TestFolderSeedHostBacked:
+    """Folder-seed with host_path set → mkdir the container path, no cp walk."""
+
+    def test_folder_seed_mkdirs_no_cp(self, tmp_path: Path):
+        src = tmp_path / "workspace_dir"
+        src.mkdir()
+        config = _make_config(
+            tmp_path,
+            specs=[_spec(src, patterns=[], content_seed="folder")],
+        )
+
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_running",
+            return_value=(True, "ok"),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_directories",
+            return_value=(True, "dirs ok"),
+        ) as dirs, patch(
+            "IgnoreScope.docker.container_lifecycle.push_file_to_container",
+            return_value=(True, "ok"),
+        ) as push, patch(
+            "IgnoreScope.docker.container_lifecycle.exec_in_container",
+            return_value=(True, "", ""),
+        ) as exec_mock:
+            result = _detached_init("scope-x", config)
+
+        assert result.success is True
+        push.assert_not_called()
+        exec_mock.assert_not_called()
+        # Full container path is mkdir'd (not just parent).
+        all_mkdir_paths = [p for call in dirs.call_args_list for p in call.args[1]]
+        assert any(p.endswith("/workspace_dir") for p in all_mkdir_paths), (
+            f"Expected full mount_root mkdir, got: {all_mkdir_paths}"
+        )
+        assert any("folder-seed" in d for d in result.details)
+
+
+class TestContainerOnlyFolderSeed:
+    """Container-only spec (host_path=None) → mkdir container-logical mount_root."""
+
+    def test_container_only_mkdirs_without_host_read(self, tmp_path: Path):
+        # mount_root is container-logical (e.g., /workspace/cache); no host path.
+        container_path = Path("/workspace/cache")
+        config = _make_config(
+            tmp_path,
+            specs=[_spec(
+                container_path,
+                patterns=[],
+                content_seed="folder",
+                host_path=None,
+            )],
+        )
+
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_running",
+            return_value=(True, "ok"),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_directories",
+            return_value=(True, "dirs ok"),
+        ) as dirs, patch(
+            "IgnoreScope.docker.container_lifecycle.push_file_to_container",
+            return_value=(True, "ok"),
+        ) as push, patch(
+            "IgnoreScope.docker.container_lifecycle.exec_in_container",
+            return_value=(True, "", ""),
+        ) as exec_mock:
+            result = _detached_init("scope-x", config)
+
+        assert result.success is True
+        push.assert_not_called()
+        exec_mock.assert_not_called()
+        all_mkdir_paths = [p for call in dirs.call_args_list for p in call.args[1]]
+        # Container-logical path preserved as POSIX (no host-container-root translation).
+        assert "/workspace/cache" in all_mkdir_paths, (
+            f"Expected container-only /workspace/cache in mkdir set, "
+            f"got: {all_mkdir_paths}"
+        )
+
+    def test_container_only_mixed_with_host_backed_tree(self, tmp_path: Path):
+        """Mixed config: container-only folder-seed + host-backed tree-seed."""
+        src = tmp_path / "src"
+        src.mkdir()
+        container_only = Path("/workspace/cache")
+        config = _make_config(
+            tmp_path,
+            specs=[
+                _spec(src, patterns=[]),  # host-backed tree-seed
+                _spec(
+                    container_only,
+                    patterns=[],
+                    content_seed="folder",
+                    host_path=None,
+                ),
+            ],
+        )
+
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_running",
+            return_value=(True, "ok"),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_directories",
+            return_value=(True, "dirs ok"),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.push_file_to_container",
+            return_value=(True, "ok"),
+        ) as push, patch(
+            "IgnoreScope.docker.container_lifecycle.exec_in_container",
+            return_value=(True, "", ""),
+        ):
+            result = _detached_init("scope-x", config)
+
+        assert result.success is True
+        # Tree-seed host-backed spec still cp's its mount_root.
+        host_paths = [call.args[1] for call in push.call_args_list]
+        assert src in host_paths
+        # Container-only folder-seed did NOT push anything host-sourced.
+        assert container_only not in host_paths

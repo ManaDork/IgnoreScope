@@ -565,3 +565,77 @@ class TestPhase3Serialization:
         data = spec.to_dict(tmp_path)
         assert data["content_seed"] == "folder"
         assert data["delivery"] == "volume"
+
+
+class TestPhase3ValidateContainerOnlyRequiresFolderSeed:
+    """host_path=None (container-only) requires content_seed='folder'."""
+
+    def test_container_only_tree_seed_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/src"),
+            delivery="detached",
+            host_path=None,
+            content_seed="tree",
+        )
+        errors = spec.validate()
+        assert any("container-only" in e and "folder" in e for e in errors), (
+            f"Expected container-only-requires-folder error, got: {errors}"
+        )
+
+    def test_container_only_folder_seed_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/container/src"),
+            delivery="detached",
+            host_path=None,
+            content_seed="folder",
+        )
+        assert not any("container-only" in e for e in spec.validate())
+
+
+class TestPhase3ValidateFolderSeedRejectsPatterns:
+    """Folder-seed specs cannot carry mask/reveal patterns."""
+
+    def test_folder_seed_with_mask_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/"],
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="folder",
+        )
+        errors = spec.validate()
+        assert any("folder-seed" in e and "pattern" in e for e in errors), (
+            f"Expected folder-seed-disallows-patterns error, got: {errors}"
+        )
+
+    def test_folder_seed_with_reveal_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/", "!vendor/public/"],
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="folder",
+        )
+        errors = spec.validate()
+        assert any("folder-seed" in e and "pattern" in e for e in errors)
+
+    def test_folder_seed_empty_patterns_ok(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=[],
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="folder",
+        )
+        assert not any("folder-seed" in e for e in spec.validate())
+
+    def test_tree_seed_with_patterns_still_ok(self, tmp_path: Path):
+        """Regression: tree-seed + patterns is the baseline, must remain valid."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/", "!vendor/public/"],
+            delivery="detached",
+            host_path=tmp_path / "src",
+            content_seed="tree",
+        )
+        assert not any("folder-seed" in e for e in spec.validate())
