@@ -21,7 +21,9 @@ from PyQt6.QtWidgets import (
     QTreeView,
     QHeaderView,
     QAbstractItemView,
+    QInputDialog,
     QMenu,
+    QMessageBox,
 )
 
 from .delegates import TreeStyleDelegate
@@ -79,6 +81,7 @@ class ScopeView(QWidget):
     removeRequested = pyqtSignal(Path)
     startContainerRequested = pyqtSignal()
     stopContainerRequested = pyqtSignal()
+    recreateRequested = pyqtSignal()
 
     def __init__(
         self, tree: MountDataTree, parent: Optional[QWidget] = None,
@@ -147,38 +150,36 @@ class ScopeView(QWidget):
     # ── Header Context Menu ──────────────────────────────────────
 
     def _show_header_context_menu(self, pos: QPoint) -> None:
-        """Header RMB: Start/Stop container based on current state."""
-        scope_name = self._tree.current_scope
-        if not scope_name:
-            return
-        from ..gui.app import PLACEHOLDER_SCOPE
-        if scope_name == PLACEHOLDER_SCOPE:
-            return
-
-        from ..docker.names import build_docker_name
-        from ..docker.container_ops import get_container_info
-        docker_name = build_docker_name(self._tree.host_project_root, scope_name)
-        info = get_container_info(docker_name)
-        if info is None:
-            return
-
+        """Header RMB: Start/Stop container, with Phase 2 silent-no-op fallback."""
         menu = QMenu(self)
-        if info.get("running", False):
-            stop_action = QAction("Stop Container", menu)
-            stop_action.triggered.connect(self.stopContainerRequested.emit)
-            menu.addAction(stop_action)
-        else:
-            start_action = QAction("Start Container", menu)
-            start_action.triggered.connect(self.startContainerRequested.emit)
-            menu.addAction(start_action)
 
+        info = self._get_container_info()
+        if info is not None:
+            if info.get("running", False):
+                stop_action = QAction("Stop Container", menu)
+                stop_action.triggered.connect(self.stopContainerRequested.emit)
+                menu.addAction(stop_action)
+            else:
+                start_action = QAction("Start Container", menu)
+                start_action.triggered.connect(self.startContainerRequested.emit)
+                menu.addAction(start_action)
+
+        self._append_fallback_if_empty(menu)
         menu.exec(self._tree_view.header().mapToGlobal(pos))
 
     # ── Context Menu ──────────────────────────────────────────────
 
     def _show_context_menu(self, pos: QPoint) -> None:
+        index_at_pos = self._tree_view.indexAt(pos)
         selected_indexes = self._tree_view.selectionModel().selectedRows(0)
-        if not selected_indexes:
+
+        menu = QMenu(self)
+
+        # Empty area click — Scope Config gesture set.
+        if not index_at_pos.isValid() or not selected_indexes:
+            self._add_scope_config_gestures(menu, node=None)
+            self._append_fallback_if_empty(menu)
+            menu.exec(self._tree_view.viewport().mapToGlobal(pos))
             return
 
         nodes: list[MountDataNode] = []
@@ -188,22 +189,25 @@ class ScopeView(QWidget):
             if node is not None:
                 nodes.append(node)
         if not nodes:
+            self._add_scope_config_gestures(menu, node=None)
+            self._append_fallback_if_empty(menu)
+            menu.exec(self._tree_view.viewport().mapToGlobal(pos))
             return
-
-        menu = QMenu(self)
 
         if len(nodes) == 1:
             node = nodes[0]
             proxy_index = selected_indexes[0]
             if node.is_file:
                 self._build_file_menu(menu, node)
+            elif self._tree.get_spec_at(node.path) is not None:
+                self._add_scope_config_gestures(menu, node=node)
             else:
                 self._build_folder_menu(menu, node, proxy_index)
         else:
             self._build_multi_select_menu(menu, nodes)
 
-        if menu.actions():
-            menu.exec(self._tree_view.viewport().mapToGlobal(pos))
+        self._append_fallback_if_empty(menu)
+        menu.exec(self._tree_view.viewport().mapToGlobal(pos))
 
     def _build_file_menu(self, menu: QMenu, node: MountDataNode) -> None:
         """File context menu — state-dependent push/update/pull/remove."""
@@ -304,6 +308,153 @@ class ScopeView(QWidget):
             )
             info.setEnabled(False)
             menu.addAction(info)
+
+    # ── Scope Config Gesture State Machine ───────────────────────
+
+    def _add_scope_config_gestures(
+        self, menu: QMenu, node: Optional[MountDataNode],
+    ) -> None:
+        """Append the Scope Config Tree RMB state machine to ``menu``.
+
+        States (UX labels; internal delivery/content_seed in parens):
+          Empty-area / non-spec node:
+            Make Folder                          (detached / folder, host_path=None)
+            Make Permanent Folder ▸
+                No Recreate                      (detached / folder, preserve_on_update=True)
+                Volume Mount                     (volume / folder)
+          Existing detached+folder spec:
+            Mark Permanent | Unmark Permanent   (flip preserve_on_update)
+            Remove
+          Existing volume spec:
+            Remove
+        """
+        if node is None:
+            self._add_make_folder_actions(menu)
+            return
+
+        spec = self._tree.get_spec_at(node.path)
+        if spec is None:
+            self._add_make_folder_actions(menu)
+            return
+
+        if spec.delivery == "volume":
+            a = menu.addAction("Remove")
+            a.triggered.connect(lambda: self._on_remove_spec(node.path))
+            return
+
+        if spec.delivery == "detached" and spec.content_seed == "folder":
+            if spec.preserve_on_update:
+                a = menu.addAction("Unmark Permanent")
+                a.triggered.connect(
+                    lambda: self._tree.unmark_permanent(node.path),
+                )
+            else:
+                a = menu.addAction("Mark Permanent")
+                a.triggered.connect(
+                    lambda: self._tree.mark_permanent(node.path),
+                )
+            menu.addSeparator()
+            a = menu.addAction("Remove")
+            a.triggered.connect(lambda: self._on_remove_spec(node.path))
+
+    def _add_make_folder_actions(self, menu: QMenu) -> None:
+        a = menu.addAction("Make Folder")
+        a.triggered.connect(self._on_make_folder)
+
+        perm_menu = menu.addMenu("Make Permanent Folder")
+        a = perm_menu.addAction("No Recreate")
+        a.triggered.connect(self._on_make_permanent_no_recreate)
+        a = perm_menu.addAction("Volume Mount")
+        a.triggered.connect(self._on_make_permanent_volume)
+
+    # ── Scope Config Handlers ────────────────────────────────────
+
+    def _on_make_folder(self) -> None:
+        path = self._prompt_container_path(
+            "Make Folder", "Container-side path:",
+        )
+        if path is None:
+            return
+        self._tree.add_stencil_folder(path, preserve_on_update=False)
+
+    def _on_make_permanent_no_recreate(self) -> None:
+        path = self._prompt_container_path(
+            "Make Permanent Folder — No Recreate", "Container-side path:",
+        )
+        if path is None:
+            return
+        self._tree.add_stencil_folder(path, preserve_on_update=True)
+
+    def _on_make_permanent_volume(self) -> None:
+        path = self._prompt_container_path(
+            "Make Permanent Folder — Volume Mount", "Container-side path:",
+        )
+        if path is None:
+            return
+        if self._container_exists() and not self._confirm_recreate():
+            return
+        if self._tree.add_stencil_volume(path) and self._container_exists():
+            self.recreateRequested.emit()
+
+    def _on_remove_spec(self, path: Path) -> None:
+        self._tree.remove_spec_at(path)
+
+    # ── Dialog + Container Helpers ───────────────────────────────
+
+    def _prompt_container_path(
+        self, title: str, label: str,
+    ) -> Optional[Path]:
+        """QInputDialog prompt for a container-side absolute path.
+
+        Returns None on cancel or empty input. Accepts any non-empty string;
+        validator gates in LocalMountConfig reject bad paths.
+        """
+        text, accepted = QInputDialog.getText(self, title, label)
+        if not accepted:
+            return None
+        stripped = text.strip()
+        if not stripped:
+            return None
+        return Path(stripped)
+
+    def _confirm_recreate(self) -> bool:
+        """QMessageBox.question gate before Volume Mount triggers recreate."""
+        reply = QMessageBox.question(
+            self,
+            "Recreate Container",
+            "Adding a Volume Mount will recreate the container "
+            "to attach the new named volume.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _get_container_info(self) -> Optional[dict]:
+        """Query the current scope's container info, returns None if absent."""
+        scope_name = self._tree.current_scope
+        if not scope_name:
+            return None
+        from ..gui.app import PLACEHOLDER_SCOPE
+        if scope_name == PLACEHOLDER_SCOPE:
+            return None
+        host_root = self._tree.host_project_root
+        if host_root is None:
+            return None
+        from ..docker.names import build_docker_name
+        from ..docker.container_ops import get_container_info
+        docker_name = build_docker_name(host_root, scope_name)
+        return get_container_info(docker_name)
+
+    def _container_exists(self) -> bool:
+        return self._get_container_info() is not None
+
+    def _append_fallback_if_empty(self, menu: QMenu) -> None:
+        """Phase 2 silent-no-op fix: menus always exec with a discoverable entry."""
+        if menu.actions():
+            return
+        placeholder = QAction("No valid actions", menu)
+        placeholder.setEnabled(False)
+        menu.addAction(placeholder)
 
     # ── Batch Operations ──────────────────────────────────────────
 

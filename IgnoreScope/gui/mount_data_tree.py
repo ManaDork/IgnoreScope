@@ -564,6 +564,123 @@ class MountDataTree(QObject):
         """Remove reveal pattern (!vendor/) and recompute."""
         return self._apply_pattern_operation(path, "!", add=False)
 
+    # ── Stencil spec operations (Scope Config RMB gestures) ──────
+
+    def add_stencil_folder(
+        self, container_path: Path, *, preserve_on_update: bool = False,
+    ) -> bool:
+        """Add a container-only detached-folder spec.
+
+        UX: "Make Folder" (preserve_on_update=False) /
+            "Make Permanent Folder → No Recreate" (preserve_on_update=True).
+
+        Creates a MountSpecPath with ``delivery="detached"``,
+        ``content_seed="folder"``, and ``host_path=None``.
+        """
+        return self._add_stencil_spec(
+            container_path,
+            delivery="detached",
+            content_seed="folder",
+            preserve_on_update=preserve_on_update,
+        )
+
+    def add_stencil_volume(self, container_path: Path) -> bool:
+        """Add a container-only named-volume spec.
+
+        UX: "Make Permanent Folder → Volume Mount". Creates a MountSpecPath
+        with ``delivery="volume"``, ``content_seed="folder"``, and
+        ``host_path=None``. A Docker named volume is emitted in compose.
+        """
+        return self._add_stencil_spec(
+            container_path,
+            delivery="volume",
+            content_seed="folder",
+            preserve_on_update=False,
+        )
+
+    def _add_stencil_spec(
+        self,
+        container_path: Path,
+        *,
+        delivery: str,
+        content_seed: str,
+        preserve_on_update: bool,
+    ) -> bool:
+        from ..core.mount_spec_path import MountSpecPath
+
+        if any(ms.mount_root == container_path for ms in self._mount_specs):
+            return False
+        for ms in self._mount_specs:
+            if is_descendant(container_path, ms.mount_root) or is_descendant(
+                ms.mount_root, container_path,
+            ):
+                return False
+        self.aboutToMutate.emit()
+        self._mount_specs.append(
+            MountSpecPath(
+                mount_root=container_path,
+                delivery=delivery,
+                host_path=None,
+                content_seed=content_seed,
+                preserve_on_update=preserve_on_update,
+            ),
+        )
+        self._recompute_states()
+        self.mountSpecsChanged.emit()
+        return True
+
+    def mark_permanent(self, path: Path) -> bool:
+        """Flip preserve_on_update False→True on detached-folder spec at ``path``.
+
+        No-op (returns False) if the spec doesn't exist, is already permanent,
+        or isn't ``delivery="detached"`` + ``content_seed="folder"``.
+        """
+        for ms in self._mount_specs:
+            if ms.mount_root != path:
+                continue
+            if ms.preserve_on_update:
+                return False
+            if ms.delivery != "detached" or ms.content_seed != "folder":
+                return False
+            self.aboutToMutate.emit()
+            ms.preserve_on_update = True
+            self._recompute_states()
+            self.mountSpecsChanged.emit()
+            return True
+        return False
+
+    def unmark_permanent(self, path: Path) -> bool:
+        """Flip preserve_on_update True→False on the spec at ``path``."""
+        for ms in self._mount_specs:
+            if ms.mount_root != path:
+                continue
+            if not ms.preserve_on_update:
+                return False
+            self.aboutToMutate.emit()
+            ms.preserve_on_update = False
+            self._recompute_states()
+            self.mountSpecsChanged.emit()
+            return True
+        return False
+
+    def remove_spec_at(self, path: Path) -> bool:
+        """Remove the MountSpecPath whose mount_root equals ``path`` (any delivery)."""
+        for i, ms in enumerate(self._mount_specs):
+            if ms.mount_root == path:
+                self.aboutToMutate.emit()
+                self._mount_specs.pop(i)
+                self._recompute_states()
+                self.mountSpecsChanged.emit()
+                return True
+        return False
+
+    def get_spec_at(self, path: Path):
+        """Return the MountSpecPath whose mount_root equals ``path``, or None."""
+        for ms in self._mount_specs:
+            if ms.mount_root == path:
+                return ms
+        return None
+
     def restore_mount_specs(self, specs_data: list[dict]) -> None:
         """Restore mount_specs from serialized dicts (undo/redo).
 
