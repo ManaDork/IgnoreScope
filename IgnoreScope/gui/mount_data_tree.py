@@ -352,6 +352,18 @@ class MountDataTree(QObject):
     def root_node(self) -> Optional[MountDataNode]:
         return self._root_node
 
+    def unified_mount_specs(self) -> list:
+        """Return the unified mount_specs list: user specs + extension-synthesized.
+
+        Matches the list ``compute_container_hierarchy(extensions=...)`` consumes
+        (Phase 1 unification). Each call synthesizes fresh — cheap (small lists).
+        Used by the Scope Config Tree header's 3-signal resolver (Phase 3).
+        """
+        unified = list(self._mount_specs)
+        for ext in self._extensions:
+            unified.extend(ext.synthesize_mount_specs())
+        return unified
+
     def set_host_project_root(self, host_project_root: Path) -> None:
         """Phase 2: SCAN — raw filesystem tree, no states.
 
