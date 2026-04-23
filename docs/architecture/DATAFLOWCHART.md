@@ -469,6 +469,17 @@ MountDataTree.load_config(config)
             compute_node_state derives container_only=True from
             spec.host_path is None; compute_visibility emits "virtual"
             without any GUI-side direct-write to _states.
+
+          CORE-side consumer (cross-ref → COREFLOWCHART.md Phase 6a,
+            ARCHITECTUREGLOSSARY.md → "volume layering order"): the same
+            ExtensionConfig.synthesize_mount_specs() helper is also
+            consumed by compute_container_hierarchy(extensions=...) at
+            compose-generation time. Extension specs merge into
+            mount_specs and emit through the L_volume tier under
+            vol_{owner_segment}_{path}. There is no separate Layer 4
+            emission tier post Unify L4 Phase 1 Task 1.3. GUI calls
+            synthesize at load time (above); CORE calls it at compute
+            time — both paths route through the same MountSpecPath shape.
 ```
 
 ---

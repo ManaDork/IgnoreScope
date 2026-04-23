@@ -296,8 +296,12 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                              pattern, not the auth volume pattern).
 
                              compose.py: per-spec `- "{name}:{container_path}"`
-                             appears in services.volumes between L1-L3
-                             and Layer 4 isolation blocks; `name:`
+                             appears in services.volumes after the
+                             L1-L3 entries. Extension-synthesized
+                             isolation specs (auth, Claude, Git)
+                             share this same L_volume tier post Unify
+                             L4 Phase 1 Task 1.3 — there is no
+                             separate Layer 4 emission block. `name:`
                              appears in the top-level `volumes:`
                              section without extra options (empty
                              declaration → Docker creates/reattaches
@@ -320,9 +324,17 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                              name matches across the down/up cycle and
                              content persists without staging.
 
-    Layer 4 (isolation volumes for extensions — auth, Claude, Git)
-    are emitted regardless of any mount_spec delivery. They are
-    orthogonal to per-spec delivery choice.
+    Extension isolation paths (e.g. /root/.claude, /root/.local) are
+    NOT a separate Layer 4 emission tier post Unify L4 Phase 1 Task
+    1.3. ExtensionConfig.synthesize_mount_specs() materializes them
+    as container-only delivery="volume" specs, and
+    compute_container_hierarchy(extensions=...) merges them into
+    mount_specs at the top of the function. They flow through the
+    same L_volume tier as user-authored Volume Mounts and emit under
+    the unified vol_{owner_segment}_{path} naming scheme. The merge
+    happens regardless of any user-authored spec's delivery choice
+    — extensions still always emit, but via the unified pipeline,
+    not a side-channel.
 
     All deliveries share the `pushed_files` replay and extension
     reconciliation steps that follow. On container recreate, detached

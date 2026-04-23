@@ -505,11 +505,21 @@ For each MountSpecPath:
      - Non-negated (e.g., "vendor/public/tmp/") — named mask volume (re-hides)
   ...
 For each Sibling (same pattern-order structure)
-L_volume: Stencil volumes                        — named Docker volumes for
-                                                    delivery="volume" specs,
-                                                    emitted in mount_specs order
-                                                    after L1-L3 and before L4
-Final:    Isolation volumes                      — persistent, container-owned (Layer 4)
+L_volume: Volume tier                            — named Docker volumes for
+                                                    delivery="volume" specs:
+                                                    user-authored Volume Mounts
+                                                    plus extension-synthesized
+                                                    isolation paths (auth, Claude,
+                                                    Git). Emitted in mount_specs
+                                                    order after L1-L3. Post Unify
+                                                    L4 Phase 1 Task 1.3 there is
+                                                    no separate post-L_volume
+                                                    Layer 4 emission tier;
+                                                    extension specs are merged
+                                                    into mount_specs by
+                                                    compute_container_hierarchy(
+                                                    extensions=...) via
+                                                    ExtensionConfig.synthesize_mount_specs().
 ```
 
 Pattern order = volume declaration order = correct nested layering. A reveal after a mask re-exposes content; a mask after a reveal re-hides a subfolder within it.
