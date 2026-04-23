@@ -169,6 +169,7 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 - `MountDataNode.is_stencil_node: bool`, `MountDataNode.stencil_tier: str` (values: `mirrored`, `volume`, `auth`)
 - `MountSpecPath.get_stencil_paths()` — derives stencil paths from mask/reveal patterns
 - `MountSpecPath.owner: str` — `"user"` or `"extension:{name}"`. Discriminates user-authored specs from extension-synthesized specs. Foundation for the unified volume synthesizer, read-only RMB re-key, and volume-name derivation landing in Phase 1 Tasks 1.2–1.10 of `unify-l4-reclaim-isolation-term`. Task 1.1 adds the field; downstream tasks consume it.
+- `ExtensionConfig.synthesize_mount_specs() -> list[MountSpecPath]` — unified-synth entrypoint (Phase 1 Task 1.2). Translates `ExtensionConfig.isolation_paths` into container-only named-volume specs (`delivery="volume"`, `content_seed="folder"`, `host_path=None`, `owner="extension:{name}"`). Task 1.3 merges the output into the unified `mount_specs` list at `compute_container_hierarchy` top; the parallel `_collect_isolation_paths` helper and inline L4 loop retire in Tasks 1.3 / 1.5.
 - `_compute_stencil_paths_from_config()`, `_cross_reference_stencil_paths()` in `core/node_state.py`
 - `display_stencil_nodes: bool` on TreeDisplayConfig
 - Theme variables: `stencil.volume`, `stencil.auth`, `inherited.stencil_volume`, `inherited.stencil_auth`, `text_stencil_purple`
