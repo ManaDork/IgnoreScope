@@ -673,8 +673,8 @@ class TestComputeContainerHierarchy:
         h = ContainerHierarchy()
         assert h.ordered_volumes == []
         assert h.mask_volume_names == []
-        assert h.stencil_volume_entries == []
-        assert h.stencil_volume_names == []
+        assert h.volume_entries == []
+        assert h.volume_names == []
         assert h.revealed_parents == set()
         assert h.validation_errors == []
         assert h.visible_paths == set()
@@ -1097,16 +1097,17 @@ class TestWalkMirroredIntermediates:
 # pipeline: ExtensionConfig.synthesize_mount_specs() emits volume-delivery
 # MountSpecPaths that compute_container_hierarchy merges into mount_specs
 # and renders via _compute_volume_tier_entries. L4 output therefore lives
-# on hierarchy.stencil_volume_entries / stencil_volume_names under the
-# vol_{owner_segment}_{path} naming scheme (Task 1.4). The owner_segment
-# resolves to the sanitized extension name for extension-synthesized
-# specs and to `user` for user-authored delivery="volume" specs.
+# on hierarchy.volume_entries / volume_names (renamed from
+# stencil_volume_* in Task 1.6) under the vol_{owner_segment}_{path} naming
+# scheme (Task 1.4). The owner_segment resolves to the sanitized extension
+# name for extension-synthesized specs and to `user` for user-authored
+# delivery="volume" specs.
 
 class TestIsolationVolumes:
     """Verify Layer 4 isolation volume computation via extensions= synth path."""
 
     def test_isolation_paths_produce_volumes(self, tmp_path: Path):
-        """extensions → entries in stencil_volume_entries + stencil_volume_names."""
+        """extensions → entries in volume_entries + volume_names."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1118,14 +1119,14 @@ class TestIsolationVolumes:
             extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
 
-        # L4 lives in stencil_volume_entries, separate from ordered_volumes
-        assert len(hierarchy.stencil_volume_entries) == 1
-        assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
+        # L4 lives in volume_entries, separate from ordered_volumes
+        assert len(hierarchy.volume_entries) == 1
+        assert ":/root/.local" in hierarchy.volume_entries[0]
         assert not any("vol_" in v for v in hierarchy.ordered_volumes)
 
-        # Name tracked in stencil_volume_names
-        assert len(hierarchy.stencil_volume_names) == 1
-        assert hierarchy.stencil_volume_names[0].startswith("vol_claude_code_")
+        # Name tracked in volume_names
+        assert len(hierarchy.volume_names) == 1
+        assert hierarchy.volume_names[0].startswith("vol_claude_code_")
 
     def test_isolation_separate_from_ordered_volumes(self, tmp_path: Path):
         """L4 entries are stored separately from L1-L3 + siblings."""
@@ -1145,9 +1146,9 @@ class TestIsolationVolumes:
         # L1 mount + L2 mask + L3 reveal = 3 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 3
         assert not any("vol_" in v for v in hierarchy.ordered_volumes)
-        # L4 is in stencil_volume_entries
-        assert len(hierarchy.stencil_volume_entries) == 1
-        assert ":/usr/bin" in hierarchy.stencil_volume_entries[0]
+        # L4 is in volume_entries
+        assert len(hierarchy.volume_entries) == 1
+        assert ":/usr/bin" in hierarchy.volume_entries[0]
 
     def test_multiple_isolation_paths(self, tmp_path: Path):
         """Multiple isolation paths from different extensions."""
@@ -1168,13 +1169,13 @@ class TestIsolationVolumes:
             ],
         )
 
-        assert len(hierarchy.stencil_volume_names) == 2
-        assert len(hierarchy.stencil_volume_entries) == 2
-        assert any("/root/.local" in v for v in hierarchy.stencil_volume_entries)
-        assert any("/usr/local/lib/p4-mcp-server" in v for v in hierarchy.stencil_volume_entries)
+        assert len(hierarchy.volume_names) == 2
+        assert len(hierarchy.volume_entries) == 2
+        assert any("/root/.local" in v for v in hierarchy.volume_entries)
+        assert any("/usr/local/lib/p4-mcp-server" in v for v in hierarchy.volume_entries)
 
     def test_no_isolation_paths_empty_list(self, tmp_path: Path):
-        """No extensions → stencil_volume_names stays empty."""
+        """No extensions → volume_names stays empty."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1185,7 +1186,7 @@ class TestIsolationVolumes:
             host_container_root=tmp_path,
         )
 
-        assert hierarchy.stencil_volume_names == []
+        assert hierarchy.volume_names == []
 
     def test_isolation_volume_naming_extension(self, tmp_path: Path):
         """Extension-synth volume name is vol_{sanitized_ext_name}_{sanitized_path}."""
@@ -1200,7 +1201,7 @@ class TestIsolationVolumes:
             extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
 
-        name = hierarchy.stencil_volume_names[0]
+        name = hierarchy.volume_names[0]
         assert name.startswith("vol_claude_code_")
         assert "root" in name.lower()
         # No slashes or invalid chars
@@ -1225,8 +1226,8 @@ class TestIsolationVolumes:
             host_project_root=tmp_path,
             host_container_root=tmp_path,
         )
-        assert len(hierarchy.stencil_volume_names) == 1
-        assert hierarchy.stencil_volume_names[0].startswith("vol_user_")
+        assert len(hierarchy.volume_names) == 1
+        assert hierarchy.volume_names[0].startswith("vol_user_")
 
     def test_isolation_with_siblings(self, tmp_path: Path):
         """Isolation volumes are separate from sibling volumes."""
@@ -1251,8 +1252,8 @@ class TestIsolationVolumes:
         assert len(hierarchy.ordered_volumes) == 2
         assert not any("vol_" in v for v in hierarchy.ordered_volumes)
         # L4 is tracked separately
-        assert len(hierarchy.stencil_volume_entries) == 1
-        assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
+        assert len(hierarchy.volume_entries) == 1
+        assert ":/root/.local" in hierarchy.volume_entries[0]
 
 
 # ──────────────────────────────────────────────
@@ -1334,7 +1335,7 @@ class TestPerSpecDelivery:
         assert "/workspace/src/vendor" in hidden
 
     def test_l4_still_emitted_for_all_detached_scope(self, tmp_path: Path):
-        """An all-detached scope still emits L4 isolation volumes (via stencil path)."""
+        """An all-detached scope still emits L4 isolation volumes (via unified volume tier)."""
         src = tmp_path / "src"
         detached = MountSpecPath(
             mount_root=src, patterns=[], delivery="detached",
@@ -1350,8 +1351,8 @@ class TestPerSpecDelivery:
         )
         assert hierarchy.ordered_volumes == []
         assert hierarchy.mask_volume_names == []
-        assert len(hierarchy.stencil_volume_entries) == 1
-        assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
+        assert len(hierarchy.volume_entries) == 1
+        assert ":/root/.local" in hierarchy.volume_entries[0]
 
     def test_bind_only_scope_byte_identical_to_legacy_baseline(self, tmp_path: Path):
         """A scope built without ever mentioning delivery matches bind-by-default output."""
@@ -1484,7 +1485,7 @@ class TestStencilVolumes:
 
 
 class TestStencilVolumeHierarchyIntegration:
-    """End-to-end: compute_container_hierarchy populates stencil_volume_* fields."""
+    """End-to-end: compute_container_hierarchy populates volume_* fields."""
 
     def test_hierarchy_exposes_stencil_volumes(self, tmp_path: Path):
         """Volume-delivery spec surfaces on hierarchy fields for compose consumption."""
@@ -1503,8 +1504,8 @@ class TestStencilVolumeHierarchyIntegration:
             host_project_root=tmp_path,
             host_container_root=tmp_path,
         )
-        assert len(hierarchy.stencil_volume_entries) == 1
-        assert len(hierarchy.stencil_volume_names) == 1
-        assert hierarchy.stencil_volume_entries[0].endswith(":/workspace/perm")
+        assert len(hierarchy.volume_entries) == 1
+        assert len(hierarchy.volume_names) == 1
+        assert hierarchy.volume_entries[0].endswith(":/workspace/perm")
 
 

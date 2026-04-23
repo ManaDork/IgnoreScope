@@ -625,8 +625,8 @@ def execute_create(
             docker_volume_name=volume_name,
             container_root=config.container_root,
             project_name=host_project_root.name,
-            stencil_volume_entries=hierarchy.stencil_volume_entries,
-            stencil_volume_names=hierarchy.stencil_volume_names,
+            volume_entries=hierarchy.volume_entries,
+            volume_names=hierarchy.volume_names,
             ports=config.ports if config.ports else None,
         )
     except Exception as e:
@@ -821,8 +821,9 @@ def execute_update(
     )
     old_mask_names = set(old_hierarchy.mask_volume_names)
     # Vestigial clause (no-op) retained for Task 1.8 formal removal: since
-    # Task 1.3 unified the L4 emit into stencil_volume_*, the separate
-    # isolation_volume_* fields have been deleted (Task 1.4). Sourcing from
+    # Task 1.3 unified the L4 emit into the single volume tier (Task 1.4
+    # removed the parallel `isolation_volume_*` fields; Task 1.6 renamed
+    # the surviving `stencil_volume_*` fields to `volume_*`). Sourcing from
     # empty-set literals preserves the `(old_iso - new_iso)` orphan-diff
     # shape for Task 1.8 to strip cleanly.
     old_iso_names: set[str] = set()
@@ -900,8 +901,8 @@ def execute_update(
                 docker_volume_name=volume_name,
                 container_root=config.container_root,
                 project_name=host_project_root.name,
-                stencil_volume_entries=new_hierarchy.stencil_volume_entries,
-                stencil_volume_names=new_hierarchy.stencil_volume_names,
+                volume_entries=new_hierarchy.volume_entries,
+                volume_names=new_hierarchy.volume_names,
                 ports=config.ports if config.ports else None,
             )
         except Exception as e:

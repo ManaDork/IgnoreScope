@@ -217,14 +217,14 @@ class TestExecuteUpdate:
 
 
 # =============================================================================
-# Compose: stencil volume declaration
+# Compose: L_volume tier declaration
 # =============================================================================
 
-class TestComposeStencilVolumes:
-    """Verify generate_compose_with_masks declares stencil volumes."""
+class TestComposeVolumeTier:
+    """Verify generate_compose_with_masks declares L_volume tier volumes."""
 
-    def test_stencil_volumes_in_volumes_section(self, tmp_path: Path):
-        """stencil_volume_names → declared in top-level volumes section."""
+    def test_volume_names_in_volumes_section(self, tmp_path: Path):
+        """volume_names → declared in top-level volumes section."""
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
@@ -232,11 +232,11 @@ class TestComposeStencilVolumes:
             mask_volume_names=[],
             host_project_root=tmp_path,
             docker_container_name="test-container",
-            stencil_volume_entries=["vol_claude_root_.local:/root/.local"],
-            stencil_volume_names=["vol_claude_root_.local"],
+            volume_entries=["vol_claude_root_.local:/root/.local"],
+            volume_names=["vol_claude_root_.local"],
         )
 
-        # Volume appears in services.volumes (from stencil_volume_entries)
+        # Volume appears in services.volumes (from volume_entries)
         assert "vol_claude_root_.local:/root/.local" in compose
         # Volume declared in top-level volumes section
         lines = compose.split("\n")
@@ -244,8 +244,8 @@ class TestComposeStencilVolumes:
         volumes_section = "\n".join(lines[volumes_section_idx:])
         assert "  vol_claude_root_.local:" in volumes_section
 
-    def test_no_stencil_volumes_no_change(self, tmp_path: Path):
-        """No stencil_volume_names → output has no vol_* entries."""
+    def test_no_volumes_no_change(self, tmp_path: Path):
+        """No volume_names → output has no vol_* entries."""
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
@@ -253,13 +253,13 @@ class TestComposeStencilVolumes:
             mask_volume_names=[],
             host_project_root=tmp_path,
             docker_container_name="test-container",
-            stencil_volume_names=[],
+            volume_names=[],
         )
 
         assert "vol_" not in compose
 
-    def test_both_mask_and_stencil_declared(self, tmp_path: Path):
-        """Both mask and stencil volumes appear in volumes section."""
+    def test_both_mask_and_volume_tier_declared(self, tmp_path: Path):
+        """Both mask and L_volume tier volumes appear in volumes section."""
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
@@ -267,8 +267,8 @@ class TestComposeStencilVolumes:
             mask_volume_names=["mask_src_api"],
             host_project_root=tmp_path,
             docker_container_name="test-container",
-            stencil_volume_entries=["vol_claude_root_.local:/root/.local"],
-            stencil_volume_names=["vol_claude_root_.local"],
+            volume_entries=["vol_claude_root_.local:/root/.local"],
+            volume_names=["vol_claude_root_.local"],
         )
 
         lines = compose.split("\n")
