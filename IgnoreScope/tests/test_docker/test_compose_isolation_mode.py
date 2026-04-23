@@ -48,7 +48,7 @@ def _rich_hierarchy(tmp_path: Path):
 
     Post-Task-1.3, extension isolation paths flow through the unified-synth
     pipeline; L4 output surfaces on ``stencil_volume_entries`` / ``stencil_volume_names``
-    under the ``stencil_{idx}_{path}`` naming scheme.
+    under the ``vol_{owner_segment}_{path}`` naming scheme introduced in Task 1.4.
     """
     src = tmp_path / "src"
     api = src / "api"
@@ -99,9 +99,9 @@ class TestHybridMode:
         assert "mask_" in compose
         volumes_section = _volumes_section(compose)
         assert any(l.strip().startswith("mask_") for l in volumes_section.split("\n"))
-        # L4 stencil isolation volume mount + declaration (post-Task-1.3)
-        assert "stencil_" in compose
-        assert any(l.strip().startswith("stencil_") for l in volumes_section.split("\n"))
+        # L4 stencil isolation volume mount + declaration (post-Task-1.3 / 1.4)
+        assert "vol_" in compose
+        assert any(l.strip().startswith("vol_") for l in volumes_section.split("\n"))
         # Auth volume preserved
         assert "test-hybrid-claude-auth" in compose
         # Container config preserved
@@ -142,7 +142,7 @@ class TestIsolationMode:
         sten_name = hierarchy.stencil_volume_names[0]
         assert f"{sten_name}:/root/.local" in compose
         volumes_section = _volumes_section(compose)
-        assert any(l.strip().startswith("stencil_") for l in volumes_section.split("\n"))
+        assert any(l.strip().startswith("vol_") for l in volumes_section.split("\n"))
         # Auth volume preserved
         assert "test-isolation-claude-auth" in compose
         # Container config preserved
@@ -178,11 +178,11 @@ class TestIsolationMode:
             docker_container_name="test-l4-only",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=["stencil_0_root_local:/root/.local"],
-            stencil_volume_names=["stencil_0_root_local"],
+            stencil_volume_entries=["vol_claude_code_root_.local:/root/.local"],
+            stencil_volume_names=["vol_claude_code_root_.local"],
         )
 
-        assert "stencil_0_root_local:/root/.local" in compose
+        assert "vol_claude_code_root_.local:/root/.local" in compose
         assert "# === Volume layers" in compose
         assert "mask_" not in compose
 
@@ -203,15 +203,15 @@ class TestStencilVolumeMode:
             docker_container_name="test-volume",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=["stencil_0_workspace_cache:/workspace/cache"],
-            stencil_volume_names=["stencil_0_workspace_cache"],
+            stencil_volume_entries=["vol_user_workspace_cache:/workspace/cache"],
+            stencil_volume_names=["vol_user_workspace_cache"],
         )
 
-        assert "stencil_0_workspace_cache:/workspace/cache" in compose
+        assert "vol_user_workspace_cache:/workspace/cache" in compose
         assert "# === Volume layers" in compose
         volumes_section = _volumes_section(compose)
         assert any(
-            l.strip().startswith("stencil_0_workspace_cache:")
+            l.strip().startswith("vol_user_workspace_cache:")
             for l in volumes_section.split("\n")
         )
 
@@ -223,9 +223,9 @@ class TestStencilVolumeMode:
         # user-declared volume-delivery spec. Post-Task-1.3 both live on the
         # stencil_volume_* output lists; compose renders the unified list.
         stencil_entries = list(hierarchy.stencil_volume_entries) + [
-            "stencil_1_workspace_data:/workspace/data",
+            "vol_user_workspace_data:/workspace/data",
         ]
-        stencil_names = list(hierarchy.stencil_volume_names) + ["stencil_1_workspace_data"]
+        stencil_names = list(hierarchy.stencil_volume_names) + ["vol_user_workspace_data"]
 
         compose = generate_compose_with_masks(
             ordered_volumes=hierarchy.ordered_volumes,
@@ -239,10 +239,10 @@ class TestStencilVolumeMode:
         )
 
         assert "mask_" in compose
-        assert "stencil_1_workspace_data:/workspace/data" in compose
+        assert "vol_user_workspace_data:/workspace/data" in compose
         volumes_section = _volumes_section(compose)
         assert any(
-            l.strip().startswith("stencil_1_workspace_data:")
+            l.strip().startswith("vol_user_workspace_data:")
             for l in volumes_section.split("\n")
         )
         # L4 extension stencil entry also renders.
@@ -258,14 +258,14 @@ class TestStencilVolumeMode:
             docker_container_name="test-bare-container",
             container_root="/workspace",
             project_name="plain",
-            stencil_volume_entries=["stencil_0_root_local:/root/.local"],
-            stencil_volume_names=["stencil_0_root_local"],
+            stencil_volume_entries=["vol_claude_code_root_.local:/root/.local"],
+            stencil_volume_names=["vol_claude_code_root_.local"],
         )
 
         # Only the single L4-origin stencil volume is present.
-        assert "stencil_0_root_local:/root/.local" in compose
+        assert "vol_claude_code_root_.local:/root/.local" in compose
         volumes_section = _volumes_section(compose)
         stencil_lines = [
-            l for l in volumes_section.split("\n") if l.strip().startswith("stencil_")
+            l for l in volumes_section.split("\n") if l.strip().startswith("vol_")
         ]
         assert len(stencil_lines) == 1

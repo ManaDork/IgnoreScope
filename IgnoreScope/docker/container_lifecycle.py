@@ -644,8 +644,6 @@ def execute_create(
             docker_volume_name=volume_name,
             container_root=config.container_root,
             project_name=host_project_root.name,
-            isolation_volume_entries=hierarchy.isolation_volume_entries,
-            isolation_volume_names=hierarchy.isolation_volume_names,
             stencil_volume_entries=hierarchy.stencil_volume_entries,
             stencil_volume_names=hierarchy.stencil_volume_names,
             ports=config.ports if config.ports else None,
@@ -841,7 +839,12 @@ def execute_update(
         extensions=old_config.extensions or None,
     )
     old_mask_names = set(old_hierarchy.mask_volume_names)
-    old_iso_names = set(old_hierarchy.isolation_volume_names)
+    # Vestigial clause (no-op) retained for Task 1.8 formal removal: since
+    # Task 1.3 unified the L4 emit into stencil_volume_*, the separate
+    # isolation_volume_* fields have been deleted (Task 1.4). Sourcing from
+    # empty-set literals preserves the `(old_iso - new_iso)` orphan-diff
+    # shape for Task 1.8 to strip cleanly.
+    old_iso_names: set[str] = set()
 
     # ── Phase 2: Preflight new config ──
     preflight = preflight_update(host_project_root, config)
@@ -859,7 +862,7 @@ def execute_update(
         extensions=config.extensions or None,
     )
     new_mask_names = set(new_hierarchy.mask_volume_names)
-    new_iso_names = set(new_hierarchy.isolation_volume_names)
+    new_iso_names: set[str] = set()
 
     # ── Phase 4: Detect orphan volumes (masks + isolation) ──
     orphan_volumes = (old_mask_names - new_mask_names) | (old_iso_names - new_iso_names)
@@ -916,8 +919,6 @@ def execute_update(
                 docker_volume_name=volume_name,
                 container_root=config.container_root,
                 project_name=host_project_root.name,
-                isolation_volume_entries=new_hierarchy.isolation_volume_entries,
-                isolation_volume_names=new_hierarchy.isolation_volume_names,
                 stencil_volume_entries=new_hierarchy.stencil_volume_entries,
                 stencil_volume_names=new_hierarchy.stencil_volume_names,
                 ports=config.ports if config.ports else None,

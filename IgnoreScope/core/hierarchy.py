@@ -52,10 +52,8 @@ class ContainerHierarchy:
     Attributes:
         ordered_volumes: Layer 1-3 + sibling volume entries (project content) for docker-compose.yml
         mask_volume_names: Named mask volumes for compose volumes section
-        stencil_volume_entries: L_volume entries for delivery="volume" specs (stencil tier, survives recreate)
-        stencil_volume_names: Named stencil volumes for compose volumes section (L_volume)
-        isolation_volume_entries: Layer 4 volume entries (container-owned, delivery-mode-independent)
-        isolation_volume_names: Named isolation volumes for compose volumes section (Layer 4)
+        stencil_volume_entries: L_volume entries for delivery="volume" specs (user + extension-synthesized); survives recreate
+        stencil_volume_names: Named volume-tier volumes for compose volumes section
         revealed_parents: Container paths needing mkdir -p before docker cp (pushed files)
         validation_errors: Configuration problems found during computation
         visible_paths: All visible container paths (for UI/debugging)
@@ -64,29 +62,28 @@ class ContainerHierarchy:
 
     # For docker-compose.yml generation — Layer 1-3 + siblings (bind-delivery
     # project content only; detached-delivery specs emit nothing here).
-    # L4 isolation entries live in isolation_volume_entries and are emitted
-    # regardless of any spec's delivery.
+    # Extension-owned volume-tier entries share the stencil_volume_entries
+    # list with user-authored delivery="volume" specs; Task 1.3 collapsed
+    # the former parallel L4 emit.
     ordered_volumes: list[str] = field(default_factory=list)
 
     # Named mask volumes declared in docker-compose.yml volumes section
     mask_volume_names: list[str] = field(default_factory=list)
 
-    # L_volume: volume entries for delivery="volume" specs (e.g.
-    # "stencil_0_workspace_cache:/workspace/cache"). Backed by named Docker
+    # L_volume: volume entries for every delivery="volume" spec (user +
+    # extension-synthesized). Names take the shape
+    # `vol_{owner_segment}_{sanitized_path}` — `owner_segment` is `user`
+    # for user-authored specs and the extension name (minus the
+    # `extension:` prefix) for synthesized specs. Backed by named Docker
     # volumes that survive ordinary compose up/down (destroyed only by
     # `compose down -v`). Separate from ordered_volumes because volume-
     # delivery emits different YAML shape and must not participate in
     # bind-order pattern interleaving.
     stencil_volume_entries: list[str] = field(default_factory=list)
 
-    # Named stencil volumes declared in docker-compose.yml volumes section (L_volume)
+    # Named volume-tier volumes declared in docker-compose.yml volumes
+    # section (names follow the `vol_{owner_segment}_{path}` shape).
     stencil_volume_names: list[str] = field(default_factory=list)
-
-    # Layer 4 volume entries (e.g. "iso_foo_root_local:/root/.local")
-    isolation_volume_entries: list[str] = field(default_factory=list)
-
-    # Named isolation volumes declared in docker-compose.yml volumes section (Layer 4)
-    isolation_volume_names: list[str] = field(default_factory=list)
 
     # For mkdir -p before pushing revealed/pushed files
     revealed_parents: set[str] = field(default_factory=set)
@@ -325,37 +322,49 @@ def _compute_volume_entries(
     return entries, mask_names, visible, hidden
 
 
-def _derive_stencil_volume_name(spec_index: int, container_path: str) -> str:
+def _derive_volume_name(owner: str, container_path: str) -> str:
     """Derive a stable Docker volume name for a delivery='volume' spec.
 
-    Shape: `stencil_{spec_index}_{sanitized_container_path}`. Same spec →
-    same name across config round-trip, matching the AC-4.4 stability
-    contract. Cross-scope uniqueness is provided by docker compose project
-    namespacing (no explicit `name:` set on the volume declaration).
+    Shape: `vol_{owner_segment}_{sanitized_container_path}`. The owner
+    discriminator drives the segment: `owner == "user"` yields
+    `owner_segment = "user"`; `owner.startswith("extension:")` yields
+    the extension name suffix (e.g. `owner="extension:claude"` →
+    `owner_segment="claude"`). Cross-scope uniqueness is delivered by
+    docker compose project namespacing (no explicit `name:` set on the
+    volume declaration).
     """
+    if owner == "user":
+        owner_segment = "user"
+    elif owner.startswith("extension:"):
+        owner_segment = sanitize_volume_name(owner.split(":", 1)[1])
+    else:
+        raise ValueError(f"Unknown owner format: {owner!r}")
     key = sanitize_volume_name(container_path.strip('/').replace('/', '_'))
-    return f"stencil_{spec_index}_{key}"
+    return f"vol_{owner_segment}_{key}"
 
 
-def _compute_stencil_volumes(
+def _compute_volume_tier_entries(
     mount_specs: list['MountSpecPath'],
     container_root: str,
     host_container_root: Path,
 ) -> tuple[list[str], list[str]]:
-    """Compute L_volume entries for delivery='volume' specs.
+    """Compute L_volume entries for every delivery='volume' spec.
 
+    Consumes the unified mount_specs list after extension-synthesized
+    specs have been merged in (see `compute_container_hierarchy`).
     volume-delivery specs emit a single named-volume mount at mount_root;
     validator guarantees content_seed='folder' so no pattern walk is needed.
-    host_path is None (container-only) for Phase 3; the mount_root is
-    interpreted as a container-logical path directly.
+    When `host_path is None` (container-only), the mount_root is interpreted
+    as a container-logical path directly.
 
     Returns:
-        Tuple of (stencil_volume_entries, stencil_volume_names) in spec
-        order. Empty lists when no volume-delivery specs exist.
+        Tuple of (volume_entries, volume_names) in spec order. Names take
+        the `vol_{owner_segment}_{path}` shape via `_derive_volume_name`.
+        Empty lists when no volume-delivery specs exist.
     """
     entries: list[str] = []
     names: list[str] = []
-    for idx, ms in enumerate(mount_specs):
+    for ms in mount_specs:
         if ms.delivery != "volume":
             continue
         if ms.host_path is None:
@@ -364,7 +373,7 @@ def _compute_stencil_volumes(
             container_path = to_container_path(
                 ms.mount_root, container_root, host_container_root,
             )
-        vol_name = _derive_stencil_volume_name(idx, container_path)
+        vol_name = _derive_volume_name(ms.owner, container_path)
         entries.append(f"{vol_name}:{container_path}")
         names.append(vol_name)
     return entries, names
@@ -469,7 +478,7 @@ def compute_container_hierarchy(
     """Compute complete container hierarchy from configuration.
 
     Single function computing ALL hierarchy logic. Used by:
-    - compose.py: uses ordered_volumes, mask_volume_names, stencil_volume_entries, stencil_volume_names, isolation_volume_entries, isolation_volume_names
+    - compose.py: uses ordered_volumes, mask_volume_names, stencil_volume_entries, stencil_volume_names
     - validation: checks validation_errors
     - file_ops.py: uses revealed_parents
     - Future UI: uses visible_paths, masked_paths
@@ -499,7 +508,7 @@ def compute_container_hierarchy(
     # into the primary mount_specs list before any downstream computation.
     # The synth output is `delivery="volume"` + `owner="extension:{name}"`,
     # so extension isolation paths are emitted through the shared volume-
-    # tier path (`_compute_stencil_volumes`) — no separate L4 loop needed.
+    # tier path (`_compute_volume_tier_entries`) — no separate L4 loop needed.
     if extensions:
         synthesized: list['MountSpecPath'] = []
         for ext in extensions:
@@ -537,16 +546,16 @@ def compute_container_hierarchy(
             for err in s_errs:
                 hierarchy.validation_errors.append(f"[{sibling.container_path}] {err}")
 
-    # L_volume: Named volumes for delivery="volume" specs (stencil tier).
-    # Iterated over the primary mount_specs only — sibling volume-delivery
-    # is not a Phase 3 gesture. Both user-authored and extension-synthesized
-    # volume specs share this emission path (extension specs carry
+    # L_volume: Named volumes for delivery="volume" specs. Iterated over
+    # the primary mount_specs only — sibling volume-delivery is not a
+    # Phase 3 gesture. Both user-authored and extension-synthesized volume
+    # specs share this emission path (extension specs carry
     # ``owner="extension:{name}"``; user specs carry ``owner="user"``).
-    # Naming discriminator via ``owner`` lands in Task 1.4.
-    stencil_entries, stencil_names = _compute_stencil_volumes(
+    # Names take the ``vol_{owner_segment}_{path}`` shape.
+    volume_entries, volume_names = _compute_volume_tier_entries(
         mount_specs, container_root, host_container_root,
     )
-    hierarchy.stencil_volume_entries = stencil_entries
-    hierarchy.stencil_volume_names = stencil_names
+    hierarchy.stencil_volume_entries = volume_entries
+    hierarchy.stencil_volume_names = volume_names
 
     return hierarchy
