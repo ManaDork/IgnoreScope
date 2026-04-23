@@ -731,18 +731,6 @@ class MountDataTree(QObject):
                     return synth
         return None
 
-    def set_extensions(self, extensions: list) -> None:
-        """Replace tracked extensions and re-emit L4 auth stencils.
-
-        Called from container_ops_ui after extension install/uninstall so the
-        Scope Config Tree refreshes its L4 stencil node set without a full
-        config reload.
-        """
-        self._extensions = list(extensions)
-        self._rebuild_extension_stencil_nodes()
-        self._recompute_states()
-        self.structureChanged.emit()
-
     def restore_mount_specs(self, specs_data: list[dict]) -> None:
         """Restore mount_specs from serialized dicts (undo/redo).
 
