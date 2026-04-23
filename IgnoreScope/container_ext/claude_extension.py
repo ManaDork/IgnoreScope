@@ -57,8 +57,14 @@ class ClaudeInstaller(ExtensionInstaller):
     # =========================================================================
 
     def get_isolation_paths(self) -> list[str]:
-        """Claude CLI installs to /root/.local/bin/ and /root/.local/lib/."""
-        return ["/root/.local"]
+        """Container paths needing persistent named-volume isolation.
+
+        - ``/root/.local`` — Claude CLI binary + libraries (native installer target).
+        - ``/root/.claude`` — authenticated session state (formerly the ad-hoc
+          ``{docker_name}-claude-auth`` volume; unified into the standard extension
+          synth pipeline in Task 1.7 of ``unify-l4-reclaim-isolation-term``).
+        """
+        return ["/root/.local", "/root/.claude"]
 
     def get_install_commands(self, method: DeployMethod) -> list[list[str]]:
         """Get installation commands for runtime deployment.

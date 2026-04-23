@@ -11,7 +11,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..core.constants import CONTAINER_CLAUDE_AUTH
 from ..core.config import DEFAULT_CONTAINER_ROOT
 from ..utils.strings import sanitize_volume_name
 
@@ -73,7 +72,6 @@ def generate_compose_with_masks(
     extra_mounts: list | None = None,
     docker_container_name: str = "",
     docker_image_name: str = "",
-    docker_volume_name: str = "",
     container_root: str = DEFAULT_CONTAINER_ROOT,
     volume_entries: list[str] | None = None,
     volume_names: list[str] | None = None,
@@ -83,6 +81,11 @@ def generate_compose_with_masks(
 
     Compose formats YAML — it never derives volume entries.
     Volume ordering and layering is computed by hierarchy.py.
+
+    Claude auth (``/root/.claude``) flows through the unified extension-synth
+    pipeline as a ``vol_*`` entry on ``volume_entries`` / ``volume_names`` —
+    no special-case block. The standalone ``{name}-claude-auth`` naming
+    scheme was retired in Task 1.7 of ``unify-l4-reclaim-isolation-term``.
 
     Args:
         ordered_volumes: Pre-computed volume entries from ContainerHierarchy
@@ -94,11 +97,11 @@ def generate_compose_with_masks(
         extra_mounts: Additional mount objects prepended before base mounts
         docker_container_name: Explicit container name (overrides auto-derived)
         docker_image_name: Explicit image name (overrides auto-derived)
-        docker_volume_name: Explicit volume name (overrides auto-derived)
         container_root: Container root path (default: /workspace)
         volume_entries: L_volume entries for every ``delivery="volume"`` spec
-            (user-authored + extension-synthesized) — ``"name:container_path"``
-            format, survives ``docker compose up/down`` by design
+            (user-authored + extension-synthesized, including Claude auth) —
+            ``"name:container_path"`` format, survives ``docker compose up/down``
+            by design
         volume_names: Named L_volume volumes for the top-level volumes section
             (one-to-one with ``volume_entries``)
         ports: List of port mappings (e.g., ["3900:3900", "8080:8080"])
@@ -109,14 +112,11 @@ def generate_compose_with_masks(
     now = datetime.now().strftime("%Y-%m-%d")
     name = project_name or host_project_root.name
 
-    # Use explicit names if provided, otherwise fall back to legacy naming
     if docker_container_name:
         container_name = docker_container_name
         image_name = docker_image_name or f"{container_name}:latest"
-        volume_name = docker_volume_name or f"{container_name}-claude-auth"
         compose_project_name = sanitize_volume_name(container_name)
     else:
-        volume_name = f"{sanitize_volume_name(name)}-claude-auth"
         container_name = f"claude-{sanitize_volume_name(name)}"
         image_name = image or f"{container_name}:latest"
         compose_project_name = sanitize_volume_name(name)
@@ -137,13 +137,10 @@ def generate_compose_with_masks(
         f"    image: {image_name}",
         "    build: .",
         "    volumes:",
-        "      # === Auth volume (named - persists across rebuilds) ===",
-        f"      - \"{volume_name}:{CONTAINER_CLAUDE_AUTH}\"",
     ]
 
     # Extra mounts (e.g. .llm → .claude, .igs → .ignore_scope)
     if extra_mounts:
-        lines.append("")
         lines.append("      # === Extra mounts ===")
         for mount in extra_mounts:
             comment = f"  # {mount.get('reason', '')}" if isinstance(mount, dict) and mount.get('reason') else ""
@@ -155,11 +152,9 @@ def generate_compose_with_masks(
 
     # Volume layers: L1-L3 + siblings (ordered_volumes, skipped by caller in Isolation mode)
     # followed by the unified L_volume tier entries (every delivery="volume"
-    # spec — user-authored plus extension-synthesized). Pre-Task 1.4 the tier
-    # was split across parallel `stencil_volume_*` / `isolation_volume_*`
-    # emission paths; Task 1.3 collapsed them into a single list.
+    # spec — user-authored plus extension-synthesized, including Claude auth at
+    # /root/.claude as of Task 1.7).
     if ordered_volumes or volume_entries:
-        lines.append("")
         lines.append("      # === Volume layers (bind mounts, masks, reveals, named volumes) ===")
         for entry in ordered_volumes:
             lines.append(f"      - \"{entry}\"")
@@ -179,21 +174,15 @@ def generate_compose_with_masks(
         for port in ports:
             lines.append(f"      - \"{port}\"")
 
-    lines.extend([
-        "",
-        "volumes:",
-        f"  {volume_name}:",
-        "    name: " + volume_name,
-    ])
-
-    # Declare mask volumes (nocopy — populated by docker cp at runtime)
-    for vol_name in mask_volume_names:
-        lines.append(f"  {vol_name}:")
-
-    # Declare L_volume tier volumes (delivery="volume" specs, container-owned;
+    # Top-level volumes section — emit iff there is anything to declare.
+    # Mask volumes + L_volume tier volumes (delivery="volume" specs, container-owned;
     # both user-authored and extension-synthesized flow through the same list).
-    for vol_name in (volume_names or []):
-        lines.append(f"  {vol_name}:")
+    if mask_volume_names or volume_names:
+        lines.extend(["", "volumes:"])
+        for vol_name in mask_volume_names:
+            lines.append(f"  {vol_name}:")
+        for vol_name in (volume_names or []):
+            lines.append(f"  {vol_name}:")
 
     lines.append("")
 

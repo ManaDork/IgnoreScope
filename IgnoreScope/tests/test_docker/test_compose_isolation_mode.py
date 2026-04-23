@@ -4,7 +4,8 @@ Structural assertions verifying that generate_compose_with_masks:
   - Preserves the full structure when project-content volumes are provided.
   - Omits project-content volumes when caller passes empty project lists
     (the shape produced by an all-detached scope).
-  - Always emits L4 isolation volumes and the auth volume.
+  - Emits extension-synthesized L_volume entries (formerly "L4 + auth" —
+    unified into the vol_* tier in Phase 1 Tasks 1.3-1.7).
 
 compose.py is a pure formatter — it emits whatever lists it's given.
 """
@@ -103,8 +104,6 @@ class TestHybridMode:
         # L_volume tier entry (extension-synthesized) mount + declaration
         assert "vol_" in compose
         assert any(l.strip().startswith("vol_") for l in volumes_section.split("\n"))
-        # Auth volume preserved
-        assert "test-hybrid-claude-auth" in compose
         # Container config preserved
         assert "working_dir:" in compose
         assert "stdin_open: true" in compose
@@ -114,7 +113,7 @@ class TestHybridMode:
 
 
 # =============================================================================
-# Isolation mode — project content omitted, L4 preserved
+# Isolation mode — project content omitted, L_volume preserved
 # =============================================================================
 
 class TestIsolationMode:
@@ -144,8 +143,6 @@ class TestIsolationMode:
         assert f"{vol_name}:/root/.local" in compose
         volumes_section = _volumes_section(compose)
         assert any(l.strip().startswith("vol_") for l in volumes_section.split("\n"))
-        # Auth volume preserved
-        assert "test-isolation-claude-auth" in compose
         # Container config preserved
         assert "working_dir:" in compose
         assert "stdin_open: true" in compose
@@ -154,7 +151,7 @@ class TestIsolationMode:
         assert '"3900:3900"' in compose
 
     def test_isolation_with_no_l4_emits_no_volume_layers_block(self, tmp_path: Path):
-        """No L1-L3 (caller passed []) and no L4 → skip the volume layers block."""
+        """No L1-L3 (caller passed []) and no L_volume → skip the volume layers block."""
         compose = generate_compose_with_masks(
             ordered_volumes=[],
             mask_volume_names=[],
@@ -167,8 +164,12 @@ class TestIsolationMode:
         )
 
         assert "# === Volume layers" not in compose
-        # Auth volume still present (lives outside the volume layers block)
-        assert "test-bare-claude-auth" in compose
+        # Post-Task-1.7 the standalone `{name}-claude-auth` volume is gone —
+        # the auth path flows through the extension synth pipeline, so an
+        # empty-scope/no-extension compose emits no top-level volumes block
+        # at all.
+        assert "-claude-auth" not in compose
+        assert "\nvolumes:\n" not in compose
 
     def test_isolation_with_only_l4(self, tmp_path: Path):
         """Empty project lists + one L4 → L4 emits; no mask_* anywhere."""
