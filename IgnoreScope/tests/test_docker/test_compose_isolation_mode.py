@@ -271,3 +271,105 @@ class TestStencilVolumeMode:
             l for l in volumes_section.split("\n") if l.strip().startswith("vol_")
         ]
         assert len(volume_lines) == 1
+
+
+# =============================================================================
+# Retired naming schemes — regression guard (Phase 1 Task 1.13)
+# =============================================================================
+
+class TestRetiredNamingAbsent:
+    """No emitted compose YAML may contain `iso_*` or `-claude-auth` literals.
+
+    Task 1.4 eliminated ``iso_{ext}_{path}`` naming (now ``vol_*`` only).
+    Task 1.7 retired the hard-coded ``{docker_name}-claude-auth`` volume.
+    The auth path flows through the unified extension synth pipeline and
+    surfaces as ``vol_claude_code_root_.claude``.
+
+    This suite runs the compose formatter over a representative sample of
+    scope shapes and asserts neither retired token appears anywhere in the
+    output — structure, volume declarations, or mount entries.
+    """
+
+    @staticmethod
+    def _assert_no_retired_tokens(compose: str) -> None:
+        assert "iso_" not in compose, (
+            "emitted compose contains retired `iso_*` volume naming"
+        )
+        assert "-claude-auth" not in compose, (
+            "emitted compose contains retired `-claude-auth` volume naming"
+        )
+
+    def test_hybrid_scope_has_no_retired_tokens(self, tmp_path: Path):
+        hierarchy = _rich_hierarchy(tmp_path)
+        compose = generate_compose_with_masks(
+            ordered_volumes=hierarchy.ordered_volumes,
+            mask_volume_names=hierarchy.mask_volume_names,
+            host_project_root=tmp_path,
+            docker_container_name="guard-hybrid",
+            container_root="/workspace",
+            project_name=tmp_path.name,
+            volume_entries=hierarchy.volume_entries,
+            volume_names=hierarchy.volume_names,
+            ports=["3900:3900"],
+        )
+        self._assert_no_retired_tokens(compose)
+
+    def test_isolation_only_scope_has_no_retired_tokens(self, tmp_path: Path):
+        hierarchy = _rich_hierarchy(tmp_path)
+        compose = generate_compose_with_masks(
+            ordered_volumes=[],
+            mask_volume_names=[],
+            host_project_root=tmp_path,
+            docker_container_name="guard-iso-only",
+            container_root="/workspace",
+            project_name=tmp_path.name,
+            volume_entries=hierarchy.volume_entries,
+            volume_names=hierarchy.volume_names,
+        )
+        self._assert_no_retired_tokens(compose)
+
+    def test_bare_scope_has_no_retired_tokens(self, tmp_path: Path):
+        compose = generate_compose_with_masks(
+            ordered_volumes=[],
+            mask_volume_names=[],
+            host_project_root=tmp_path,
+            docker_container_name="guard-bare",
+            container_root="/workspace",
+            project_name="plain",
+            volume_entries=[],
+            volume_names=[],
+        )
+        self._assert_no_retired_tokens(compose)
+
+    def test_user_volume_plus_claude_ext_has_no_retired_tokens(self, tmp_path: Path):
+        """Mixed user-volume + Claude ext isolation paths — post-Task-1.7 both
+        routes produce `vol_*`; neither emits `iso_*` or `-claude-auth`."""
+        claude_ext = ExtensionConfig(
+            name="Claude Code",
+            isolation_paths=["/root/.local", "/root/.claude"],
+        )
+        hierarchy = compute_container_hierarchy(
+            container_root="/workspace",
+            mount_specs=_make_mount_specs({tmp_path / "src"}),
+            pushed_files=set(),
+            host_project_root=tmp_path,
+            host_container_root=tmp_path,
+            extensions=[claude_ext],
+        )
+        volume_entries = list(hierarchy.volume_entries) + [
+            "vol_user_workspace_data:/workspace/data",
+        ]
+        volume_names = list(hierarchy.volume_names) + ["vol_user_workspace_data"]
+        compose = generate_compose_with_masks(
+            ordered_volumes=hierarchy.ordered_volumes,
+            mask_volume_names=hierarchy.mask_volume_names,
+            host_project_root=tmp_path,
+            docker_container_name="guard-mixed",
+            container_root="/workspace",
+            project_name=tmp_path.name,
+            volume_entries=volume_entries,
+            volume_names=volume_names,
+        )
+        self._assert_no_retired_tokens(compose)
+        assert "vol_claude_code_root_.claude" in compose
+        assert "vol_claude_code_root_.local" in compose
