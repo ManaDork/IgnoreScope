@@ -1090,21 +1090,21 @@ class TestWalkMirroredIntermediates:
 
 
 # =============================================================================
-# Isolation Volumes (Layer 4 via unified synth) — Task 1.3 / 1.4
+# Isolation Volumes (unified volume tier via extension synth) — Task 1.3 / 1.4
 # =============================================================================
 #
 # Post-Task-1.3, extension isolation paths flow through the unified-synth
 # pipeline: ExtensionConfig.synthesize_mount_specs() emits volume-delivery
 # MountSpecPaths that compute_container_hierarchy merges into mount_specs
-# and renders via _compute_volume_tier_entries. L4 output therefore lives
-# on hierarchy.volume_entries / volume_names (renamed from
-# stencil_volume_* in Task 1.6) under the vol_{owner_segment}_{path} naming
-# scheme (Task 1.4). The owner_segment resolves to the sanitized extension
-# name for extension-synthesized specs and to `user` for user-authored
-# delivery="volume" specs.
+# and renders via _compute_volume_tier_entries. Extension-owned isolation
+# output therefore lives on hierarchy.volume_entries / volume_names
+# (renamed from stencil_volume_* in Task 1.6) under the
+# vol_{owner_segment}_{path} naming scheme (Task 1.4). The owner_segment
+# resolves to the sanitized extension name for extension-synthesized specs
+# and to `user` for user-authored delivery="volume" specs.
 
 class TestIsolationVolumes:
-    """Verify Layer 4 isolation volume computation via extensions= synth path."""
+    """Verify extension-owned isolation volume computation via extensions= synth path."""
 
     def test_isolation_paths_produce_volumes(self, tmp_path: Path):
         """extensions → entries in volume_entries + volume_names."""
@@ -1119,7 +1119,7 @@ class TestIsolationVolumes:
             extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
 
-        # L4 lives in volume_entries, separate from ordered_volumes
+        # Extension isolation entries live in volume_entries, separate from ordered_volumes
         assert len(hierarchy.volume_entries) == 1
         assert ":/root/.local" in hierarchy.volume_entries[0]
         assert not any("vol_" in v for v in hierarchy.ordered_volumes)
@@ -1129,7 +1129,7 @@ class TestIsolationVolumes:
         assert hierarchy.volume_names[0].startswith("vol_claude_code_")
 
     def test_isolation_separate_from_ordered_volumes(self, tmp_path: Path):
-        """L4 entries are stored separately from L1-L3 + siblings."""
+        """Volume-tier entries are stored separately from L1-L3 + siblings."""
         src = tmp_path / "src"
         api = src / "api"
         public = api / "public"
@@ -1146,7 +1146,7 @@ class TestIsolationVolumes:
         # L1 mount + L2 mask + L3 reveal = 3 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 3
         assert not any("vol_" in v for v in hierarchy.ordered_volumes)
-        # L4 is in volume_entries
+        # Volume-tier entry is in volume_entries
         assert len(hierarchy.volume_entries) == 1
         assert ":/usr/bin" in hierarchy.volume_entries[0]
 
@@ -1251,7 +1251,7 @@ class TestIsolationVolumes:
         # primary mount + sibling mount = 2 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 2
         assert not any("vol_" in v for v in hierarchy.ordered_volumes)
-        # L4 is tracked separately
+        # Extension volume-tier entry tracked separately
         assert len(hierarchy.volume_entries) == 1
         assert ":/root/.local" in hierarchy.volume_entries[0]
 
@@ -1334,8 +1334,8 @@ class TestPerSpecDelivery:
         assert "/workspace/src/vendor/public" in visible
         assert "/workspace/src/vendor" in hidden
 
-    def test_l4_still_emitted_for_all_detached_scope(self, tmp_path: Path):
-        """An all-detached scope still emits L4 isolation volumes (via unified volume tier)."""
+    def test_extension_volume_still_emitted_for_all_detached_scope(self, tmp_path: Path):
+        """An all-detached scope still emits extension isolation volumes via the unified volume tier."""
         src = tmp_path / "src"
         detached = MountSpecPath(
             mount_root=src, patterns=[], delivery="detached",
