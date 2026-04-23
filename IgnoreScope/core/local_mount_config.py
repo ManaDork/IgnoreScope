@@ -532,8 +532,8 @@ class ExtensionConfig(LocalMountConfig):
         (``delivery="volume"``, ``content_seed="folder"``, ``host_path=None``)
         tagged with ``owner=f"extension:{self.name}"``. The returned specs are
         merged into the unified ``mount_specs`` list at
-        ``compute_container_hierarchy`` top (Task 1.3); the parallel
-        ``_collect_isolation_paths`` / L4 loop are retired in Tasks 1.3 and 1.5.
+        ``compute_container_hierarchy`` top and flow through
+        ``_compute_volume_tier_entries`` alongside user-authored volume specs.
 
         Returns:
             List of synthesized MountSpecPath entries (empty if isolation_paths

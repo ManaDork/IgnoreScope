@@ -498,7 +498,6 @@ docker/
                             preflight_update / execute_update (14-phase: load old→preflight→hierarchy→orphan detect→preserve→down→compose→build→up→detached init→restore→prune→dirs→reconcile→save)
                             preflight_remove_container / execute_remove_container
                             reconcile_extensions — post-start verify/re-deploy loop (state × presence matrix)
-                            _collect_isolation_paths — extracts extension isolation paths for Layer 4 volumes (vestigial post Task 1.3; lifecycle callers now pass extensions= directly into compute_container_hierarchy; helper retires in Task 1.5)
                             _preserve_detached_folders / _restore_detached_folders — preserve_on_update hook pair
                             Shared by GUI and CLI — neither owns orchestration
 
