@@ -44,11 +44,12 @@ def _make_mount_specs(
 
 
 def _rich_hierarchy(tmp_path: Path):
-    """Fixture hierarchy with L1 mount + L2 mask + L3 reveal + L4 stencil isolation.
+    """Fixture hierarchy with L1 mount + L2 mask + L3 reveal + L_volume tier entry.
 
     Post-Task-1.3, extension isolation paths flow through the unified-synth
-    pipeline; L4 output surfaces on ``stencil_volume_entries`` / ``stencil_volume_names``
-    under the ``vol_{owner_segment}_{path}`` naming scheme introduced in Task 1.4.
+    pipeline; L4 output surfaces on ``volume_entries`` / ``volume_names``
+    (renamed from ``stencil_volume_*`` in Task 1.6) under the
+    ``vol_{owner_segment}_{path}`` naming scheme introduced in Task 1.4.
     """
     src = tmp_path / "src"
     api = src / "api"
@@ -86,8 +87,8 @@ class TestHybridMode:
             docker_container_name="test-hybrid",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=hierarchy.stencil_volume_entries,
-            stencil_volume_names=hierarchy.stencil_volume_names,
+            volume_entries=hierarchy.volume_entries,
+            volume_names=hierarchy.volume_names,
             ports=["3900:3900"],
         )
 
@@ -99,7 +100,7 @@ class TestHybridMode:
         assert "mask_" in compose
         volumes_section = _volumes_section(compose)
         assert any(l.strip().startswith("mask_") for l in volumes_section.split("\n"))
-        # L4 stencil isolation volume mount + declaration (post-Task-1.3 / 1.4)
+        # L_volume tier entry (extension-synthesized) mount + declaration
         assert "vol_" in compose
         assert any(l.strip().startswith("vol_") for l in volumes_section.split("\n"))
         # Auth volume preserved
@@ -129,8 +130,8 @@ class TestIsolationMode:
             docker_container_name="test-isolation",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=hierarchy.stencil_volume_entries,
-            stencil_volume_names=hierarchy.stencil_volume_names,
+            volume_entries=hierarchy.volume_entries,
+            volume_names=hierarchy.volume_names,
             ports=["3900:3900"],
         )
 
@@ -138,9 +139,9 @@ class TestIsolationMode:
         assert "/workspace/src" not in compose
         # No L2 mask volumes anywhere
         assert "mask_" not in compose
-        # L4 stencil isolation volume mount + declaration still present
-        sten_name = hierarchy.stencil_volume_names[0]
-        assert f"{sten_name}:/root/.local" in compose
+        # L_volume tier entry (extension-synthesized) mount + declaration still present
+        vol_name = hierarchy.volume_names[0]
+        assert f"{vol_name}:/root/.local" in compose
         volumes_section = _volumes_section(compose)
         assert any(l.strip().startswith("vol_") for l in volumes_section.split("\n"))
         # Auth volume preserved
@@ -161,8 +162,8 @@ class TestIsolationMode:
             docker_container_name="test-bare",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=[],
-            stencil_volume_names=[],
+            volume_entries=[],
+            volume_names=[],
         )
 
         assert "# === Volume layers" not in compose
@@ -178,8 +179,8 @@ class TestIsolationMode:
             docker_container_name="test-l4-only",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=["vol_claude_code_root_.local:/root/.local"],
-            stencil_volume_names=["vol_claude_code_root_.local"],
+            volume_entries=["vol_claude_code_root_.local:/root/.local"],
+            volume_names=["vol_claude_code_root_.local"],
         )
 
         assert "vol_claude_code_root_.local:/root/.local" in compose
@@ -203,8 +204,8 @@ class TestStencilVolumeMode:
             docker_container_name="test-volume",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=["vol_user_workspace_cache:/workspace/cache"],
-            stencil_volume_names=["vol_user_workspace_cache"],
+            volume_entries=["vol_user_workspace_cache:/workspace/cache"],
+            volume_names=["vol_user_workspace_cache"],
         )
 
         assert "vol_user_workspace_cache:/workspace/cache" in compose
@@ -216,16 +217,16 @@ class TestStencilVolumeMode:
         )
 
     def test_stencil_volume_coexists_with_l1_l2_l4(self, tmp_path: Path):
-        """Bind/mask + stencil (L4 + user-volume) all emit in the same compose file."""
+        """Bind/mask + volume tier (L4 + user-volume) all emit in the same compose file."""
         hierarchy = _rich_hierarchy(tmp_path)
 
-        # Combine the L4 extension-synth stencil entries with an explicit
+        # Combine the L4 extension-synth volume entries with an explicit
         # user-declared volume-delivery spec. Post-Task-1.3 both live on the
-        # stencil_volume_* output lists; compose renders the unified list.
-        stencil_entries = list(hierarchy.stencil_volume_entries) + [
+        # ``volume_entries`` output list; compose renders the unified list.
+        volume_entries = list(hierarchy.volume_entries) + [
             "vol_user_workspace_data:/workspace/data",
         ]
-        stencil_names = list(hierarchy.stencil_volume_names) + ["vol_user_workspace_data"]
+        volume_names = list(hierarchy.volume_names) + ["vol_user_workspace_data"]
 
         compose = generate_compose_with_masks(
             ordered_volumes=hierarchy.ordered_volumes,
@@ -234,8 +235,8 @@ class TestStencilVolumeMode:
             docker_container_name="test-mixed",
             container_root="/workspace",
             project_name=tmp_path.name,
-            stencil_volume_entries=stencil_entries,
-            stencil_volume_names=stencil_names,
+            volume_entries=volume_entries,
+            volume_names=volume_names,
         )
 
         assert "mask_" in compose
@@ -245,12 +246,12 @@ class TestStencilVolumeMode:
             l.strip().startswith("vol_user_workspace_data:")
             for l in volumes_section.split("\n")
         )
-        # L4 extension stencil entry also renders.
-        assert any(":/root/.local" in e for e in stencil_entries)
+        # L4 extension-synthesized entry also renders.
+        assert any(":/root/.local" in e for e in volume_entries)
         assert any(":/root/.local" in l for l in compose.split("\n"))
 
     def test_no_stencil_volumes_omits_nothing_else(self, tmp_path: Path):
-        """Stencil tier populated only by the L4 extension synth output."""
+        """Volume tier populated only by the L4 extension synth output."""
         compose = generate_compose_with_masks(
             ordered_volumes=[],
             mask_volume_names=[],
@@ -258,14 +259,14 @@ class TestStencilVolumeMode:
             docker_container_name="test-bare-container",
             container_root="/workspace",
             project_name="plain",
-            stencil_volume_entries=["vol_claude_code_root_.local:/root/.local"],
-            stencil_volume_names=["vol_claude_code_root_.local"],
+            volume_entries=["vol_claude_code_root_.local:/root/.local"],
+            volume_names=["vol_claude_code_root_.local"],
         )
 
-        # Only the single L4-origin stencil volume is present.
+        # Only the single L4-origin volume-tier entry is present.
         assert "vol_claude_code_root_.local:/root/.local" in compose
         volumes_section = _volumes_section(compose)
-        stencil_lines = [
+        volume_lines = [
             l for l in volumes_section.split("\n") if l.strip().startswith("vol_")
         ]
-        assert len(stencil_lines) == 1
+        assert len(volume_lines) == 1

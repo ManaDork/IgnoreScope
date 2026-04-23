@@ -52,8 +52,8 @@ class ContainerHierarchy:
     Attributes:
         ordered_volumes: Layer 1-3 + sibling volume entries (project content) for docker-compose.yml
         mask_volume_names: Named mask volumes for compose volumes section
-        stencil_volume_entries: L_volume entries for delivery="volume" specs (user + extension-synthesized); survives recreate
-        stencil_volume_names: Named volume-tier volumes for compose volumes section
+        volume_entries: L_volume entries for delivery="volume" specs (user + extension-synthesized); survives recreate
+        volume_names: Named L_volume volumes for compose volumes section
         revealed_parents: Container paths needing mkdir -p before docker cp (pushed files)
         validation_errors: Configuration problems found during computation
         visible_paths: All visible container paths (for UI/debugging)
@@ -62,9 +62,9 @@ class ContainerHierarchy:
 
     # For docker-compose.yml generation — Layer 1-3 + siblings (bind-delivery
     # project content only; detached-delivery specs emit nothing here).
-    # Extension-owned volume-tier entries share the stencil_volume_entries
-    # list with user-authored delivery="volume" specs; Task 1.3 collapsed
-    # the former parallel L4 emit.
+    # Extension-owned volume-tier entries share the volume_entries list with
+    # user-authored delivery="volume" specs; Task 1.3 collapsed the former
+    # parallel L4 emit path.
     ordered_volumes: list[str] = field(default_factory=list)
 
     # Named mask volumes declared in docker-compose.yml volumes section
@@ -79,11 +79,11 @@ class ContainerHierarchy:
     # `compose down -v`). Separate from ordered_volumes because volume-
     # delivery emits different YAML shape and must not participate in
     # bind-order pattern interleaving.
-    stencil_volume_entries: list[str] = field(default_factory=list)
+    volume_entries: list[str] = field(default_factory=list)
 
-    # Named volume-tier volumes declared in docker-compose.yml volumes
+    # Named L_volume tier volumes declared in docker-compose.yml volumes
     # section (names follow the `vol_{owner_segment}_{path}` shape).
-    stencil_volume_names: list[str] = field(default_factory=list)
+    volume_names: list[str] = field(default_factory=list)
 
     # For mkdir -p before pushing revealed/pushed files
     revealed_parents: set[str] = field(default_factory=set)
@@ -478,7 +478,7 @@ def compute_container_hierarchy(
     """Compute complete container hierarchy from configuration.
 
     Single function computing ALL hierarchy logic. Used by:
-    - compose.py: uses ordered_volumes, mask_volume_names, stencil_volume_entries, stencil_volume_names
+    - compose.py: uses ordered_volumes, mask_volume_names, volume_entries, volume_names
     - validation: checks validation_errors
     - file_ops.py: uses revealed_parents
     - Future UI: uses visible_paths, masked_paths
@@ -555,7 +555,7 @@ def compute_container_hierarchy(
     volume_entries, volume_names = _compute_volume_tier_entries(
         mount_specs, container_root, host_container_root,
     )
-    hierarchy.stencil_volume_entries = volume_entries
-    hierarchy.stencil_volume_names = volume_names
+    hierarchy.volume_entries = volume_entries
+    hierarchy.volume_names = volume_names
 
     return hierarchy

@@ -75,10 +75,8 @@ def generate_compose_with_masks(
     docker_image_name: str = "",
     docker_volume_name: str = "",
     container_root: str = DEFAULT_CONTAINER_ROOT,
-    isolation_volume_entries: list[str] | None = None,
-    isolation_volume_names: list[str] | None = None,
-    stencil_volume_entries: list[str] | None = None,
-    stencil_volume_names: list[str] | None = None,
+    volume_entries: list[str] | None = None,
+    volume_names: list[str] | None = None,
     ports: list[str] | None = None,
 ) -> str:
     """Generate docker-compose.yml from pre-computed hierarchy data.
@@ -98,10 +96,11 @@ def generate_compose_with_masks(
         docker_image_name: Explicit image name (overrides auto-derived)
         docker_volume_name: Explicit volume name (overrides auto-derived)
         container_root: Container root path (default: /workspace)
-        isolation_volume_entries: Layer 4 volume entries ("name:container_path"); always emitted
-        isolation_volume_names: Named isolation volumes (Layer 4) for the volumes section
-        stencil_volume_entries: L_volume entries for delivery="volume" specs ("name:container_path")
-        stencil_volume_names: Named stencil volumes for the volumes declaration section
+        volume_entries: L_volume entries for every ``delivery="volume"`` spec
+            (user-authored + extension-synthesized) — ``"name:container_path"``
+            format, survives ``docker compose up/down`` by design
+        volume_names: Named L_volume volumes for the top-level volumes section
+            (one-to-one with ``volume_entries``)
         ports: List of port mappings (e.g., ["3900:3900", "8080:8080"])
 
     Returns:
@@ -155,16 +154,16 @@ def generate_compose_with_masks(
             lines.append(f"      - \"{volume}\"{comment}")
 
     # Volume layers: L1-L3 + siblings (ordered_volumes, skipped by caller in Isolation mode)
-    # followed by L_volume stencil entries (delivery="volume" specs)
-    # followed by L4 isolation entries (always emitted regardless of mode).
-    if ordered_volumes or stencil_volume_entries or isolation_volume_entries:
+    # followed by the unified L_volume tier entries (every delivery="volume"
+    # spec — user-authored plus extension-synthesized). Pre-Task 1.4 the tier
+    # was split across parallel `stencil_volume_*` / `isolation_volume_*`
+    # emission paths; Task 1.3 collapsed them into a single list.
+    if ordered_volumes or volume_entries:
         lines.append("")
-        lines.append("      # === Volume layers (bind mounts, masks, reveals, stencil volumes, isolation) ===")
+        lines.append("      # === Volume layers (bind mounts, masks, reveals, named volumes) ===")
         for entry in ordered_volumes:
             lines.append(f"      - \"{entry}\"")
-        for entry in (stencil_volume_entries or []):
-            lines.append(f"      - \"{entry}\"")
-        for entry in (isolation_volume_entries or []):
+        for entry in (volume_entries or []):
             lines.append(f"      - \"{entry}\"")
 
     lines.extend([
@@ -191,12 +190,9 @@ def generate_compose_with_masks(
     for vol_name in mask_volume_names:
         lines.append(f"  {vol_name}:")
 
-    # Declare stencil volumes (L_volume — delivery="volume" specs, container-owned)
-    for vol_name in (stencil_volume_names or []):
-        lines.append(f"  {vol_name}:")
-
-    # Declare isolation volumes (Layer 4 — persistent, container-owned)
-    for vol_name in (isolation_volume_names or []):
+    # Declare L_volume tier volumes (delivery="volume" specs, container-owned;
+    # both user-authored and extension-synthesized flow through the same list).
+    for vol_name in (volume_names or []):
         lines.append(f"  {vol_name}:")
 
     lines.append("")
