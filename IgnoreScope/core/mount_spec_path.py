@@ -241,7 +241,7 @@ class MountSpecPath:
                 f"got {self.content_seed!r}"
             )
 
-        # host_path=None is valid only for non-bind deliveries (container-only).
+        # host_path=None is valid only for isolation deliveries (container-only).
         if self.host_path is None and self.delivery == "bind":
             errors.append(
                 "host_path is required when delivery='bind' (bind mounts "
