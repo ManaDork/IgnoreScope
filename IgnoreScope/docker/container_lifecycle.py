@@ -559,7 +559,7 @@ def preflight_create(
         host_project_root=host_project_root,
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
-        isolation_paths=_collect_isolation_paths(config),
+        extensions=config.extensions or None,
     )
 
     if hierarchy.validation_errors:
@@ -624,7 +624,7 @@ def execute_create(
         host_project_root=host_project_root,
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
-        isolation_paths=_collect_isolation_paths(config),
+        extensions=config.extensions or None,
     )
 
     # Scope name for config dirs; docker name for Docker resources
@@ -838,7 +838,7 @@ def execute_update(
         host_project_root=host_project_root,
         host_container_root=old_config.host_container_root,
         siblings=old_config.siblings or None,
-        isolation_paths=_collect_isolation_paths(old_config),
+        extensions=old_config.extensions or None,
     )
     old_mask_names = set(old_hierarchy.mask_volume_names)
     old_iso_names = set(old_hierarchy.isolation_volume_names)
@@ -856,7 +856,7 @@ def execute_update(
         host_project_root=host_project_root,
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
-        isolation_paths=_collect_isolation_paths(config),
+        extensions=config.extensions or None,
     )
     new_mask_names = set(new_hierarchy.mask_volume_names)
     new_iso_names = set(new_hierarchy.isolation_volume_names)
