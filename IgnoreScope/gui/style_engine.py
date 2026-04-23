@@ -22,28 +22,6 @@ from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QRadialGradie
 
 
 # ------------------------------------------------------------------
-# Mount delivery tint resolver (superseded by ScopeHeaderSignals; removed in Task 3.5)
-# ------------------------------------------------------------------
-
-def resolve_delivery_tint_key(mount_specs) -> Optional[str]:
-    """Return the theme state-color key for a scope's dominant delivery mix.
-
-    Per THEME_WORKFLOW.md § Mount Delivery Color Mapping:
-      - All ``delivery == "bind"``       → ``"config.mount"``
-      - All ``delivery == "detached"``   → ``"visibility.virtual"``
-      - Mixed                            → majority by spec count; ties → ``"config.mount"``
-      - Empty scope                      → ``None`` (caller uses default)
-    """
-    if not mount_specs:
-        return None
-    detached = sum(1 for ms in mount_specs if ms.delivery == "detached")
-    bind = len(mount_specs) - detached
-    if detached > bind:
-        return "visibility.virtual"
-    return "config.mount"
-
-
-# ------------------------------------------------------------------
 # Scope Config Tree container header — 3-signal aggregate (Phase 3)
 # ------------------------------------------------------------------
 
