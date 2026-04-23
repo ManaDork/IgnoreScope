@@ -523,3 +523,32 @@ class ExtensionConfig(LocalMountConfig):
             isolation_paths=data.get('isolation_paths', []),
             seed_method=data.get('seed_method', 'empty'),
         )
+
+    def synthesize_mount_specs(self) -> list[MountSpecPath]:
+        """Translate isolation_paths into MountSpecPath entries.
+
+        Phase 1 unified-synth entrypoint: each entry in ``isolation_paths`` is
+        materialized as a container-only named-volume spec
+        (``delivery="volume"``, ``content_seed="folder"``, ``host_path=None``)
+        tagged with ``owner=f"extension:{self.name}"``. The returned specs are
+        merged into the unified ``mount_specs`` list at
+        ``compute_container_hierarchy`` top (Task 1.3); the parallel
+        ``_collect_isolation_paths`` / L4 loop are retired in Tasks 1.3 and 1.5.
+
+        Returns:
+            List of synthesized MountSpecPath entries (empty if isolation_paths
+            is empty). Each spec is self-describing via its ``owner`` tag; no
+            sibling lookup to ExtensionConfig is required downstream.
+        """
+        return [
+            MountSpecPath(
+                mount_root=Path(container_path),
+                patterns=[],
+                delivery="volume",
+                host_path=None,
+                content_seed="folder",
+                preserve_on_update=False,
+                owner=f"extension:{self.name}",
+            )
+            for container_path in self.isolation_paths
+        ]

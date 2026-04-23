@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from IgnoreScope.core.local_mount_config import LocalMountConfig
+from IgnoreScope.core.local_mount_config import ExtensionConfig, LocalMountConfig
 from IgnoreScope.core.mount_spec_path import MountSpecPath
 
 
@@ -443,3 +443,67 @@ class TestConfigRoundTripWithPhase3:
         src.mkdir()
         config.add_mount(src)
         assert config.mount_specs[0].host_path == src
+
+
+# ──────────────────────────────────────────────
+# EXT-1: ExtensionConfig.synthesize_mount_specs()
+# ──────────────────────────────────────────────
+
+
+class TestExtensionSynthesizeMountSpecs:
+    """Phase 1 Task 1.2 — unified-synth entrypoint for extension isolation_paths."""
+
+    def test_empty_isolation_paths_returns_empty_list(self):
+        ext = ExtensionConfig(name="claude", isolation_paths=[])
+        assert ext.synthesize_mount_specs() == []
+
+    def test_single_path_shape(self):
+        ext = ExtensionConfig(name="claude", isolation_paths=["/root/.claude"])
+        specs = ext.synthesize_mount_specs()
+        assert len(specs) == 1
+        spec = specs[0]
+        assert spec.mount_root == Path("/root/.claude")
+        assert spec.patterns == []
+        assert spec.delivery == "volume"
+        assert spec.content_seed == "folder"
+        assert spec.host_path is None
+        assert spec.preserve_on_update is False
+        assert spec.owner == "extension:claude"
+
+    def test_multiple_paths_preserve_order(self):
+        ext = ExtensionConfig(
+            name="git",
+            isolation_paths=["/root/.gitconfig", "/root/.ssh", "/var/cache/git"],
+        )
+        specs = ext.synthesize_mount_specs()
+        assert [s.mount_root for s in specs] == [
+            Path("/root/.gitconfig"),
+            Path("/root/.ssh"),
+            Path("/var/cache/git"),
+        ]
+        for s in specs:
+            assert s.owner == "extension:git"
+            assert s.delivery == "volume"
+            assert s.content_seed == "folder"
+            assert s.host_path is None
+
+    def test_owner_tag_embeds_extension_name(self):
+        ext = ExtensionConfig(name="p4-mcp-server", isolation_paths=["/root/.p4"])
+        specs = ext.synthesize_mount_specs()
+        assert specs[0].owner == "extension:p4-mcp-server"
+
+    def test_synthesized_specs_pass_validator(self):
+        ext = ExtensionConfig(
+            name="claude",
+            isolation_paths=["/root/.claude", "/root/.config/claude"],
+        )
+        for spec in ext.synthesize_mount_specs():
+            assert spec.validate() == []
+
+    def test_overlap_validator_accepts_disjoint_synth_output(self):
+        ext = ExtensionConfig(
+            name="claude",
+            isolation_paths=["/root/.claude", "/var/lib/claude"],
+        )
+        specs = ext.synthesize_mount_specs()
+        assert MountSpecPath.validate_no_overlap(specs) == []
