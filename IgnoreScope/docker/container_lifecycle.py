@@ -782,7 +782,7 @@ def execute_update(
       1. Load old config → compute old hierarchy → old volume names
       2. Preflight new config
       3. Compute new hierarchy → new volume names
-      4. orphan_volumes = (old_masks - new_masks) | (old_iso - new_iso)
+      4. orphan_volumes = old_masks - new_masks
       5. docker compose down (remove_volumes=False, remove_images=False)
       6. Generate new compose + Dockerfile → write to disk
       7. Build image
@@ -822,13 +822,6 @@ def execute_update(
         extensions=old_config.extensions or None,
     )
     old_mask_names = set(old_hierarchy.mask_volume_names)
-    # Vestigial clause (no-op) retained for Task 1.8 formal removal: since
-    # Task 1.3 unified the L4 emit into the single volume tier (Task 1.4
-    # removed the parallel `isolation_volume_*` fields; Task 1.6 renamed
-    # the surviving `stencil_volume_*` fields to `volume_*`). Sourcing from
-    # empty-set literals preserves the `(old_iso - new_iso)` orphan-diff
-    # shape for Task 1.8 to strip cleanly.
-    old_iso_names: set[str] = set()
 
     # ── Phase 2: Preflight new config ──
     preflight = preflight_update(host_project_root, config)
@@ -846,10 +839,15 @@ def execute_update(
         extensions=config.extensions or None,
     )
     new_mask_names = set(new_hierarchy.mask_volume_names)
-    new_iso_names: set[str] = set()
 
-    # ── Phase 4: Detect orphan volumes (masks + isolation) ──
-    orphan_volumes = (old_mask_names - new_mask_names) | (old_iso_names - new_iso_names)
+    # ── Phase 4: Detect orphan volumes (masks only) ──
+    # Volume-tier entries (`vol_*`, the unified L_volume tier covering both
+    # user-authored `delivery="volume"` specs and extension-synthesized
+    # isolation paths) are NEVER orphaned here: they are designed to persist
+    # across ordinary recreate so extension auth state and Permanent Folder
+    # contents survive updates. Destruction of a `vol_*` volume requires an
+    # explicit `docker compose down -v` path, not an update-time diff.
+    orphan_volumes = old_mask_names - new_mask_names
 
     docker_name, image_name = _compute_resource_names(host_project_root, scope_name)
     output_dir = get_container_dir(host_project_root, scope_name)
