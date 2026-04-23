@@ -191,7 +191,12 @@ class TestL4StencilTierRole:
 
 
 class TestScopeViewRmbSilentNoOp:
-    """RMB on an L4 stencil node yields the silent-no-op fallback only."""
+    """RMB on an extension-owned volume spec yields silent-no-op fallback only.
+
+    Task 1.10: the read-only guard is now owner-keyed
+    (``spec.delivery == "volume" and spec.owner.startswith("extension:")``),
+    not tree-node-tag-keyed (``is_stencil_node and stencil_tier == "auth"``).
+    """
 
     def test_l4_stencil_rmb_offers_only_fallback(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
@@ -200,11 +205,16 @@ class TestScopeViewRmbSilentNoOp:
 
         stencil_node = tree._stencil_nodes[0]
         menu = QMenu()
-        # Drive the per-node branch directly — bypassing indexAt which needs
-        # a real paint event. The branch under test is the is_stencil_node
-        # short-circuit inside _show_context_menu.
-        if stencil_node.is_stencil_node and stencil_node.stencil_tier == "auth":
-            pass  # mirrors ScopeView._show_context_menu's empty-branch
+        # Drive the per-node routing decision directly — bypassing indexAt which
+        # needs a real paint event. Mirrors the owner-keyed guard inside
+        # ScopeView._show_context_menu.
+        spec = tree.get_any_spec_at(stencil_node.path)
+        if (
+            spec is not None
+            and spec.delivery == "volume"
+            and spec.owner.startswith("extension:")
+        ):
+            pass  # silent-no-op branch
         view._append_fallback_if_empty(menu)
 
         texts = [a.text() for a in menu.actions()]
@@ -212,17 +222,20 @@ class TestScopeViewRmbSilentNoOp:
         assert menu.actions()[0].isEnabled() is False
 
     def test_l4_stencil_does_not_emit_make_folder(self, tree: MountDataTree):
-        """Sanity: a stencil node never receives the Scope Config gesture set."""
+        """Sanity: an extension-owned volume spec never routes to gesture set."""
         ext = _make_extension("Claude Code", ["/root/.local"])
         tree.set_extensions([ext])
         view = ScopeView(tree)
 
         stencil_node = tree._stencil_nodes[0]
         menu = QMenu()
-        # The Scope Config gesture set is not applicable to L4 nodes.
-        # If we accidentally routed here, "Make Folder" would appear.
-        # Simulate the routing decision: L4 stencils take the silent branch.
-        if not (stencil_node.is_stencil_node and stencil_node.stencil_tier == "auth"):
+        spec = tree.get_any_spec_at(stencil_node.path)
+        is_readonly = (
+            spec is not None
+            and spec.delivery == "volume"
+            and spec.owner.startswith("extension:")
+        )
+        if not is_readonly:
             view._add_scope_config_gestures(menu, node=stencil_node)
         view._append_fallback_if_empty(menu)
 
@@ -230,6 +243,98 @@ class TestScopeViewRmbSilentNoOp:
         assert "Make Folder" not in texts
         assert "Mark Permanent" not in texts
         assert "Remove" not in texts
+
+
+class TestOwnerKeyedRoutingGuard:
+    """Task 1.10 — read-only guard routes by owner, not by tree-node tag.
+
+    User-authored ``delivery="volume"`` specs (``owner="user"``) must reach
+    the editable gesture menu. Extension-synthesized specs
+    (``owner="extension:{name}"``) must take the silent-no-op branch.
+    """
+
+    def test_user_authored_volume_routes_to_gesture_menu(
+        self, tree: MountDataTree,
+    ):
+        from IgnoreScope.gui.mount_data_tree import MountDataNode
+
+        container_path = Path("/var/data")
+        tree.add_stencil_volume(container_path)
+        view = ScopeView(tree)
+
+        node = MountDataNode(path=container_path)
+        menu = QMenu()
+
+        # Mirror ScopeView._show_context_menu's single-node routing logic.
+        spec = tree.get_any_spec_at(node.path)
+        is_readonly = (
+            spec is not None
+            and spec.delivery == "volume"
+            and spec.owner.startswith("extension:")
+        )
+        if is_readonly:
+            pass
+        elif node.is_file:
+            pass  # Not exercised in this test — no file.
+        elif tree.get_spec_at(node.path) is not None:
+            view._add_scope_config_gestures(menu, node=node)
+        else:
+            pass  # Not exercised — spec exists.
+
+        texts = [a.text() for a in menu.actions()]
+        assert "Remove" in texts, (
+            "User-authored volume spec must reach editable gesture menu"
+        )
+
+    def test_extension_volume_routes_to_silent_noop(self, tree: MountDataTree):
+        ext = _make_extension("Claude Code", ["/root/.local"])
+        tree.set_extensions([ext])
+        view = ScopeView(tree)
+
+        stencil_node = tree._stencil_nodes[0]
+        menu = QMenu()
+
+        spec = tree.get_any_spec_at(stencil_node.path)
+        is_readonly = (
+            spec is not None
+            and spec.delivery == "volume"
+            and spec.owner.startswith("extension:")
+        )
+        if is_readonly:
+            pass  # Silent-no-op path
+        else:
+            pytest.fail(
+                f"Extension-owned volume spec must be read-only; "
+                f"guard returned is_readonly={is_readonly}, spec={spec}",
+            )
+
+        view._append_fallback_if_empty(menu)
+        texts = [a.text() for a in menu.actions()]
+        assert texts == ["No valid actions"]
+
+    def test_get_any_spec_at_returns_user_spec_first(
+        self, tree: MountDataTree,
+    ):
+        """User-authored specs win over extension-synthesized on path collision."""
+        shared = Path("/var/data")
+        tree.add_stencil_volume(shared)
+        ext = _make_extension("Custom", ["/var/data"])
+        tree.set_extensions([ext])
+
+        spec = tree.get_any_spec_at(shared)
+        assert spec is not None
+        assert spec.owner == "user"
+
+    def test_get_any_spec_at_returns_extension_spec_when_user_absent(
+        self, tree: MountDataTree,
+    ):
+        ext = _make_extension("Claude Code", ["/root/.local"])
+        tree.set_extensions([ext])
+
+        spec = tree.get_any_spec_at(Path("/root/.local"))
+        assert spec is not None
+        assert spec.owner.startswith("extension:")
+        assert spec.delivery == "volume"
 
 
 class TestRebuildIdempotency:
