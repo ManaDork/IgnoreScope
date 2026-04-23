@@ -448,8 +448,10 @@ MountDataTree.load_config(config)
     ├── Apply project states (mount_specs → mounts/masked/revealed via @property)
     ├── Set file tracking (pushed_files, container_files)
     ├── Add siblings (scan filesystem + apply sibling states)
-    └── _rebuild_l4_stencil_nodes()      ← L4 auth stencils from extensions
-          One synthetic MountDataNode per ExtensionConfig.isolation_paths entry:
+    └── _rebuild_extension_stencil_nodes()  ← L4 auth stencils from extensions
+          One synthetic MountDataNode per spec returned by
+            ExtensionConfig.synthesize_mount_specs() (container-only
+            delivery="volume" + content_seed="folder" + host_path=None):
             is_stencil_node=True, stencil_tier="auth",
             source=NodeSource.STENCIL, container_path=str
           Appended to root_node.children; never lazy-loads
@@ -458,6 +460,13 @@ MountDataTree.load_config(config)
           Phase 3 Task 4.9: container_ops_ui calls
           MountDataTree.set_extensions(config.extensions) after install /
           uninstall to refresh the L4 set without a full config reload.
+
+          Unify L4 Task 1.9: NodeState for each stencil path is produced by
+            CORE's apply_node_states_from_scope — GUI merges synthesized
+            specs into a temporary LocalMountConfig before the CORE call.
+            compute_node_state derives container_only=True from
+            spec.host_path is None; compute_visibility emits "virtual"
+            without any GUI-side direct-write to _states.
 ```
 
 ---

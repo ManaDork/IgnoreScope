@@ -246,6 +246,7 @@ def compute_node_state(
     is_masked = False
     is_revealed = False
     is_mount_root = False
+    is_container_only = False
 
     for ms in mount_specs:
         if path == ms.mount_root or is_descendant(path, ms.mount_root):
@@ -253,6 +254,13 @@ def compute_node_state(
             is_mount_root = (path == ms.mount_root)
             is_masked = ms.is_masked(path)
             is_revealed = ms.is_unmasked(path)
+            # host_path is None ⇒ no host-side source: the owning spec is a
+            # container-only stencil (Virtual Folder / Volume Mount / extension
+            # isolation path). Propagate container_only so compute_visibility
+            # routes the node to "virtual" — unified with Task 1.9 GUI-side
+            # retirement of the L4 auth direct-write.
+            if ms.host_path is None:
+                is_container_only = True
 
             # Apply mutual exclusivity: reveal takes precedence over mask
             # (gitignore semantics: last match wins).
@@ -274,6 +282,7 @@ def compute_node_state(
         revealed=is_revealed,
         pushed=is_pushed,
         container_orphaned=is_container_orphaned,
+        container_only=is_container_only,
     )
 
     return NodeState(
@@ -282,6 +291,7 @@ def compute_node_state(
         revealed=is_revealed,
         pushed=is_pushed,
         container_orphaned=is_container_orphaned,
+        container_only=is_container_only,
         is_mount_root=is_mount_root,
         visibility=vis,
     )

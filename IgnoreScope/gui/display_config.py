@@ -272,13 +272,19 @@ def _resolve_folder_state(node_state, stencil_tier: str = "mirrored") -> str:
     has_vis_desc = (node_state.has_pushed_descendant or
                     node_state.has_direct_visible_child)
 
-    if node_state.container_only:
-        return "FOLDER_CONTAINER_ONLY"
+    # Stencil-tier tags carry explicit rendering intent and take precedence
+    # over the generic container_only routing: extension-synth nodes
+    # (stencil_tier="auth") and user-authored Volume Mount nodes
+    # (stencil_tier="volume") must resolve to their dedicated styles even
+    # though container_only=True is set by CORE (Task 1.9 unified-synth).
     if vis == "virtual":
         if stencil_tier == "volume":
             return "FOLDER_STENCIL_VOLUME"
         if stencil_tier == "auth":
             return "FOLDER_STENCIL_AUTH"
+    if node_state.container_only:
+        return "FOLDER_CONTAINER_ONLY"
+    if vis == "virtual":
         if node_state.masked:
             if has_vis_desc:
                 return "FOLDER_MASKED_REVEALED"
