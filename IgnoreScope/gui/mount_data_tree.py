@@ -714,6 +714,23 @@ class MountDataTree(QObject):
                 return ms
         return None
 
+    def get_any_spec_at(self, path: Path):
+        """Return any MountSpecPath at ``path`` — user-authored or extension-synthesized.
+
+        Used by owner-keyed routing (Task 1.10 RMB guard). ``get_spec_at``
+        stays user-authored-only because its consumers (e.g.
+        ``_add_scope_config_gestures``) must not surface gestures on
+        extension-synthesized specs.
+        """
+        spec = self.get_spec_at(path)
+        if spec is not None:
+            return spec
+        for ext in self._extensions:
+            for synth in ext.synthesize_mount_specs():
+                if synth.mount_root == path:
+                    return synth
+        return None
+
     def set_extensions(self, extensions: list) -> None:
         """Replace tracked extensions and re-emit L4 auth stencils.
 
