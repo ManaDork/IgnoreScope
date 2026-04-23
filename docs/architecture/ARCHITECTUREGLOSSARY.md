@@ -713,6 +713,36 @@ Selection mechanism and QSS details are an implementation concern of `gui/local_
 
 **Domains:** Presentation (GUI theme), Config (delivery read)
 
+**Status:** Superseded in Phase 3 by `ScopeHeaderSignals` (below). `resolve_delivery_tint_key` and `LocalHostView._apply_header_tint` are removed when the 3-signal header lands on the Scope Config Tree (Task 3.5). This section is retained here as history until the doc pass in Task 3.7.
+
+---
+
+### ScopeHeaderSignals (Scope Config Tree container header)
+
+Three-signal aggregate that drives the Scope Config Tree's container header in the GUI. Computed by `gui/style_engine.py::resolve_scope_header_signals` and consumed by the renderer in `gui/scope_view.py` (Phase 3 of `unify-l4-reclaim-isolation-term`).
+
+**Fields:**
+- `container_running: bool` — True iff the scope's docker container is running (sourced from `docker/container_ops.py::get_container_info(docker_name)['running']`).
+- `fully_virtual: bool` — True iff the scope has 1+ `mount_specs` AND every spec has `delivery != "bind"` (pure host-isolated content: detached + volume, any owner).
+- `has_mounts: bool` — True iff any `mount_spec` has `delivery == "bind"` (at least one live bind mount).
+
+**Invariant:** `fully_virtual ∧ has_mounts` is impossible by construction. The valid truth table has 6 rows (the 8-row product minus the 2 impossible `fully_virtual ∧ has_mounts` rows):
+
+| Container Running | Fully Virtual | Has Mounts | Header State |
+|-------------------|---------------|------------|--------------|
+| F | F | F | Empty / inactive |
+| F | F | T | Has bind, off |
+| F | T | F | Fully virtual, off |
+| T | F | F | Empty container running |
+| T | F | T | Has bind, running |
+| T | T | F | Fully virtual, running |
+
+**Input-list convention:** The resolver consumes the **unified** `mount_specs` list — user-authored specs plus extension-synthesized specs (from `ExtensionConfig.synthesize_mount_specs()`, Phase 1 Task 1.2). This matches what `compute_container_hierarchy(extensions=...)` sees, so the header and the compose emitter read identical state.
+
+**Why a structured signal instead of a single theme key:** The prior `resolve_delivery_tint_key` returned one theme key (`config.mount` or `visibility.virtual`) representing a single axis. Container running, fully-virtual, and has-mounts are three independent axes with independent visual encodings (status dot + background tint + indicator). The dataclass shape lets each axis route to its own theme key without collapsing information at resolve time.
+
+**Domains:** Presentation (GUI header), Config (`mount_specs` read), Lifecycle (container state query)
+
 ---
 
 ### Detached symlink placeholder (guidance)
