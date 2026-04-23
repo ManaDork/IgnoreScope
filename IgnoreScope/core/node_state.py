@@ -257,8 +257,8 @@ def compute_node_state(
             # host_path is None ⇒ no host-side source: the owning spec is a
             # container-only stencil (Virtual Folder / Volume Mount / extension
             # isolation path). Propagate container_only so compute_visibility
-            # routes the node to "virtual" — unified with Task 1.9 GUI-side
-            # retirement of the L4 auth direct-write.
+            # routes the node to "virtual" — unified with the extension-auth
+            # stencil direct-write.
             if ms.host_path is None:
                 is_container_only = True
 

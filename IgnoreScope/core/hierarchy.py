@@ -63,8 +63,8 @@ class ContainerHierarchy:
     # For docker-compose.yml generation — Layer 1-3 + siblings (bind-delivery
     # project content only; detached-delivery specs emit nothing here).
     # Extension-owned volume-tier entries share the volume_entries list with
-    # user-authored delivery="volume" specs; Task 1.3 collapsed the former
-    # parallel L4 emit path.
+    # user-authored delivery="volume" specs (unified volume tier — no
+    # separate extension emit path).
     ordered_volumes: list[str] = field(default_factory=list)
 
     # Named mask volumes declared in docker-compose.yml volumes section
@@ -504,11 +504,11 @@ def compute_container_hierarchy(
     if host_container_root is None:
         host_container_root = host_project_root.parent
 
-    # Phase 1 unified pipeline (Task 1.3): merge extension-synthesized specs
-    # into the primary mount_specs list before any downstream computation.
-    # The synth output is `delivery="volume"` + `owner="extension:{name}"`,
-    # so extension isolation paths are emitted through the shared volume-
-    # tier path (`_compute_volume_tier_entries`) — no separate L4 loop needed.
+    # Unified pipeline: merge extension-synthesized specs into the primary
+    # mount_specs list before any downstream computation. The synth output
+    # is `delivery="volume"` + `owner="extension:{name}"`, so extension
+    # isolation paths are emitted through the shared volume-tier path
+    # (`_compute_volume_tier_entries`).
     if extensions:
         synthesized: list['MountSpecPath'] = []
         for ext in extensions:
