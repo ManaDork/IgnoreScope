@@ -233,7 +233,7 @@ class TestScopeViewRmbSilentNoOp:
 
 
 class TestRebuildIdempotency:
-    """_rebuild_l4_stencil_nodes drops prior auth nodes before re-emitting."""
+    """_rebuild_extension_stencil_nodes drops prior auth nodes before re-emitting."""
 
     def test_does_not_duplicate_root_children_on_double_call(
         self, tree: MountDataTree,
@@ -243,7 +243,7 @@ class TestRebuildIdempotency:
         first_count = len(tree.root_node.children)
 
         # Direct re-call should not duplicate root children.
-        tree._rebuild_l4_stencil_nodes()
+        tree._rebuild_extension_stencil_nodes()
         assert len(tree.root_node.children) == first_count
 
     def test_preserves_non_stencil_root_children(

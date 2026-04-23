@@ -237,14 +237,21 @@ class MountDataTree(QObject):
         Stencil detection: handled by CORE config-native queries (no tree walk).
         The hierarchy call is for path INCLUSION only, not stencil detection.
 
-        L4 auth stencils (extension isolation_paths) get a synthetic
-        visibility="virtual" NodeState so the FOLDER_STENCIL_AUTH style fires.
+        Extension isolation paths flow through the same pipeline as user specs:
+        ``ExtensionConfig.synthesize_mount_specs()`` is merged into the
+        ``LocalMountConfig`` mount_specs (Task 1.9 unified-synth payoff on the
+        GUI side). CORE's ``compute_node_state`` derives
+        ``container_only=True`` from each synthesized spec's ``host_path=None``
+        and routes visibility to ``"virtual"`` without any GUI direct-write.
         """
-        from dataclasses import replace
         from ..core.local_mount_config import LocalMountConfig
 
+        synthesized_specs: list = []
+        for ext in self._extensions:
+            synthesized_specs.extend(ext.synthesize_mount_specs())
+
         config = LocalMountConfig(
-            mount_specs=list(self._mount_specs),
+            mount_specs=list(self._mount_specs) + synthesized_specs,
             pushed_files=self._pushed_files,
             mirrored=self._mirrored,
         )
@@ -260,14 +267,11 @@ class MountDataTree(QObject):
             mirrored_intermediates = set()
 
         all_paths = self._collect_all_paths(mirrored_intermediates)
+        # Extension-synth mount_roots must be present in all_paths so CORE
+        # computes a state for each (they never appear in the host tree walk).
+        for spec in synthesized_specs:
+            all_paths.add(spec.mount_root)
         self._states = apply_node_states_from_scope(config, all_paths)
-
-        # Synthesize visibility="virtual" state for L4 auth stencil nodes —
-        # they have no host filesystem presence and CORE never sees them.
-        for node in self._stencil_nodes:
-            self._states[node.path] = replace(
-                _DEFAULT_NODE_STATE, visibility="virtual",
-            )
 
         self._emit_state_changed()
 
@@ -718,7 +722,7 @@ class MountDataTree(QObject):
         config reload.
         """
         self._extensions = list(extensions)
-        self._rebuild_l4_stencil_nodes()
+        self._rebuild_extension_stencil_nodes()
         self._recompute_states()
         self.structureChanged.emit()
 
@@ -880,20 +884,25 @@ class MountDataTree(QObject):
             self._mount_specs.extend(sibling.mount_specs)
             self._pushed_files.update(sibling.pushed_files)
 
-        # L4 auth stencils — emit synthetic nodes for extension isolation_paths
-        self._rebuild_l4_stencil_nodes()
+        # Extension isolation paths — emit synthetic stencil nodes driven off
+        # the unified ExtensionConfig.synthesize_mount_specs() pipeline.
+        self._rebuild_extension_stencil_nodes()
 
         self._recompute_states()
         self.mountSpecsChanged.emit()
 
-    def _rebuild_l4_stencil_nodes(self) -> None:
-        """Emit synthetic stencil nodes for each extension's isolation_paths.
+    def _rebuild_extension_stencil_nodes(self) -> None:
+        """Emit synthetic stencil tree nodes for each extension-synthesized spec.
 
-        L4 auth stencils represent container paths backed by named Docker
-        volumes that overlay all other layers (extension-managed, persistent).
+        Task 1.9 unified-synth payoff: iterates
+        ``ExtensionConfig.synthesize_mount_specs()`` — the same entrypoint the
+        Docker/compose side consumes via ``compute_container_hierarchy`` — and
+        builds one ``MountDataNode`` per synthesized spec's ``mount_root``.
+        Tree nodes are tagged ``stencil_tier="auth"`` so the existing
+        ``FOLDER_STENCIL_AUTH`` style keeps firing via ``resolve_tree_state``.
         Read-only in the GUI — no RMB gestures, container_lifecycle owns them.
         """
-        # Drop any prior L4 nodes from root_node.children (rebuild idempotency)
+        # Drop any prior auth-tier stencil nodes from root_node.children (rebuild idempotency)
         if self._root_node:
             self._root_node.children = [
                 c for c in self._root_node.children
@@ -905,10 +914,12 @@ class MountDataTree(QObject):
             return
 
         for ext in self._extensions:
-            ext_name = getattr(ext, "name", "")
-            for container_path in getattr(ext, "isolation_paths", []):
+            for spec in ext.synthesize_mount_specs():
+                # Container paths are POSIX — Path() normalizes to host separators
+                # on Windows, so restore POSIX form for the container_path tag.
+                container_path = spec.mount_root.as_posix()
                 node = MountDataNode(
-                    path=Path(container_path),
+                    path=spec.mount_root,
                     parent=self._root_node,
                     is_stencil_node=True,
                     stencil_tier="auth",

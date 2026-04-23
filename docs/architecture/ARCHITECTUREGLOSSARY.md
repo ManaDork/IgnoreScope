@@ -175,15 +175,15 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 - Theme variables: `stencil.volume`, `stencil.auth`, `inherited.stencil_volume`, `inherited.stencil_auth`, `text_stencil_purple`
 - Folder states: `FOLDER_STENCIL_VOLUME`, `FOLDER_STENCIL_AUTH`
 - GUI tier routing: `MountDataTreeModel.NodeStencilTierRole` (Qt UserRole+3) returns `node.stencil_tier` for stencil nodes, `"mirrored"` otherwise. `TreeStyleDelegate._resolve_style` reads it and forwards into `resolve_tree_state(state, is_folder, stencil_tier)`.
-- L4 auth synthesizer: `MountDataTree._rebuild_l4_stencil_nodes()` (idempotent — drops auth-tier stencils from `root_node.children` then re-emits one per `ExtensionConfig.isolation_paths` entry). Public refresh hook `MountDataTree.set_extensions(list)` for hot install/uninstall.
-- Synthetic NodeState injection (GUI-only): for stencil paths CORE never sees, `mount_data_tree._recompute_states` writes `replace(_DEFAULT_NODE_STATE, visibility="virtual")` post-`apply_node_states_from_scope`. Keeps the GUI route through `_resolve_folder_state` without polluting the CORE state pipeline.
+- L4 auth synthesizer: `MountDataTree._rebuild_extension_stencil_nodes()` (idempotent — drops extension-owned stencils from `root_node.children` then re-emits one per spec returned by `ExtensionConfig.synthesize_mount_specs()`). Public refresh hook `MountDataTree.set_extensions(list)` for hot install/uninstall. Post Task 1.9 (unify-l4) the synth pipeline consumes the same `synthesize_mount_specs()` output that `compute_container_hierarchy(extensions=)` merges into `mount_specs`; CORE derives `container_only=True` for `host_path=None` specs and `compute_visibility` produces `visibility="virtual"` without any GUI-side direct-write to `_states`.
+- CORE-driven synthetic states (Task 1.9): extension-synthesized specs are merged into a temporary `LocalMountConfig` inside `MountDataTree._recompute_states`, and `apply_node_states_from_scope` returns the `visibility="virtual"` states directly. The former GUI direct-write that injected `replace(_DEFAULT_NODE_STATE, visibility="virtual")` post-pipeline is retired; routing to `FOLDER_STENCIL_AUTH` in `_resolve_folder_state` now gates the `stencil_tier` branches ahead of the generic `container_only` fallback.
 
 **`stencil_tier` taxonomy** (three values; surfaced via `NodeStencilTierRole`, consumed by `resolve_tree_state`):
 | Value | Source | Folder state | Theme key |
 |---|---|---|---|
 | `"mirrored"` | Structural intermediates (CORE Stage 2 — see `mirrored`) | `FOLDER_MIRRORED` family | mirrored stops |
 | `"volume"` | `delivery="volume"` mount specs (L_volume tier) | `FOLDER_STENCIL_VOLUME` | `stencil.volume` |
-| `"auth"` | Extension `isolation_paths` (L4 — `_rebuild_l4_stencil_nodes`) | `FOLDER_STENCIL_AUTH` | `stencil.auth` |
+| `"auth"` | Extension-synthesized container-only specs (L4 — `_rebuild_extension_stencil_nodes` consumes `ExtensionConfig.synthesize_mount_specs()`) | `FOLDER_STENCIL_AUTH` | `stencil.auth` |
 
 **Read-only stencil RMB rule (silent-no-op pattern):** Stencil nodes whose lifecycle is owned outside the GUI never expose RMB gestures — the context menu falls through to `_append_fallback_if_empty` ("No valid actions", disabled). Three sites apply this rule today: (a) Project Root Header on LocalHost when no host node is targetable (Phase 2 silent-no-op fix), (b) Project Root Header on Scope Config Tree (Task 4.6), (c) L4 auth stencil nodes in Scope Config Tree (Task 4.9 — container_lifecycle owns the named-volume lifecycle). Mirrored intermediates and `delivery="volume"` stencils route through their normal RMB branches; only auth-tier and header-empty cases short-circuit.
 
