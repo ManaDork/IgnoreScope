@@ -651,6 +651,26 @@ Hard-permanent variant. Backed by a Docker named volume emitted in compose. Surv
 
 ---
 
+### isolation (compound)
+
+Umbrella term for "host-isolated content" — any `MountSpecPath` where `delivery != "bind"`. Introduced in Phase 2 of `unify-l4-reclaim-isolation-term` to reclaim the word "isolation" as a compound concept after Phase 1 eliminated the standalone "Layer 4 isolation" emission tier.
+
+Spans:
+- `delivery="detached"` (cp-delivered snapshot; container-fs only; lost on recreate unless `preserve_on_update=True`).
+- `delivery="volume"` (Docker named volume; persists natively across recreate).
+
+Both owner strata participate:
+- `owner == "user"` — user-authored Virtual Mount / Virtual Folder / Permanent Folder specs.
+- `owner.startswith("extension:")` — extension-synthesized specs produced by `ExtensionConfig.synthesize_mount_specs()` (e.g., Claude CLI `/root/.local`, `/root/.claude`).
+
+The compound term is the appropriate vocabulary for guard-variable names, log strings, and documentation prose where the tier distinction (`detached` vs `volume`) is **not** load-bearing. When a site's behavior depends on the specific mechanism, the mechanism axes (`delivery`, `owner`, `content_seed`, `preserve_on_update`) are the source of truth — `isolation` as a blanket rename would hide meaningful distinctions.
+
+Public field names on `MountSpecPath` (`delivery`, `owner`, `content_seed`, `preserve_on_update`, `host_path`) are NOT renamed to anything involving "isolation" — the compound lives in local variables, comments, and narrative documentation only. Task 2.2's mechanical audit classifies each candidate site as either (a) compound improves clarity or (b) keep mechanism axes explicit; targeted renames in Task 2.3 apply only to bucket (a).
+
+**Domains:** Documentation vocabulary, Config (read-only reference to `delivery` / `owner`)
+
+---
+
 ### CLI surface (mount delivery)
 
 Phase 3 Task 4.8 surfaces every Mount Delivery gesture on the `python -m IgnoreScope` CLI. Each command mirrors a GUI gesture and persists via `save_config` only — no implicit container recreate. Container-affecting gestures append a recreate hint to the success message when a container exists.
