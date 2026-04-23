@@ -168,6 +168,7 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 - `NodeSource.STENCIL` — MountDataTree source discriminator
 - `MountDataNode.is_stencil_node: bool`, `MountDataNode.stencil_tier: str` (values: `mirrored`, `volume`, `auth`)
 - `MountSpecPath.get_stencil_paths()` — derives stencil paths from mask/reveal patterns
+- `MountSpecPath.owner: str` — `"user"` or `"extension:{name}"`. Discriminates user-authored specs from extension-synthesized specs. Foundation for the unified volume synthesizer, read-only RMB re-key, and volume-name derivation landing in Phase 1 Tasks 1.2–1.10 of `unify-l4-reclaim-isolation-term`. Task 1.1 adds the field; downstream tasks consume it.
 - `_compute_stencil_paths_from_config()`, `_cross_reference_stencil_paths()` in `core/node_state.py`
 - `display_stencil_nodes: bool` on TreeDisplayConfig
 - Theme variables: `stencil.volume`, `stencil.auth`, `inherited.stencil_volume`, `inherited.stencil_auth`, `text_stencil_purple`
@@ -534,6 +535,7 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 - `host_path: Optional[Path] = None` — host-side source for content. `None` = container-only (no host read side). Required when `delivery == "bind"` — auto-filled from `mount_root` by `__post_init__` for legacy Phase 1/2 construction.
 - `content_seed: Literal["tree", "folder"] = "tree"` — controls initial container-side content for non-bind specs. `"tree"` cp-walks the whole subtree from host (Phase 1 behavior). `"folder"` only `mkdir -p`'s the mount root; content is filled via `pushed_files` or inside-container writes.
 - `preserve_on_update: bool = False` — if `True`, the update lifecycle cp's this spec's container contents to a host tmp staging area across recreate. Only valid when `delivery == "detached"` and `content_seed == "folder"` (tree-seed specs re-read from host; `delivery="volume"` survives natively).
+- `owner: str = "user"` — provenance tag. `"user"` for user-authored specs (default). `"extension:{name}"` (e.g. `"extension:claude"`) for extension-synthesized specs. Load-bearing for unified volume naming, GUI read-only RMB gating, and Scope Config header signal derivation across Phase 1 Tasks 1.2–1.10 of `unify-l4-reclaim-isolation-term`. Validated to `"user"` or `"extension:{non-empty-name}"` format; no other shapes permitted. Round-trippable as a flat string (extension name embedded) so the spec stays self-describing.
 
 **Pattern syntax (gitignore native, applies to both delivery modes):**
 - `"vendor/"` — mask (deny) the vendor directory
@@ -549,6 +551,7 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 - `host_path is None` → `delivery != "bind"` (bind needs a host source)
 - `delivery == "volume"` → `content_seed == "folder"` (no tree-seeding into a named volume at this phase)
 - `preserve_on_update == True` → `delivery == "detached"` and `content_seed == "folder"` (meaningless elsewhere)
+- `owner` format: `"user"` or `"extension:{non-empty-name}"` (no other shapes accepted)
 
 **JSON format:**
 ```json
@@ -556,11 +559,12 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
   {"mount_root": "src", "patterns": ["vendor/", "!vendor/public/"], "delivery": "bind"},
   {"mount_root": "src/generated", "patterns": [], "delivery": "detached"},
   {"mount_root": "/container/scratch", "patterns": [], "delivery": "detached", "content_seed": "folder", "preserve_on_update": true},
-  {"mount_root": "/container/cache", "patterns": [], "delivery": "volume", "content_seed": "folder"}
+  {"mount_root": "/container/cache", "patterns": [], "delivery": "volume", "content_seed": "folder"},
+  {"mount_root": "/root/.claude", "patterns": [], "delivery": "volume", "content_seed": "folder", "owner": "extension:claude"}
 ]
 ```
 
-`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs). `host_path`, `content_seed`, and `preserve_on_update` are omitted from JSON when at their defaults, so Phase 1/2 configs round-trip unchanged.
+`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs). `host_path`, `content_seed`, `preserve_on_update`, and `owner` are omitted from JSON when at their defaults, so Phase 1/2 configs round-trip unchanged.
 
 **Domains:** Config (mount_spec_path.py), Computation (node_state.py pathspec eval, hierarchy.py volume generation), Presentation (future rule list panel)
 

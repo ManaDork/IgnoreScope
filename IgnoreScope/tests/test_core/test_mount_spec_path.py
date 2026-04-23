@@ -641,3 +641,122 @@ class TestPhase3ValidateFolderSeedRejectsPatterns:
             content_seed="tree",
         )
         assert not any("folder-seed" in e for e in spec.validate())
+
+
+# ──────────────────────────────────────────────
+# MSP-5: owner field (user / extension:{name})
+# ──────────────────────────────────────────────
+
+
+class TestOwnerFieldDefaults:
+    """owner defaults to 'user' on construction."""
+
+    def test_owner_defaults_to_user(self, tmp_path: Path):
+        spec = MountSpecPath(mount_root=tmp_path / "src")
+        assert spec.owner == "user"
+
+    def test_owner_explicit_extension(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/root/.claude"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+            owner="extension:claude",
+        )
+        assert spec.owner == "extension:claude"
+
+
+class TestOwnerFieldValidation:
+    """owner must be 'user' or 'extension:{name}' with non-empty name."""
+
+    def test_user_owner_accepted(self, tmp_path: Path):
+        spec = MountSpecPath(mount_root=tmp_path / "src", owner="user")
+        assert not any("owner" in e for e in spec.validate())
+
+    def test_extension_owner_accepted(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/root/.claude"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+            owner="extension:claude",
+        )
+        assert not any("owner" in e for e in spec.validate())
+
+    def test_extension_owner_with_hyphenated_name_accepted(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/opt/my-tool"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+            owner="extension:my-tool",
+        )
+        assert not any("owner" in e for e in spec.validate())
+
+    def test_bare_extension_name_rejected(self, tmp_path: Path):
+        """'claude' alone (no 'extension:' prefix) is invalid."""
+        spec = MountSpecPath(mount_root=tmp_path / "src", owner="claude")
+        errors = spec.validate()
+        assert any("owner must be" in e for e in errors), (
+            f"Expected owner-format error, got: {errors}"
+        )
+
+    def test_empty_extension_suffix_rejected(self, tmp_path: Path):
+        """'extension:' with no name after colon is invalid."""
+        spec = MountSpecPath(mount_root=tmp_path / "src", owner="extension:")
+        errors = spec.validate()
+        assert any("missing extension name" in e for e in errors), (
+            f"Expected missing-extension-name error, got: {errors}"
+        )
+
+    def test_empty_owner_rejected(self, tmp_path: Path):
+        spec = MountSpecPath(mount_root=tmp_path / "src", owner="")
+        errors = spec.validate()
+        assert any("owner must be" in e for e in errors)
+
+
+class TestOwnerFieldSerialization:
+    """owner round-trips through to_dict / from_dict."""
+
+    def test_default_owner_omitted_from_dict(self, tmp_path: Path):
+        """Legacy specs serialize to the same JSON shape — 'owner' key absent."""
+        spec = MountSpecPath(
+            mount_root=tmp_path / "src",
+            patterns=["vendor/"],
+            delivery="bind",
+        )
+        data = spec.to_dict(tmp_path)
+        assert "owner" not in data
+
+    def test_extension_owner_emitted_in_dict(self, tmp_path: Path):
+        spec = MountSpecPath(
+            mount_root=Path("/root/.claude"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+            owner="extension:claude",
+        )
+        data = spec.to_dict(tmp_path)
+        assert data["owner"] == "extension:claude"
+
+    def test_legacy_dict_defaults_owner_to_user(self, tmp_path: Path):
+        """Configs on disk without 'owner' deserialize as 'user'."""
+        legacy = {
+            "mount_root": "src",
+            "patterns": [],
+            "delivery": "bind",
+        }
+        spec = MountSpecPath.from_dict(legacy, tmp_path)
+        assert spec.owner == "user"
+
+    def test_extension_owner_round_trip(self, tmp_path: Path):
+        original = MountSpecPath(
+            mount_root=Path("/root/.claude"),
+            delivery="volume",
+            host_path=None,
+            content_seed="folder",
+            owner="extension:claude",
+        )
+        restored = MountSpecPath.from_dict(original.to_dict(tmp_path), tmp_path)
+        assert restored.owner == "extension:claude"
+        assert restored.delivery == "volume"

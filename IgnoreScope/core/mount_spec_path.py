@@ -51,6 +51,14 @@ class MountSpecPath:
             ``content_seed == "folder"``; tree-seed specs re-read from host, so
             the flag is meaningless there. ``delivery == "volume"`` survives
             update natively without needing this flag.
+        owner: Provenance tag for the spec.
+            "user"               — user-authored spec (default).
+            "extension:{name}"   — synthesized by an extension at hierarchy-
+                                   compute time (e.g. "extension:claude").
+            Load-bearing for volume naming, GUI read-only RMB gating, and
+            Scope Config header signal derivation. Round-trippable as a flat
+            string so the spec stays self-describing (no sibling lookup into
+            ExtensionConfig to resolve the extension name).
     """
 
     mount_root: Path = field(default_factory=Path)
@@ -59,6 +67,7 @@ class MountSpecPath:
     host_path: Optional[Path] = None
     content_seed: Literal["tree", "folder"] = "tree"
     preserve_on_update: bool = False
+    owner: str = "user"
 
     def __post_init__(self) -> None:
         """For bind specs, default host_path to mount_root.
@@ -276,6 +285,19 @@ class MountSpecPath:
                 f"content_seed={self.content_seed!r}"
             )
 
+        # owner must be "user" or "extension:{name}" (non-empty name).
+        if self.owner != "user":
+            if not self.owner.startswith("extension:"):
+                errors.append(
+                    f"owner must be 'user' or 'extension:{{name}}'; "
+                    f"got {self.owner!r}"
+                )
+            elif not self.owner[len("extension:"):]:
+                errors.append(
+                    "owner='extension:' is missing extension name; "
+                    "expected 'extension:{name}'"
+                )
+
         for i, p in enumerate(self.patterns):
             stripped = p.lstrip("!")
             if not stripped:
@@ -335,9 +357,9 @@ class MountSpecPath:
     def to_dict(self, host_project_root: Path) -> dict:
         """Serialize to dict with relative paths.
 
-        Non-default fields (host_path, content_seed, preserve_on_update) are
-        emitted only when they differ from defaults, so legacy Phase 1/2 specs
-        round-trip to the same JSON they came from.
+        Non-default fields (host_path, content_seed, preserve_on_update,
+        owner) are emitted only when they differ from defaults, so legacy
+        Phase 1/2 specs round-trip to the same JSON they came from.
 
         Args:
             host_project_root: Base path for relative conversion.
@@ -359,6 +381,8 @@ class MountSpecPath:
             result["content_seed"] = self.content_seed
         if self.preserve_on_update:
             result["preserve_on_update"] = True
+        if self.owner != "user":
+            result["owner"] = self.owner
         return result
 
     @classmethod
@@ -369,7 +393,8 @@ class MountSpecPath:
             data: Dict with 'mount_root' (relative path), 'patterns' (list),
                 and optional 'delivery' ('bind' default for legacy configs),
                 'host_path' (None default — container-only), 'content_seed'
-                ('tree' default), 'preserve_on_update' (False default).
+                ('tree' default), 'preserve_on_update' (False default),
+                'owner' ('user' default — user-authored spec).
             host_project_root: Base path for resolving relative mount_root.
         """
         raw_root = data.get("mount_root", ".")
@@ -391,6 +416,7 @@ class MountSpecPath:
             mount_root = (host_project_root / raw_root).resolve()
         content_seed = data.get("content_seed", "tree")
         preserve_on_update = data.get("preserve_on_update", False)
+        owner = data.get("owner", "user")
 
         return cls(
             mount_root=mount_root,
@@ -399,6 +425,7 @@ class MountSpecPath:
             host_path=host_path,
             content_seed=content_seed,
             preserve_on_update=preserve_on_update,
+            owner=owner,
         )
 
     # --- Internal ---
