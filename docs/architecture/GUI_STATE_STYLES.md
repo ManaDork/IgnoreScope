@@ -490,3 +490,19 @@ The old architecture had three separate tree contexts (PROJECT, EXCEPTION, SCOPE
 ### TreeContext.SCOPE Note
 
 > `TreeContext.SCOPE` — now wired via `TreeDisplayConfig(panel="scope")`. The scope panel reads from `_scope_resolved` (deep-merge of `scope` over `local_host` sections in the consolidated `*_theme.json`). Per-panel differentiation is achieved by overriding keys in the `scope.state_colors` and `scope.fonts` sections — empty sections inherit all values from `local_host`.
+
+---
+
+## 10. Scope Config Tree Container Header (Phase 3)
+
+The Scope Config Tree's column-0 header renders a 3-signal aggregate (`ScopeHeaderSignals`, see `ARCHITECTUREGLOSSARY.md`) composed of three orthogonal channels. Full canonical mapping lives in `THEME_WORKFLOW.md § Scope Header Signal Mapping`.
+
+| Signal | Channel | Theme key / glyph |
+|---|---|---|
+| `container_running` | Text prefix on column 0 | `●` running / `○` stopped / none (placeholder or empty scope) |
+| `fully_virtual` | `QHeaderView::section` background-color | `visibility.virtual` |
+| `has_mounts` | `QHeaderView::section` border-bottom (3px) | `config.mount` |
+
+Channels are orthogonal by invariant — `fully_virtual` and `has_mounts` are mutually exclusive, so background and border-bottom never paint simultaneously. Running-state is independent and stays text-only. Empty-scope state clears the stylesheet and drops the prefix.
+
+No new theme keys are introduced; both reused keys already appear in the state-color palette (Section 5). Unified `mount_specs` input (user + extension-synthesized) keeps the header and the compose emitter in sync.

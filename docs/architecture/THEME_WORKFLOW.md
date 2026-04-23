@@ -192,22 +192,31 @@ METHOD flags (`is_masked`, `is_revealed`, `is_mount_root`, etc.) drive the P3/P4
 
 ---
 
-## Mount Delivery Color Mapping
+## Scope Header Signal Mapping
 
-The Project Root Header tints to indicate the active scope's dominant delivery mode across its `mount_specs` (see glossary → Mount Delivery Terms). The mapping reuses existing theme keys — no new variables are introduced.
+The Scope Config Tree column-0 header renders a 3-signal aggregate (see glossary → `ScopeHeaderSignals`) that reports the active scope's container state, virtual-only posture, and bind-mount presence. The three channels are orthogonal: they paint independent visual properties and cannot collide.
 
-| Scope's mount_specs delivery mix | Theme Key | Rationale |
-|------|-----------|-----------|
-| All `delivery == "bind"` | `config.mount` | Consistent with mount-checkbox coloring — bind IS the mount-driven mechanism. |
-| All `delivery == "detached"` | `visibility.virtual` | Consistent with container-only / virtual content tinting — detached content lives only in the container. |
-| **Mixed** (some bind, some detached) | **Majority by spec count wins** | Ties resolve to `config.mount`. |
-| Empty scope (no mount_specs) | Default panel-header color | No signal to communicate. |
+| Signal | Channel | Encoding | Source |
+|---|---|---|---|
+| `container_running` | Header text prefix (column 0) | `●` when True / `○` when False / no prefix for empty or placeholder scope | `get_container_info(docker_name)['running']` |
+| `fully_virtual` | `QHeaderView::section` background-color | `color_vars["visibility.virtual"]` | `len(mount_specs) > 0 AND all(s.delivery != "bind")` |
+| `has_mounts` | `QHeaderView::section` border-bottom | `3px solid color_vars["config.mount"]` | `any(s.delivery == "bind")` |
 
-Semantic overload note: `visibility.virtual` already tints container-only files and mirrored intermediate directories. Extending it to the detached-majority header tint keeps the "lives only in the container" palette consistent across node-level and scope-level cues.
+The `mount_specs` input is the unified list (user specs + extension-synthesized specs) that `compute_container_hierarchy(extensions=...)` consumes. Extension specs (e.g., Claude `/root/.claude`) are `delivery="volume"` and count toward `fully_virtual`, never toward `has_mounts`.
 
-Per-scope header tint is a signal of the scope's overall shape — it does NOT imply every spec has that delivery. For fine-grained per-spec visual cues, refer to per-node styling in `GUI_STATE_STYLES.md`.
+Mutual exclusion: `fully_virtual` and `has_mounts` cannot both be True (proven by construction — one requires no bind specs, the other requires at least one). Background and border-bottom therefore never both paint.
 
-Selector mechanism is an implementation detail left to the GUI zone — the Blueprint only specifies the input signal (`delivery` mix) and the output theme key above.
+Empty-scope case: `fully_virtual=False, has_mounts=False` → empty stylesheet override, falls back to the global QSS default.
+
+Theme-key reuse rationale:
+- `visibility.virtual` already tints container-only files and mirrored intermediate directories. Extending it to the `fully_virtual` scope-level background keeps the "lives only in the container" palette consistent across node-level and scope-level cues.
+- `config.mount` is the mount-checkbox and bind-mount node accent. Extending it to the `has_mounts` scope-level border keeps the bind-mount affordance visually coherent.
+
+No new theme keys are introduced. If a future UX pass wants header-only keys distinct from the reused palette entries, that becomes a separate theme update — the 3-signal resolver and renderer are already key-agnostic.
+
+Selector mechanism: `ScopeView._apply_header_signals(signals)` composes the stylesheet; `refresh()` recomputes the dot prefix. Re-render is driven off `MountDataTree.mountSpecsChanged`. Runtime container-state polling lives in `_query_is_container_running` (module-level helper in `scope_view.py`).
+
+LocalHost panel: the Phase 2 Project Root Header delivery-tint was retired in Phase 3 Task 3.5. LocalHost header now falls back to the global QSS default; scope-level signal affordance is localized to the Scope Config Tree.
 
 ---
 

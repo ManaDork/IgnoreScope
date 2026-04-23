@@ -701,22 +701,6 @@ Shift-select supports batch Remove across multiple Virtual Mount entries.
 
 ---
 
-### Mount Delivery header cue
-
-The Project Root Header in the GUI tints to indicate the active scope's dominant delivery mode across its `mount_specs`:
-- All specs `delivery="bind"` → `config.mount` theme color (Mount-consistent)
-- All specs `delivery="detached"` → `visibility.virtual` theme color (container-only-consistent)
-- Mixed (some bind, some detached) → majority-by-spec-count wins. Ties resolve to `config.mount`.
-- Empty scope (no mount_specs) → default panel-header color.
-
-Selection mechanism and QSS details are an implementation concern of `gui/local_host_view.py` and the theme stylesheet.
-
-**Domains:** Presentation (GUI theme), Config (delivery read)
-
-**Status:** Superseded in Phase 3 by `ScopeHeaderSignals` (below). `resolve_delivery_tint_key` and `LocalHostView._apply_header_tint` are removed when the 3-signal header lands on the Scope Config Tree (Task 3.5). This section is retained here as history until the doc pass in Task 3.7.
-
----
-
 ### ScopeHeaderSignals (Scope Config Tree container header)
 
 Three-signal aggregate that drives the Scope Config Tree's container header in the GUI. Computed by `gui/style_engine.py::resolve_scope_header_signals` and consumed by the renderer in `gui/scope_view.py` (Phase 3 of `unify-l4-reclaim-isolation-term`).
@@ -739,7 +723,17 @@ Three-signal aggregate that drives the Scope Config Tree's container header in t
 
 **Input-list convention:** The resolver consumes the **unified** `mount_specs` list — user-authored specs plus extension-synthesized specs (from `ExtensionConfig.synthesize_mount_specs()`, Phase 1 Task 1.2). This matches what `compute_container_hierarchy(extensions=...)` sees, so the header and the compose emitter read identical state.
 
-**Why a structured signal instead of a single theme key:** The prior `resolve_delivery_tint_key` returned one theme key (`config.mount` or `visibility.virtual`) representing a single axis. Container running, fully-virtual, and has-mounts are three independent axes with independent visual encodings (status dot + background tint + indicator). The dataclass shape lets each axis route to its own theme key without collapsing information at resolve time.
+**Why a structured signal instead of a single theme key:** The prior (retired) `resolve_delivery_tint_key` returned one theme key (`config.mount` or `visibility.virtual`) representing a single axis. Container running, fully-virtual, and has-mounts are three independent axes with independent visual encodings (status dot + background tint + border). The dataclass shape lets each axis route to its own theme key without collapsing information at resolve time.
+
+**Visual encoding (Phase 3 Tasks 3.3 + 3.4):** three orthogonal channels; canonical mapping in `THEME_WORKFLOW.md § Scope Header Signal Mapping`.
+
+| Signal | Channel | Theme key / glyph |
+|---|---|---|
+| `container_running` | Column-0 header text prefix | `●` running / `○` stopped / none (placeholder or empty) |
+| `fully_virtual` | `QHeaderView::section` background-color | `visibility.virtual` |
+| `has_mounts` | `QHeaderView::section` border-bottom (3px) | `config.mount` |
+
+`fully_virtual` and `has_mounts` are mutually exclusive by invariant, so background and border-bottom never both paint. No new theme keys introduced — the two reused keys already appear in the state-color palette.
 
 **Domains:** Presentation (GUI header), Config (`mount_specs` read), Lifecycle (container state query)
 
