@@ -22,7 +22,7 @@ from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QRadialGradie
 
 
 # ------------------------------------------------------------------
-# Mount delivery tint resolver
+# Mount delivery tint resolver (superseded by ScopeHeaderSignals; removed in Task 3.5)
 # ------------------------------------------------------------------
 
 def resolve_delivery_tint_key(mount_specs) -> Optional[str]:
@@ -41,6 +41,49 @@ def resolve_delivery_tint_key(mount_specs) -> Optional[str]:
     if detached > bind:
         return "visibility.virtual"
     return "config.mount"
+
+
+# ------------------------------------------------------------------
+# Scope Config Tree container header — 3-signal aggregate (Phase 3)
+# ------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ScopeHeaderSignals:
+    """Three-signal aggregate for the Scope Config Tree container header.
+
+    - ``container_running``: True iff the scope's docker container is running.
+    - ``fully_virtual``: True iff the scope has 1+ mount_specs AND all are
+      ``delivery != "bind"`` (host-isolated content only).
+    - ``has_mounts``: True iff any mount_spec is ``delivery == "bind"``.
+
+    Invariant: ``fully_virtual`` and ``has_mounts`` are mutually exclusive.
+    Empty scope: both False.
+    """
+
+    container_running: bool
+    fully_virtual: bool
+    has_mounts: bool
+
+
+def resolve_scope_header_signals(
+    container_running: bool,
+    mount_specs,
+) -> ScopeHeaderSignals:
+    """Compute the 3-signal aggregate for a scope's container header.
+
+    Caller is responsible for passing the unified ``mount_specs`` list
+    (user specs + extension-synthesized specs) — matches what
+    ``compute_container_hierarchy`` sees post-Phase-1. Container state is
+    injected as a plain bool so this resolver stays pure (no Docker subprocess).
+    """
+    specs = list(mount_specs)
+    has_mounts = any(ms.delivery == "bind" for ms in specs)
+    fully_virtual = bool(specs) and all(ms.delivery != "bind" for ms in specs)
+    return ScopeHeaderSignals(
+        container_running=container_running,
+        fully_virtual=fully_virtual,
+        has_mounts=has_mounts,
+    )
 
 
 # ------------------------------------------------------------------
