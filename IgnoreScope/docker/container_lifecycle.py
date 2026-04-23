@@ -483,16 +483,19 @@ def reconcile_extensions(
     )
 
 
-def _compute_resource_names(host_project_root: Path, scope_name: str) -> tuple[str, str, str]:
-    """Compute Docker resource name triple.
+def _compute_resource_names(host_project_root: Path, scope_name: str) -> tuple[str, str]:
+    """Compute Docker resource name pair.
 
     Returns:
-        (docker_name, image_name, volume_name)
+        (docker_name, image_name)
+
+    Note: Task 1.7 of ``unify-l4-reclaim-isolation-term`` retired the
+    ``{docker_name}-claude-auth`` volume name — the auth volume now flows
+    through the unified extension-synth pipeline as a ``vol_*`` name.
     """
     docker_name = build_docker_name(host_project_root, scope_name)
     image_name = f"{sanitize_volume_name(docker_name)}:latest"
-    volume_name = f"{docker_name}-claude-auth"
-    return docker_name, image_name, volume_name
+    return docker_name, image_name
 
 
 def preflight_create(
@@ -612,7 +615,7 @@ def execute_create(
     scope_name = config.scope_name
     if not scope_name:
         return OpResult(success=False, message="config.scope_name must be set", error=OpError.VALIDATION_FAILED)
-    docker_name, image_name, volume_name = _compute_resource_names(host_project_root, scope_name)
+    docker_name, image_name = _compute_resource_names(host_project_root, scope_name)
 
     # Generate docker-compose.yml
     try:
@@ -622,7 +625,6 @@ def execute_create(
             host_project_root=host_project_root,
             docker_container_name=docker_name,
             docker_image_name=image_name,
-            docker_volume_name=volume_name,
             container_root=config.container_root,
             project_name=host_project_root.name,
             volume_entries=hierarchy.volume_entries,
@@ -849,7 +851,7 @@ def execute_update(
     # ── Phase 4: Detect orphan volumes (masks + isolation) ──
     orphan_volumes = (old_mask_names - new_mask_names) | (old_iso_names - new_iso_names)
 
-    docker_name, image_name, volume_name = _compute_resource_names(host_project_root, scope_name)
+    docker_name, image_name = _compute_resource_names(host_project_root, scope_name)
     output_dir = get_container_dir(host_project_root, scope_name)
 
     # ── Phase 4b: Preserve detached folders (before compose down) ──
@@ -898,7 +900,6 @@ def execute_update(
                 host_project_root=host_project_root,
                 docker_container_name=docker_name,
                 docker_image_name=image_name,
-                docker_volume_name=volume_name,
                 container_root=config.container_root,
                 project_name=host_project_root.name,
                 volume_entries=new_hierarchy.volume_entries,
