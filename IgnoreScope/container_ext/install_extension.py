@@ -126,7 +126,7 @@ class ExtensionInstaller(ABC):
         """Get container paths that need persistent isolation volumes.
 
         Returns:
-            List of container-absolute paths requiring Layer 4 volumes.
+            List of container-absolute paths requiring persistent named volumes.
             Override in subclasses. Default: empty (no isolation needed).
         """
         return []
