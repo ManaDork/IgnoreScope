@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QInputDialog,
     QMenu,
-    QMessageBox,
 )
 
 from .delegates import TreeStyleDelegate
@@ -477,9 +476,9 @@ class ScopeView(QWidget):
         )
         if path is None:
             return
-        if self._container_exists() and not self._confirm_recreate():
-            return
         if self._tree.add_stencil_volume(path) and self._container_exists():
+            # recreate_container (host-app slot) owns the destructive-action
+            # confirmation dialog — richer wording than a bare "Continue?".
             self.recreateRequested.emit()
 
     def _on_remove_spec(self, path: Path) -> None:
@@ -502,18 +501,6 @@ class ScopeView(QWidget):
         if not stripped:
             return None
         return Path(stripped)
-
-    def _confirm_recreate(self) -> bool:
-        """QMessageBox.question gate before Volume Mount triggers recreate."""
-        reply = QMessageBox.question(
-            self,
-            "Recreate Container",
-            "Adding a Volume Mount will recreate the container "
-            "to attach the new named volume.\n\n"
-            "Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        return reply == QMessageBox.StandardButton.Yes
 
     def _get_container_info(self) -> Optional[dict]:
         """Query the current scope's container info, returns None if absent."""
