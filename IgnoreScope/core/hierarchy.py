@@ -20,6 +20,7 @@ from .config import get_container_path
 
 if TYPE_CHECKING:
     from .config import SiblingMount
+    from .local_mount_config import ExtensionConfig
     from .mount_spec_path import MountSpecPath
 
 
@@ -463,7 +464,7 @@ def compute_container_hierarchy(
     host_container_root: Path | None = None,
     siblings: list['SiblingMount'] | None = None,
     mirrored: bool = True,
-    isolation_paths: list[tuple[str, str]] | None = None,
+    extensions: list['ExtensionConfig'] | None = None,
 ) -> ContainerHierarchy:
     """Compute complete container hierarchy from configuration.
 
@@ -481,13 +482,30 @@ def compute_container_hierarchy(
         host_container_root: Host container root (relative_to base). Defaults to host_project_root.parent
         siblings: Optional list of sibling mounts for external directories
         mirrored: Enable intermediate directory creation in masked areas
-        isolation_paths: Optional list of (extension_name, container_path) tuples for Layer 4 volumes
+        extensions: Optional list of ExtensionConfig entries. Each extension's
+            ``isolation_paths`` are materialized as ``delivery="volume"`` specs
+            via ``ExtensionConfig.synthesize_mount_specs()`` and merged into
+            the unified ``mount_specs`` list at the top of this function —
+            they flow through the same volume-tier emission path as user-
+            authored ``delivery="volume"`` specs.
 
     Returns:
         ContainerHierarchy with all computed values
     """
     if host_container_root is None:
         host_container_root = host_project_root.parent
+
+    # Phase 1 unified pipeline (Task 1.3): merge extension-synthesized specs
+    # into the primary mount_specs list before any downstream computation.
+    # The synth output is `delivery="volume"` + `owner="extension:{name}"`,
+    # so extension isolation paths are emitted through the shared volume-
+    # tier path (`_compute_stencil_volumes`) — no separate L4 loop needed.
+    if extensions:
+        synthesized: list['MountSpecPath'] = []
+        for ext in extensions:
+            synthesized.extend(ext.synthesize_mount_specs())
+        if synthesized:
+            mount_specs = list(mount_specs) + synthesized
 
     hierarchy = ContainerHierarchy()
 
@@ -521,22 +539,14 @@ def compute_container_hierarchy(
 
     # L_volume: Named volumes for delivery="volume" specs (stencil tier).
     # Iterated over the primary mount_specs only — sibling volume-delivery
-    # is not a Phase 3 gesture. Kept separate from ordered_volumes because
-    # volume-delivery survives recreate natively while L1-L3 do not, and
-    # separate from isolation volumes because these are user-authored.
+    # is not a Phase 3 gesture. Both user-authored and extension-synthesized
+    # volume specs share this emission path (extension specs carry
+    # ``owner="extension:{name}"``; user specs carry ``owner="user"``).
+    # Naming discriminator via ``owner`` lands in Task 1.4.
     stencil_entries, stencil_names = _compute_stencil_volumes(
         mount_specs, container_root, host_container_root,
     )
     hierarchy.stencil_volume_entries = stencil_entries
     hierarchy.stencil_volume_names = stencil_names
-
-    # Layer 4: Isolation volumes (persistent, container-owned, final overlay).
-    # Kept separate from ordered_volumes because L4 is emitted regardless of
-    # any spec's delivery — ordered_volumes carries only bind-delivery content.
-    if isolation_paths:
-        for ext_name, container_path in isolation_paths:
-            vol_name = f"iso_{sanitize_volume_name(ext_name)}_{sanitize_volume_name(container_path.strip('/').replace('/', '_'))}"
-            hierarchy.isolation_volume_entries.append(f"{vol_name}:{container_path}")
-            hierarchy.isolation_volume_names.append(vol_name)
 
     return hierarchy

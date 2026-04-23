@@ -31,6 +31,7 @@ from IgnoreScope.core.hierarchy import (
     _walk_mirrored_intermediates,
 )
 from IgnoreScope.core.config import SiblingMount
+from IgnoreScope.core.local_mount_config import ExtensionConfig
 from IgnoreScope.core.mount_spec_path import MountSpecPath
 
 
@@ -1088,14 +1089,23 @@ class TestWalkMirroredIntermediates:
 
 
 # =============================================================================
-# Isolation Volumes (Layer 4)
+# Isolation Volumes (Layer 4 via unified synth) — Task 1.3
 # =============================================================================
+#
+# Post-Task-1.3, extension isolation paths flow through the unified-synth
+# pipeline: ExtensionConfig.synthesize_mount_specs() emits volume-delivery
+# MountSpecPaths that compute_container_hierarchy merges into mount_specs
+# and renders via _compute_stencil_volumes. L4 output therefore lives on
+# hierarchy.stencil_volume_entries / stencil_volume_names under the
+# stencil_{idx}_{path} naming scheme (Task 1.4 renames to vol_*).
+# The legacy isolation_volume_* fields stay zero-populated for now and
+# retire formally at Task 1.4.
 
 class TestIsolationVolumes:
-    """Verify Layer 4 isolation volume computation."""
+    """Verify Layer 4 isolation volume computation via extensions= synth path."""
 
     def test_isolation_paths_produce_volumes(self, tmp_path: Path):
-        """isolation_paths → entries in isolation_volume_entries + isolation_volume_names."""
+        """extensions → entries in stencil_volume_entries + stencil_volume_names."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1104,17 +1114,17 @@ class TestIsolationVolumes:
             pushed_files=set(),
             host_project_root=tmp_path,
             host_container_root=tmp_path,
-            isolation_paths=[("Claude Code", "/root/.local")],
+            extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
 
-        # L4 lives in its own list, separate from ordered_volumes (L1-L3 + siblings)
-        assert len(hierarchy.isolation_volume_entries) == 1
-        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
-        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
+        # L4 lives in stencil_volume_entries, separate from ordered_volumes
+        assert len(hierarchy.stencil_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
+        assert not any("stencil_" in v for v in hierarchy.ordered_volumes)
 
-        # Name tracked in isolation_volume_names
-        assert len(hierarchy.isolation_volume_names) == 1
-        assert hierarchy.isolation_volume_names[0].startswith("iso_")
+        # Name tracked in stencil_volume_names
+        assert len(hierarchy.stencil_volume_names) == 1
+        assert hierarchy.stencil_volume_names[0].startswith("stencil_")
 
     def test_isolation_separate_from_ordered_volumes(self, tmp_path: Path):
         """L4 entries are stored separately from L1-L3 + siblings."""
@@ -1128,15 +1138,15 @@ class TestIsolationVolumes:
             pushed_files=set(),
             host_project_root=tmp_path,
             host_container_root=tmp_path,
-            isolation_paths=[("Git", "/usr/bin")],
+            extensions=[ExtensionConfig(name="Git", isolation_paths=["/usr/bin"])],
         )
 
         # L1 mount + L2 mask + L3 reveal = 3 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 3
-        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
-        # L4 is in isolation_volume_entries
-        assert len(hierarchy.isolation_volume_entries) == 1
-        assert ":/usr/bin" in hierarchy.isolation_volume_entries[0]
+        assert not any("stencil_" in v for v in hierarchy.ordered_volumes)
+        # L4 is in stencil_volume_entries
+        assert len(hierarchy.stencil_volume_entries) == 1
+        assert ":/usr/bin" in hierarchy.stencil_volume_entries[0]
 
     def test_multiple_isolation_paths(self, tmp_path: Path):
         """Multiple isolation paths from different extensions."""
@@ -1148,19 +1158,22 @@ class TestIsolationVolumes:
             pushed_files=set(),
             host_project_root=tmp_path,
             host_container_root=tmp_path,
-            isolation_paths=[
-                ("Claude Code", "/root/.local"),
-                ("P4 MCP Server", "/usr/local/lib/p4-mcp-server"),
+            extensions=[
+                ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"]),
+                ExtensionConfig(
+                    name="P4 MCP Server",
+                    isolation_paths=["/usr/local/lib/p4-mcp-server"],
+                ),
             ],
         )
 
-        assert len(hierarchy.isolation_volume_names) == 2
-        assert len(hierarchy.isolation_volume_entries) == 2
-        assert any("/root/.local" in v for v in hierarchy.isolation_volume_entries)
-        assert any("/usr/local/lib/p4-mcp-server" in v for v in hierarchy.isolation_volume_entries)
+        assert len(hierarchy.stencil_volume_names) == 2
+        assert len(hierarchy.stencil_volume_entries) == 2
+        assert any("/root/.local" in v for v in hierarchy.stencil_volume_entries)
+        assert any("/usr/local/lib/p4-mcp-server" in v for v in hierarchy.stencil_volume_entries)
 
     def test_no_isolation_paths_empty_list(self, tmp_path: Path):
-        """No isolation_paths → isolation_volume_names stays empty."""
+        """No extensions → stencil_volume_names stays empty."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1171,10 +1184,10 @@ class TestIsolationVolumes:
             host_container_root=tmp_path,
         )
 
-        assert hierarchy.isolation_volume_names == []
+        assert hierarchy.stencil_volume_names == []
 
     def test_isolation_volume_naming(self, tmp_path: Path):
-        """Volume name is iso_{ext}_{sanitized_path}."""
+        """Volume name is stencil_{idx}_{sanitized_path} (Task 1.4 renames to vol_*)."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1183,12 +1196,11 @@ class TestIsolationVolumes:
             pushed_files=set(),
             host_project_root=tmp_path,
             host_container_root=tmp_path,
-            isolation_paths=[("Claude Code", "/root/.local")],
+            extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
 
-        name = hierarchy.isolation_volume_names[0]
-        assert name.startswith("iso_")
-        assert "claude" in name.lower()
+        name = hierarchy.stencil_volume_names[0]
+        assert name.startswith("stencil_")
         assert "root" in name.lower()
         # No slashes or invalid chars
         assert "/" not in name
@@ -1210,15 +1222,15 @@ class TestIsolationVolumes:
             host_project_root=tmp_path,
             host_container_root=tmp_path,
             siblings=[sibling],
-            isolation_paths=[("Claude Code", "/root/.local")],
+            extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
 
         # primary mount + sibling mount = 2 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 2
-        assert not any("iso_" in v for v in hierarchy.ordered_volumes)
+        assert not any("stencil_" in v for v in hierarchy.ordered_volumes)
         # L4 is tracked separately
-        assert len(hierarchy.isolation_volume_entries) == 1
-        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+        assert len(hierarchy.stencil_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
 
 
 # ──────────────────────────────────────────────
@@ -1300,7 +1312,7 @@ class TestPerSpecDelivery:
         assert "/workspace/src/vendor" in hidden
 
     def test_l4_still_emitted_for_all_detached_scope(self, tmp_path: Path):
-        """An all-detached scope still emits L4 isolation volumes."""
+        """An all-detached scope still emits L4 isolation volumes (via stencil path)."""
         src = tmp_path / "src"
         detached = MountSpecPath(
             mount_root=src, patterns=[], delivery="detached",
@@ -1312,12 +1324,12 @@ class TestPerSpecDelivery:
             pushed_files=set(),
             host_project_root=tmp_path,
             host_container_root=tmp_path,
-            isolation_paths=[("Claude Code", "/root/.local")],
+            extensions=[ExtensionConfig(name="Claude Code", isolation_paths=["/root/.local"])],
         )
         assert hierarchy.ordered_volumes == []
         assert hierarchy.mask_volume_names == []
-        assert len(hierarchy.isolation_volume_entries) == 1
-        assert ":/root/.local" in hierarchy.isolation_volume_entries[0]
+        assert len(hierarchy.stencil_volume_entries) == 1
+        assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
 
     def test_bind_only_scope_byte_identical_to_legacy_baseline(self, tmp_path: Path):
         """A scope built without ever mentioning delivery matches bind-by-default output."""
