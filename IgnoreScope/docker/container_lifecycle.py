@@ -398,25 +398,6 @@ def _cleanup_staging(staging_root: Path | None) -> None:
         logger.debug("Failed to clean staging dir %s", staging_root, exc_info=True)
 
 
-def _collect_isolation_paths(config: ScopeDockerConfig) -> list[tuple[str, str]] | None:
-    """Extract isolation paths from tracked extensions.
-
-    Converts config.extensions into the tuple format that
-    compute_container_hierarchy() expects for Layer 4 volumes.
-
-    Returns:
-        List of (extension_name, container_path) tuples, or None if empty.
-    """
-    if not config.extensions:
-        return None
-    paths = [
-        (ext.name, path)
-        for ext in config.extensions
-        for path in ext.isolation_paths
-    ]
-    return paths or None
-
-
 def reconcile_extensions(
     container_name: str,
     config: ScopeDockerConfig,
