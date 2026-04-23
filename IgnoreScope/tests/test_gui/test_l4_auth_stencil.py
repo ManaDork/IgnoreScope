@@ -5,7 +5,8 @@ Covers:
     with stencil_tier="auth", source=NodeSource.STENCIL, is_stencil_node=True.
   - Synthetic NodeState has visibility="virtual" so FOLDER_STENCIL_AUTH style
     fires through resolve_tree_state.
-  - set_extensions() rebuilds the L4 set idempotently.
+  - load_config() rebuilds the L4 set idempotently (Task 1.11: retired
+    set_extensions; tests drive the generic config-intake path).
   - ScopeView RMB on an L4 stencil node is silent-no-op (only the
     "No valid actions" fallback is offered — no Make Folder / Mark Permanent).
   - Model exposes NodeStencilTierRole returning "auth" for L4 nodes.
@@ -19,6 +20,7 @@ import pytest
 from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QApplication, QMenu
 
+from IgnoreScope.core.config import ScopeDockerConfig
 from IgnoreScope.core.local_mount_config import ExtensionConfig
 from IgnoreScope.gui.display_config import resolve_tree_state
 from IgnoreScope.gui.mount_data_model import (
@@ -63,12 +65,27 @@ def _make_extension(name: str, isolation_paths: list[str]) -> ExtensionConfig:
     )
 
 
+def _install_extensions(tree: MountDataTree, exts: list[ExtensionConfig]) -> None:
+    """Drive the tree's generic config-intake path with the given extensions.
+
+    Mirrors the production flow (`container_ops_ui._track_extension` →
+    `tree.load_config(config)` post-Task-1.11). Carries the tree's existing
+    `mount_specs` and host project root through unchanged.
+    """
+    config = ScopeDockerConfig(
+        mount_specs=list(tree._mount_specs),
+        host_project_root=tree._host_project_root,
+        extensions=list(exts),
+    )
+    tree.load_config(config)
+
+
 class TestL4StencilEmission:
-    """set_extensions() emits one stencil node per isolation_path."""
+    """load_config() emits one stencil node per extension isolation_path."""
 
     def test_single_extension_single_path_emits_one_node(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         assert len(tree._stencil_nodes) == 1
         node = tree._stencil_nodes[0]
@@ -83,7 +100,7 @@ class TestL4StencilEmission:
             _make_extension("Claude Code", ["/root/.local"]),
             _make_extension("P4 MCP", ["/usr/local/lib/p4-mcp", "/etc/p4"]),
         ]
-        tree.set_extensions(exts)
+        _install_extensions(tree, exts)
 
         assert len(tree._stencil_nodes) == 3
         paths = sorted(str(n.path) for n in tree._stencil_nodes)
@@ -97,29 +114,29 @@ class TestL4StencilEmission:
         self, tree: MountDataTree,
     ):
         ext = _make_extension("Git", [])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         assert tree._stencil_nodes == []
 
-    def test_set_extensions_is_idempotent(self, tree: MountDataTree):
-        """Calling set_extensions twice with the same list yields the same set."""
+    def test_repeated_install_is_idempotent(self, tree: MountDataTree):
+        """Loading the same extension list twice yields the same stencil set."""
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
+        _install_extensions(tree, [ext])
         assert len(tree._stencil_nodes) == 1
 
-    def test_set_extensions_replaces_prior_set(self, tree: MountDataTree):
+    def test_empty_extensions_clears_prior_set(self, tree: MountDataTree):
         """Adding then removing extensions clears the L4 stencil set."""
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         assert len(tree._stencil_nodes) == 1
 
-        tree.set_extensions([])
+        _install_extensions(tree, [])
         assert tree._stencil_nodes == []
 
     def test_stencil_nodes_appear_under_root_node(self, tree: MountDataTree):
         """L4 stencils are appended to root_node.children for tree visibility."""
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         assert tree.root_node is not None
         root_children_paths = {c.path for c in tree.root_node.children}
@@ -131,14 +148,14 @@ class TestL4StencilState:
 
     def test_synthetic_state_is_virtual(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         state = tree.get_node_state(Path("/root/.local"))
         assert state.visibility == "virtual"
 
     def test_resolves_to_folder_stencil_auth_style(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         state = tree.get_node_state(Path("/root/.local"))
         state_name = resolve_tree_state(
@@ -154,7 +171,7 @@ class TestL4StencilTierRole:
         from IgnoreScope.gui.display_config import ScopeDisplayConfig
 
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         model = MountDataTreeModel(tree, ScopeDisplayConfig())
 
         # Find the stencil node row under root.
@@ -200,7 +217,7 @@ class TestScopeViewRmbSilentNoOp:
 
     def test_l4_stencil_rmb_offers_only_fallback(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         view = ScopeView(tree)
 
         stencil_node = tree._stencil_nodes[0]
@@ -224,7 +241,7 @@ class TestScopeViewRmbSilentNoOp:
     def test_l4_stencil_does_not_emit_make_folder(self, tree: MountDataTree):
         """Sanity: an extension-owned volume spec never routes to gesture set."""
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         view = ScopeView(tree)
 
         stencil_node = tree._stencil_nodes[0]
@@ -288,7 +305,7 @@ class TestOwnerKeyedRoutingGuard:
 
     def test_extension_volume_routes_to_silent_noop(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         view = ScopeView(tree)
 
         stencil_node = tree._stencil_nodes[0]
@@ -319,7 +336,7 @@ class TestOwnerKeyedRoutingGuard:
         shared = Path("/var/data")
         tree.add_stencil_volume(shared)
         ext = _make_extension("Custom", ["/var/data"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         spec = tree.get_any_spec_at(shared)
         assert spec is not None
@@ -329,7 +346,7 @@ class TestOwnerKeyedRoutingGuard:
         self, tree: MountDataTree,
     ):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         spec = tree.get_any_spec_at(Path("/root/.local"))
         assert spec is not None
@@ -344,7 +361,7 @@ class TestRebuildIdempotency:
         self, tree: MountDataTree,
     ):
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
         first_count = len(tree.root_node.children)
 
         # Direct re-call should not duplicate root children.
@@ -362,7 +379,7 @@ class TestRebuildIdempotency:
         before_paths = {c.path for c in tree.root_node.children}
 
         ext = _make_extension("Claude Code", ["/root/.local"])
-        tree.set_extensions([ext])
+        _install_extensions(tree, [ext])
 
         after_paths = {c.path for c in tree.root_node.children}
         # Every prior child still present + new stencil added.

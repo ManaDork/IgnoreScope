@@ -737,9 +737,9 @@ class ContainerOperations:
                 isolation_paths=isolation_paths,
             )
             save_config(config)
-            # Update in-memory tree so GUI reflects the change immediately
-            # (also rebuilds L4 auth stencil nodes — Phase 3 Task 4.9)
-            self._app._mount_data_tree.set_extensions(config.extensions)
+            self._app._mount_data_tree.load_config(config)
+            self._app._local_host.refresh()
+            self._app._scope_view.refresh()
         except Exception:
             pass  # Tracking failure is non-fatal
 

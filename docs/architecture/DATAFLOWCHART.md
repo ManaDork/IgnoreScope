@@ -457,9 +457,11 @@ MountDataTree.load_config(config)
           Appended to root_node.children; never lazy-loads
           (children_loaded=True on construction)
 
-          Phase 3 Task 4.9: container_ops_ui calls
-          MountDataTree.set_extensions(config.extensions) after install /
-          uninstall to refresh the L4 set without a full config reload.
+          Unify L4 Task 1.11: container_ops_ui._track_extension routes
+          post-install refresh through this same generic intake path —
+          tree.load_config(config) then _local_host.refresh() +
+          _scope_view.refresh(). The dedicated set_extensions shortcut
+          was retired; there is now one tree-rebuild call path.
 
           Unify L4 Task 1.9: NodeState for each stencil path is produced by
             CORE's apply_node_states_from_scope — GUI merges synthesized
