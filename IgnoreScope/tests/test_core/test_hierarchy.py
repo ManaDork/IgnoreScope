@@ -25,8 +25,8 @@ from IgnoreScope.core.hierarchy import (
     _compute_volume_entries,
     _compute_revealed_parents,
     _compute_mirrored_parents,
-    _compute_stencil_volumes,
-    _derive_stencil_volume_name,
+    _compute_volume_tier_entries,
+    _derive_volume_name,
     _validate_hierarchy,
     _walk_mirrored_intermediates,
 )
@@ -673,7 +673,8 @@ class TestComputeContainerHierarchy:
         h = ContainerHierarchy()
         assert h.ordered_volumes == []
         assert h.mask_volume_names == []
-        assert h.isolation_volume_names == []
+        assert h.stencil_volume_entries == []
+        assert h.stencil_volume_names == []
         assert h.revealed_parents == set()
         assert h.validation_errors == []
         assert h.visible_paths == set()
@@ -1089,17 +1090,17 @@ class TestWalkMirroredIntermediates:
 
 
 # =============================================================================
-# Isolation Volumes (Layer 4 via unified synth) — Task 1.3
+# Isolation Volumes (Layer 4 via unified synth) — Task 1.3 / 1.4
 # =============================================================================
 #
 # Post-Task-1.3, extension isolation paths flow through the unified-synth
 # pipeline: ExtensionConfig.synthesize_mount_specs() emits volume-delivery
 # MountSpecPaths that compute_container_hierarchy merges into mount_specs
-# and renders via _compute_stencil_volumes. L4 output therefore lives on
-# hierarchy.stencil_volume_entries / stencil_volume_names under the
-# stencil_{idx}_{path} naming scheme (Task 1.4 renames to vol_*).
-# The legacy isolation_volume_* fields stay zero-populated for now and
-# retire formally at Task 1.4.
+# and renders via _compute_volume_tier_entries. L4 output therefore lives
+# on hierarchy.stencil_volume_entries / stencil_volume_names under the
+# vol_{owner_segment}_{path} naming scheme (Task 1.4). The owner_segment
+# resolves to the sanitized extension name for extension-synthesized
+# specs and to `user` for user-authored delivery="volume" specs.
 
 class TestIsolationVolumes:
     """Verify Layer 4 isolation volume computation via extensions= synth path."""
@@ -1120,11 +1121,11 @@ class TestIsolationVolumes:
         # L4 lives in stencil_volume_entries, separate from ordered_volumes
         assert len(hierarchy.stencil_volume_entries) == 1
         assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
-        assert not any("stencil_" in v for v in hierarchy.ordered_volumes)
+        assert not any("vol_" in v for v in hierarchy.ordered_volumes)
 
         # Name tracked in stencil_volume_names
         assert len(hierarchy.stencil_volume_names) == 1
-        assert hierarchy.stencil_volume_names[0].startswith("stencil_")
+        assert hierarchy.stencil_volume_names[0].startswith("vol_claude_code_")
 
     def test_isolation_separate_from_ordered_volumes(self, tmp_path: Path):
         """L4 entries are stored separately from L1-L3 + siblings."""
@@ -1143,7 +1144,7 @@ class TestIsolationVolumes:
 
         # L1 mount + L2 mask + L3 reveal = 3 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 3
-        assert not any("stencil_" in v for v in hierarchy.ordered_volumes)
+        assert not any("vol_" in v for v in hierarchy.ordered_volumes)
         # L4 is in stencil_volume_entries
         assert len(hierarchy.stencil_volume_entries) == 1
         assert ":/usr/bin" in hierarchy.stencil_volume_entries[0]
@@ -1186,8 +1187,8 @@ class TestIsolationVolumes:
 
         assert hierarchy.stencil_volume_names == []
 
-    def test_isolation_volume_naming(self, tmp_path: Path):
-        """Volume name is stencil_{idx}_{sanitized_path} (Task 1.4 renames to vol_*)."""
+    def test_isolation_volume_naming_extension(self, tmp_path: Path):
+        """Extension-synth volume name is vol_{sanitized_ext_name}_{sanitized_path}."""
         src = tmp_path / "src"
 
         hierarchy = compute_container_hierarchy(
@@ -1200,11 +1201,32 @@ class TestIsolationVolumes:
         )
 
         name = hierarchy.stencil_volume_names[0]
-        assert name.startswith("stencil_")
+        assert name.startswith("vol_claude_code_")
         assert "root" in name.lower()
         # No slashes or invalid chars
         assert "/" not in name
         assert "\\" not in name
+        # No legacy stencil_ prefix
+        assert not name.startswith("stencil_")
+
+    def test_isolation_volume_naming_user(self, tmp_path: Path):
+        """User-authored delivery='volume' spec names take the vol_user_* shape."""
+        user_spec = MountSpecPath(
+            mount_root=Path("/workspace/data"),
+            delivery="volume",
+            content_seed="folder",
+            host_path=None,
+            owner="user",
+        )
+        hierarchy = compute_container_hierarchy(
+            container_root="/workspace",
+            mount_specs=[user_spec],
+            pushed_files=set(),
+            host_project_root=tmp_path,
+            host_container_root=tmp_path,
+        )
+        assert len(hierarchy.stencil_volume_names) == 1
+        assert hierarchy.stencil_volume_names[0].startswith("vol_user_")
 
     def test_isolation_with_siblings(self, tmp_path: Path):
         """Isolation volumes are separate from sibling volumes."""
@@ -1227,7 +1249,7 @@ class TestIsolationVolumes:
 
         # primary mount + sibling mount = 2 entries in ordered_volumes
         assert len(hierarchy.ordered_volumes) == 2
-        assert not any("stencil_" in v for v in hierarchy.ordered_volumes)
+        assert not any("vol_" in v for v in hierarchy.ordered_volumes)
         # L4 is tracked separately
         assert len(hierarchy.stencil_volume_entries) == 1
         assert ":/root/.local" in hierarchy.stencil_volume_entries[0]
@@ -1356,12 +1378,12 @@ class TestPerSpecDelivery:
 # =============================================================================
 
 class TestStencilVolumes:
-    """_compute_stencil_volumes emits L_volume entries for delivery='volume' specs."""
+    """_compute_volume_tier_entries emits L_volume entries for delivery='volume' specs."""
 
     def test_no_volume_specs_returns_empty(self, tmp_path: Path):
         """Bind-only mount_specs produce no stencil volumes."""
         specs = [MountSpecPath(mount_root=tmp_path / "src", delivery="bind")]
-        entries, names = _compute_stencil_volumes(specs, "/workspace", tmp_path)
+        entries, names = _compute_volume_tier_entries(specs, "/workspace", tmp_path)
         assert entries == []
         assert names == []
 
@@ -1373,11 +1395,12 @@ class TestStencilVolumes:
             content_seed="folder",
             host_path=None,
         )
-        entries, names = _compute_stencil_volumes([spec], "/workspace", tmp_path)
+        entries, names = _compute_volume_tier_entries([spec], "/workspace", tmp_path)
         assert len(entries) == 1
         assert len(names) == 1
         assert entries[0].endswith(":/workspace/cache")
-        assert names[0].startswith("stencil_0_")
+        # User-authored volume spec → vol_user_ prefix
+        assert names[0].startswith("vol_user_")
         # Entry and name share the same volume name prefix
         assert entries[0].split(":")[0] == names[0]
 
@@ -1389,13 +1412,13 @@ class TestStencilVolumes:
             content_seed="folder",
             host_path=None,
         )
-        e1, n1 = _compute_stencil_volumes([spec], "/workspace", tmp_path)
-        e2, n2 = _compute_stencil_volumes([spec], "/workspace", tmp_path)
+        e1, n1 = _compute_volume_tier_entries([spec], "/workspace", tmp_path)
+        e2, n2 = _compute_volume_tier_entries([spec], "/workspace", tmp_path)
         assert n1 == n2
         assert e1 == e2
 
-    def test_multiple_volume_specs_indexed(self, tmp_path: Path):
-        """Multiple volume specs get distinct indexed names."""
+    def test_multiple_volume_specs_distinct_names(self, tmp_path: Path):
+        """Multiple user-volume specs get distinct path-derived names."""
         specs = [
             MountSpecPath(
                 mount_root=Path("/workspace/a"),
@@ -1410,11 +1433,11 @@ class TestStencilVolumes:
                 host_path=None,
             ),
         ]
-        entries, names = _compute_stencil_volumes(specs, "/workspace", tmp_path)
+        entries, names = _compute_volume_tier_entries(specs, "/workspace", tmp_path)
         assert len(names) == 2
         assert names[0] != names[1]
-        assert names[0].startswith("stencil_0_")
-        assert names[1].startswith("stencil_1_")
+        assert names[0] == "vol_user_workspace_a"
+        assert names[1] == "vol_user_workspace_b"
 
     def test_mixed_delivery_only_volume_emits(self, tmp_path: Path):
         """Mix of bind/detached/volume — only volume specs emit here."""
@@ -1433,17 +1456,31 @@ class TestStencilVolumes:
                 host_path=tmp_path / "snap",
             ),
         ]
-        entries, names = _compute_stencil_volumes(specs, "/workspace", tmp_path)
+        entries, names = _compute_volume_tier_entries(specs, "/workspace", tmp_path)
         assert len(entries) == 1
-        # Index follows original mount_specs order — volume was at idx 1
-        assert names[0].startswith("stencil_1_")
+        # Owner discriminator replaces spec-index; user-authored → vol_user_*
+        assert names[0] == "vol_user_workspace_vol"
 
-    def test_derive_volume_name_sanitized(self):
-        """_derive_stencil_volume_name strips leading slash and sanitizes."""
-        name = _derive_stencil_volume_name(3, "/workspace/nested/path")
-        assert name.startswith("stencil_3_")
-        # No leading slash in the key portion
+    def test_derive_volume_name_user(self):
+        """_derive_volume_name emits vol_user_{sanitized_path} for user owner."""
+        name = _derive_volume_name("user", "/workspace/nested/path")
+        assert name == "vol_user_workspace_nested_path"
         assert "//" not in name
+
+    def test_derive_volume_name_extension(self):
+        """_derive_volume_name emits vol_{ext}_{sanitized_path} for extension owner."""
+        name = _derive_volume_name("extension:claude", "/root/.claude")
+        assert name == "vol_claude_root_.claude"
+
+    def test_derive_volume_name_extension_spaces_sanitized(self):
+        """Extension names with spaces are lowercased + underscored."""
+        name = _derive_volume_name("extension:Claude Code", "/root/.local")
+        assert name == "vol_claude_code_root_.local"
+
+    def test_derive_volume_name_unknown_owner_rejected(self):
+        """Bogus owner string triggers ValueError rather than silent fallback."""
+        with pytest.raises(ValueError):
+            _derive_volume_name("bogus", "/x")
 
 
 class TestStencilVolumeHierarchyIntegration:

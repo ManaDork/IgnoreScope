@@ -32,18 +32,12 @@ def _make_config(scope_name: str = "test-container", tmp_path: Path | None = Non
     )
 
 
-def _make_hierarchy(
-    mask_volume_names: list[str],
-    isolation_volume_names: list[str] | None = None,
-    isolation_volume_entries: list[str] | None = None,
-):
+def _make_hierarchy(mask_volume_names: list[str]):
     """Create a minimal ContainerHierarchy mock with specified volume names."""
     from IgnoreScope.core.hierarchy import ContainerHierarchy
 
     h = ContainerHierarchy()
     h.mask_volume_names = list(mask_volume_names)
-    h.isolation_volume_names = list(isolation_volume_names or [])
-    h.isolation_volume_entries = list(isolation_volume_entries or [])
     h.ordered_volumes = []
     h.revealed_parents = set()
     h.validation_errors = []
@@ -83,15 +77,14 @@ class TestExecuteUpdate:
 
     def _patch_all(
         self, old_masks, new_masks,
-        old_iso=None, new_iso=None,
         compose_down_ok=True, prune_ok=True,
     ):
         """Return a dict of patches for execute_update testing."""
         old_config = _make_config()
-        old_hierarchy = _make_hierarchy(old_masks, old_iso)
+        old_hierarchy = _make_hierarchy(old_masks)
         # preflight_create also calls compute_hierarchy for validation
-        preflight_hierarchy = _make_hierarchy(new_masks, new_iso)
-        new_hierarchy = _make_hierarchy(new_masks, new_iso)
+        preflight_hierarchy = _make_hierarchy(new_masks)
+        new_hierarchy = _make_hierarchy(new_masks)
 
         patches = {
             "load_config": patch(
@@ -222,40 +215,16 @@ class TestExecuteUpdate:
         assert result.success is True
         assert any("Failed to prune" in d for d in result.details)
 
-    def test_orphan_detection_isolation_volumes(self, tmp_path):
-        """Old iso {X,Y}, new iso {Y,Z} → orphan X pruned."""
-        patches = self._patch_all(
-            old_masks=["A"], new_masks=["A"],
-            old_iso=["X", "Y"], new_iso=["Y", "Z"],
-        )
-        result, mocks = self._run_update(patches, tmp_path)
-
-        assert result.success is True
-        mocks["remove_volume"].assert_called_once_with("X")
-
-    def test_orphan_detection_mixed_masks_and_isolation(self, tmp_path):
-        """Orphans from both mask and isolation are pruned."""
-        patches = self._patch_all(
-            old_masks=["A", "B"], new_masks=["A"],
-            old_iso=["X", "Y"], new_iso=["X"],
-        )
-        result, mocks = self._run_update(patches, tmp_path)
-
-        assert result.success is True
-        # Both orphan mask "B" and orphan iso "Y" should be pruned
-        pruned = {call.args[0] for call in mocks["remove_volume"].call_args_list}
-        assert pruned == {"B", "Y"}
-
 
 # =============================================================================
-# Compose: isolation volume declaration
+# Compose: stencil volume declaration
 # =============================================================================
 
-class TestComposeIsolationVolumes:
-    """Verify generate_compose_with_masks declares isolation volumes."""
+class TestComposeStencilVolumes:
+    """Verify generate_compose_with_masks declares stencil volumes."""
 
-    def test_isolation_volumes_in_volumes_section(self, tmp_path: Path):
-        """isolation_volume_names → declared in top-level volumes section."""
+    def test_stencil_volumes_in_volumes_section(self, tmp_path: Path):
+        """stencil_volume_names → declared in top-level volumes section."""
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
@@ -263,20 +232,20 @@ class TestComposeIsolationVolumes:
             mask_volume_names=[],
             host_project_root=tmp_path,
             docker_container_name="test-container",
-            isolation_volume_entries=["iso_claude_root_local:/root/.local"],
-            isolation_volume_names=["iso_claude_root_local"],
+            stencil_volume_entries=["vol_claude_root_.local:/root/.local"],
+            stencil_volume_names=["vol_claude_root_.local"],
         )
 
-        # Volume appears in services.volumes (from isolation_volume_entries)
-        assert "iso_claude_root_local:/root/.local" in compose
+        # Volume appears in services.volumes (from stencil_volume_entries)
+        assert "vol_claude_root_.local:/root/.local" in compose
         # Volume declared in top-level volumes section
         lines = compose.split("\n")
         volumes_section_idx = next(i for i, l in enumerate(lines) if l.startswith("volumes:"))
         volumes_section = "\n".join(lines[volumes_section_idx:])
-        assert "  iso_claude_root_local:" in volumes_section
+        assert "  vol_claude_root_.local:" in volumes_section
 
-    def test_no_isolation_volumes_no_change(self, tmp_path: Path):
-        """No isolation_volume_names → output unchanged from before."""
+    def test_no_stencil_volumes_no_change(self, tmp_path: Path):
+        """No stencil_volume_names → output has no vol_* entries."""
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
@@ -284,13 +253,13 @@ class TestComposeIsolationVolumes:
             mask_volume_names=[],
             host_project_root=tmp_path,
             docker_container_name="test-container",
-            isolation_volume_names=[],
+            stencil_volume_names=[],
         )
 
-        assert "iso_" not in compose
+        assert "vol_" not in compose
 
-    def test_both_mask_and_isolation_declared(self, tmp_path: Path):
-        """Both mask and isolation volumes appear in volumes section."""
+    def test_both_mask_and_stencil_declared(self, tmp_path: Path):
+        """Both mask and stencil volumes appear in volumes section."""
         from IgnoreScope.docker.compose import generate_compose_with_masks
 
         compose = generate_compose_with_masks(
@@ -298,15 +267,15 @@ class TestComposeIsolationVolumes:
             mask_volume_names=["mask_src_api"],
             host_project_root=tmp_path,
             docker_container_name="test-container",
-            isolation_volume_entries=["iso_claude_root_local:/root/.local"],
-            isolation_volume_names=["iso_claude_root_local"],
+            stencil_volume_entries=["vol_claude_root_.local:/root/.local"],
+            stencil_volume_names=["vol_claude_root_.local"],
         )
 
         lines = compose.split("\n")
         volumes_section_idx = next(i for i, l in enumerate(lines) if l.startswith("volumes:"))
         volumes_section = "\n".join(lines[volumes_section_idx:])
         assert "  mask_src_api:" in volumes_section
-        assert "  iso_claude_root_local:" in volumes_section
+        assert "  vol_claude_root_.local:" in volumes_section
 
 
 # =============================================================================
@@ -601,8 +570,6 @@ class TestPushedFilesReplay:
 
         h = ContainerHierarchy()
         h.mask_volume_names = []
-        h.isolation_volume_names = []
-        h.isolation_volume_entries = []
         h.ordered_volumes = []
         h.revealed_parents = set()
         h.validation_errors = []

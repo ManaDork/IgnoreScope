@@ -279,15 +279,20 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                                  == "folder".
 
     delivery == "volume" ─── L_volume tier (stencil-named Docker volume).
-                             hierarchy.py: `_compute_stencil_volumes`
+                             hierarchy.py: `_compute_volume_tier_entries`
                              walks mount_specs in order; each
                              delivery="volume" spec yields
-                             `stencil_{spec_idx}_{sanitized_container_path}`
-                             as volume name (see glossary → "volume
-                             layering order"). Cross-scope uniqueness
-                             comes from docker compose project
-                             namespacing (no explicit `name:` on the
-                             declaration — matches the mask volume
+                             `vol_{owner_segment}_{sanitized_container_path}`
+                             as volume name via `_derive_volume_name(
+                             ms.owner, container_path)` (see glossary →
+                             "volume layering order"). owner_segment is
+                             "user" for user-authored specs and
+                             sanitize_volume_name(extension_name) for
+                             extension-synthesized specs (e.g.
+                             "Claude Code" → "claude_code"). Cross-scope
+                             uniqueness comes from docker compose
+                             project namespacing (no explicit `name:` on
+                             the declaration — matches the mask volume
                              pattern, not the auth volume pattern).
 
                              compose.py: per-spec `- "{name}:{container_path}"`

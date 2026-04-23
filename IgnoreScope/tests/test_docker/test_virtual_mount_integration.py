@@ -80,8 +80,6 @@ def _compose_from_config(config: ScopeDockerConfig, name: str = "test-ctr") -> s
         docker_container_name=name,
         container_root=config.container_root,
         project_name=config.host_project_root.name,
-        isolation_volume_entries=hierarchy.isolation_volume_entries,
-        isolation_volume_names=hierarchy.isolation_volume_names,
     )
 
 
