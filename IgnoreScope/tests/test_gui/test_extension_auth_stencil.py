@@ -1,15 +1,15 @@
-"""Tests for Phase 3 Task 4.9 — L4 auth volume rendering.
+"""Tests for extension auth stencil rendering (Phase 3 Task 4.9 → Unify L4 Task 1.9).
 
 Covers:
   - MountDataTree emits synthetic stencil nodes for extension isolation_paths
     with stencil_tier="auth", source=NodeSource.STENCIL, is_stencil_node=True.
   - Synthetic NodeState has visibility="virtual" so FOLDER_STENCIL_AUTH style
     fires through resolve_tree_state.
-  - load_config() rebuilds the L4 set idempotently (Task 1.11: retired
-    set_extensions; tests drive the generic config-intake path).
-  - ScopeView RMB on an L4 stencil node is silent-no-op (only the
+  - load_config() rebuilds the extension auth stencil set idempotently
+    (Task 1.11: retired set_extensions; tests drive the generic config-intake path).
+  - ScopeView RMB on an extension auth stencil node is silent-no-op (only the
     "No valid actions" fallback is offered — no Make Folder / Mark Permanent).
-  - Model exposes NodeStencilTierRole returning "auth" for L4 nodes.
+  - Model exposes NodeStencilTierRole returning "auth" for extension-owned nodes.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def _install_extensions(tree: MountDataTree, exts: list[ExtensionConfig]) -> Non
     tree.load_config(config)
 
 
-class TestL4StencilEmission:
+class TestExtensionAuthStencilEmission:
     """load_config() emits one stencil node per extension isolation_path."""
 
     def test_single_extension_single_path_emits_one_node(self, tree: MountDataTree):
@@ -125,7 +125,7 @@ class TestL4StencilEmission:
         assert len(tree._stencil_nodes) == 1
 
     def test_empty_extensions_clears_prior_set(self, tree: MountDataTree):
-        """Adding then removing extensions clears the L4 stencil set."""
+        """Adding then removing extensions clears the extension auth stencil set."""
         ext = _make_extension("Claude Code", ["/root/.local"])
         _install_extensions(tree, [ext])
         assert len(tree._stencil_nodes) == 1
@@ -134,7 +134,7 @@ class TestL4StencilEmission:
         assert tree._stencil_nodes == []
 
     def test_stencil_nodes_appear_under_root_node(self, tree: MountDataTree):
-        """L4 stencils are appended to root_node.children for tree visibility."""
+        """Extension auth stencils are appended to root_node.children for tree visibility."""
         ext = _make_extension("Claude Code", ["/root/.local"])
         _install_extensions(tree, [ext])
 
@@ -143,7 +143,7 @@ class TestL4StencilEmission:
         assert Path("/root/.local") in root_children_paths
 
 
-class TestL4StencilState:
+class TestExtensionAuthStencilState:
     """Synthetic NodeState routes stencils to the FOLDER_STENCIL_AUTH style."""
 
     def test_synthetic_state_is_virtual(self, tree: MountDataTree):
@@ -164,10 +164,10 @@ class TestL4StencilState:
         assert state_name == "FOLDER_STENCIL_AUTH"
 
 
-class TestL4StencilTierRole:
+class TestExtensionAuthStencilTierRole:
     """The model exposes stencil_tier via NodeStencilTierRole."""
 
-    def test_role_returns_auth_for_l4_nodes(self, tree: MountDataTree):
+    def test_role_returns_auth_for_extension_nodes(self, tree: MountDataTree):
         from IgnoreScope.gui.display_config import ScopeDisplayConfig
 
         ext = _make_extension("Claude Code", ["/root/.local"])
@@ -185,7 +185,7 @@ class TestL4StencilTierRole:
                 tier = idx.data(NodeStencilTierRole)
                 assert tier == "auth"
                 found = True
-        assert found, "L4 stencil row not exposed by model"
+        assert found, "extension auth stencil row not exposed by model"
 
     def test_role_returns_mirrored_for_non_stencil_nodes(
         self, tree: MountDataTree, tmp_path: Path,
@@ -215,7 +215,7 @@ class TestScopeViewRmbSilentNoOp:
     not tree-node-tag-keyed (``is_stencil_node and stencil_tier == "auth"``).
     """
 
-    def test_l4_stencil_rmb_offers_only_fallback(self, tree: MountDataTree):
+    def test_extension_stencil_rmb_offers_only_fallback(self, tree: MountDataTree):
         ext = _make_extension("Claude Code", ["/root/.local"])
         _install_extensions(tree, [ext])
         view = ScopeView(tree)
@@ -238,7 +238,7 @@ class TestScopeViewRmbSilentNoOp:
         assert texts == ["No valid actions"]
         assert menu.actions()[0].isEnabled() is False
 
-    def test_l4_stencil_does_not_emit_make_folder(self, tree: MountDataTree):
+    def test_extension_stencil_does_not_emit_make_folder(self, tree: MountDataTree):
         """Sanity: an extension-owned volume spec never routes to gesture set."""
         ext = _make_extension("Claude Code", ["/root/.local"])
         _install_extensions(tree, [ext])
