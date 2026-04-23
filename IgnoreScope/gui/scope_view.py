@@ -31,6 +31,7 @@ from .display_filter_proxy import DisplayFilterProxy
 from .mount_data_tree import MountDataTree, MountDataNode
 from .mount_data_model import MountDataTreeModel
 from .display_config import ScopeDisplayConfig
+from .style_engine import ScopeHeaderSignals, resolve_scope_header_signals
 from .view_helpers import configure_tree_view, apply_header_config
 
 
@@ -58,6 +59,27 @@ def _query_container_state(
     if info.get("running", False):
         return ("-running", True)
     return ("-stopped", False)
+
+
+def _query_is_container_running(
+    host_project_root: Optional[Path], scope_name: str,
+) -> bool:
+    """Return True iff the scope's docker container is running.
+
+    Thin wrapper around ``get_container_info(docker_name)['running']`` for
+    the Scope Config Tree header's 3-signal aggregate (Phase 3). Returns
+    False for placeholder / empty scope and for missing containers — the
+    header should show the "off" state in those cases.
+    """
+    if not host_project_root or not scope_name:
+        return False
+    from ..gui.app import PLACEHOLDER_SCOPE
+    if scope_name == PLACEHOLDER_SCOPE:
+        return False
+    from ..docker.names import build_docker_name
+    from ..docker.container_ops import get_container_info
+    info = get_container_info(build_docker_name(host_project_root, scope_name))
+    return bool(info and info.get("running", False))
 
 
 class ScopeView(QWidget):
@@ -146,6 +168,22 @@ class ScopeView(QWidget):
     def tree_view(self) -> QTreeView:
         """QTreeView access for external consumers."""
         return self._tree_view
+
+    # ── Scope Config Tree Container Header (Phase 3) ──────────────
+
+    def _compute_header_signals(self) -> ScopeHeaderSignals:
+        """Compute the current 3-signal aggregate for this scope's container header.
+
+        Queries live container state and composes ``ScopeHeaderSignals`` from
+        the tree's unified ``mount_specs`` list (user + extension-synthesized).
+        Consumed by Task 3.4 rendering.
+        """
+        running = _query_is_container_running(
+            self._tree.host_project_root, self._tree.current_scope,
+        )
+        return resolve_scope_header_signals(
+            running, self._tree.unified_mount_specs(),
+        )
 
     # ── Header Context Menu ──────────────────────────────────────
 
