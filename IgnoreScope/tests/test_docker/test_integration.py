@@ -337,6 +337,7 @@ class TestFileOperations:
 
         from IgnoreScope.core.config import ScopeDockerConfig, get_container_path
         from IgnoreScope.cli.commands import cmd_create, cmd_push, cmd_pull, cmd_remove
+        from IgnoreScope.docker.names import build_docker_name
 
         # Create config with pushed file
         config = ScopeDockerConfig(
@@ -356,6 +357,10 @@ class TestFileOperations:
             (temp_project / "config" / "settings.json").relative_to(config.host_container_root).as_posix(),
         )
 
+        # Docker container name = {project}__{scope}; docker exec/start need the
+        # full name, not just scope_name.
+        docker_name = build_docker_name(temp_project, test_container_name)
+
         try:
             # Create container
             success, msg = cmd_create(temp_project, config)
@@ -367,7 +372,7 @@ class TestFileOperations:
 
             # Modify file in container
             subprocess.run([
-                'docker', 'exec', test_container_name,
+                'docker', 'exec', docker_name,
                 'sh', '-c', f'echo \'{{"debug": false}}\' > {settings_container_path}'
             ], check=True)
 
@@ -412,14 +417,17 @@ class TestMountRootMasking:
 
         from IgnoreScope.core.config import ScopeDockerConfig, get_container_path
         from IgnoreScope.cli.commands import cmd_create, cmd_remove
+        from IgnoreScope.docker.names import build_docker_name
 
-        # src/ is BOTH mounted and masked; api/public/ is revealed
+        # src/ is BOTH mounted and masked; api/public/ is revealed. The explicit
+        # `api/` deny precedes `!api/public/` so the exception has a covering
+        # deny (validator rule: exception must follow a deny that covers it);
+        # `./` masks the mount root so files directly in src/ are hidden too.
         config = ScopeDockerConfig(
-            mount_specs=_make_mount_specs(
-                {temp_project / "src"},
-                {temp_project / "src"},
-                {temp_project / "src" / "api" / "public"},
-            ),
+            mount_specs=[MountSpecPath(
+                mount_root=temp_project / "src",
+                patterns=["./", "api/", "!api/public/"],
+            )],
             scope_name=test_container_name,
             host_project_root=temp_project,
         )
@@ -431,20 +439,24 @@ class TestMountRootMasking:
         secret_py = get_container_path(cr, (temp_project / "src" / "api" / "internal" / "secret.py").relative_to(hcr).as_posix())
         client_py = get_container_path(cr, (temp_project / "src" / "api" / "public" / "client.py").relative_to(hcr).as_posix())
 
+        # Docker container name = {project}__{scope}; docker exec/start need the
+        # full name, not just scope_name.
+        docker_name = build_docker_name(temp_project, test_container_name)
+
         try:
             success, msg = cmd_create(temp_project, config)
             assert success, f"Create failed: {msg}"
 
             # cmd_create uses --no-start; start the container for exec
             start = subprocess.run(
-                ['docker', 'start', test_container_name],
+                ['docker', 'start', docker_name],
                 capture_output=True, text=True,
             )
             assert start.returncode == 0, f"Start failed: {start.stderr}"
 
             # main.py sits directly in src/ (the masked mount root) — should be HIDDEN
             result = subprocess.run(
-                ['docker', 'exec', test_container_name,
+                ['docker', 'exec', docker_name,
                  'test', '-f', main_py],
                 capture_output=True,
             )
@@ -454,7 +466,7 @@ class TestMountRootMasking:
 
             # secret.py is inside a masked child (src/api/internal/) — should be HIDDEN
             result = subprocess.run(
-                ['docker', 'exec', test_container_name,
+                ['docker', 'exec', docker_name,
                  'test', '-f', secret_py],
                 capture_output=True,
             )
@@ -464,7 +476,7 @@ class TestMountRootMasking:
 
             # client.py is inside the revealed punch-through (src/api/public/) — should be VISIBLE
             result = subprocess.run(
-                ['docker', 'exec', test_container_name,
+                ['docker', 'exec', docker_name,
                  'test', '-f', client_py],
                 capture_output=True,
             )
