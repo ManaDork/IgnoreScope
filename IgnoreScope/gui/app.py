@@ -380,6 +380,16 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         # ScopeView header container controls
         self._scope_view.startContainerRequested.connect(co.start_container)
         self._scope_view.stopContainerRequested.connect(co.stop_container)
+        # Volume Mount gesture adds a delivery="volume" spec that requires a
+        # container recreate to attach the named volume. recreate_container
+        # owns the confirmation dialog.
+        self._scope_view.recreateRequested.connect(co.recreate_container)
+
+        # LocalHostView "Convert to Mount" / "Convert to Virtual Mount" RMB
+        # gestures flip the existing spec's delivery in-place.
+        self._local_host.convertDeliveryRequested.connect(
+            self._mount_data_tree.convert_delivery,
+        )
 
         # Push toggle (context menus → push/remove via docker cp) — both panels
         self._scope_view._model.pushToggleRequested.connect(

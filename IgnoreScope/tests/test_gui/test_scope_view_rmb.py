@@ -20,7 +20,7 @@ from typing import Optional
 import pytest
 from PyQt6.QtCore import QPoint
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox
+from PyQt6.QtWidgets import QApplication, QInputDialog, QMenu
 
 from IgnoreScope.core.mount_spec_path import MountSpecPath
 from IgnoreScope.gui.mount_data_tree import MountDataNode, MountDataTree
@@ -283,32 +283,34 @@ class TestMakeFolderDialog:
 
 
 class TestMakePermanentVolume:
-    """Volume Mount gesture: prompt + recreate confirmation when container exists."""
+    """Volume Mount gesture: emits recreateRequested iff container exists.
 
-    def test_volume_mount_no_container_skips_confirmation(
+    Confirmation of the destructive recreate is owned by the host-app
+    ``recreate_container`` slot, not by ScopeView — see the
+    ``recreateRequested`` connect in ``app._connect_signals`` and the
+    richer ``QMessageBox`` in ``container_ops_ui.recreate_container``.
+    """
+
+    def test_volume_mount_no_container_skips_recreate(
         self, view: ScopeView, monkeypatch,
     ):
         monkeypatch.setattr(
             QInputDialog, "getText",
             lambda *a, **kw: ("/var/data", True),
         )
-        # Force no-container state.
         monkeypatch.setattr(view, "_container_exists", lambda: False)
 
-        confirm_calls = []
-        monkeypatch.setattr(
-            QMessageBox, "question",
-            lambda *a, **kw: confirm_calls.append(a) or QMessageBox.StandardButton.Yes,
-        )
+        recreate_signals: list = []
+        view.recreateRequested.connect(lambda: recreate_signals.append(None))
 
         view._on_make_permanent_volume()
 
         spec = view._tree.get_spec_at(Path("/var/data"))
         assert spec is not None
         assert spec.delivery == "volume"
-        assert confirm_calls == []  # No confirmation when no container
+        assert recreate_signals == []
 
-    def test_volume_mount_container_exists_prompts_and_confirms(
+    def test_volume_mount_container_exists_emits_recreate(
         self, view: ScopeView, monkeypatch,
     ):
         monkeypatch.setattr(
@@ -316,10 +318,6 @@ class TestMakePermanentVolume:
             lambda *a, **kw: ("/var/data", True),
         )
         monkeypatch.setattr(view, "_container_exists", lambda: True)
-        monkeypatch.setattr(
-            QMessageBox, "question",
-            lambda *a, **kw: QMessageBox.StandardButton.Yes,
-        )
 
         recreate_signals: list = []
         view.recreateRequested.connect(lambda: recreate_signals.append(None))
@@ -330,23 +328,6 @@ class TestMakePermanentVolume:
         assert spec is not None
         assert spec.delivery == "volume"
         assert recreate_signals == [None]
-
-    def test_volume_mount_container_exists_decline_aborts(
-        self, view: ScopeView, monkeypatch,
-    ):
-        monkeypatch.setattr(
-            QInputDialog, "getText",
-            lambda *a, **kw: ("/var/data", True),
-        )
-        monkeypatch.setattr(view, "_container_exists", lambda: True)
-        monkeypatch.setattr(
-            QMessageBox, "question",
-            lambda *a, **kw: QMessageBox.StandardButton.No,
-        )
-
-        view._on_make_permanent_volume()
-
-        assert view._tree.get_spec_at(Path("/var/data")) is None
 
 
 class TestHeaderFallback:

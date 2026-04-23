@@ -157,8 +157,8 @@ class FileOperationsHandler:
             path, container_name, container_root, host_container_root,
         )
         if result.success:
+            # add_pushed emits stateChanged → auto_save persists (app.py:400).
             self._app._mount_data_tree.add_pushed(path)
-            self._app.config_manager.save_config()
             self._app.statusBar().showMessage(f"Pushed {path.name}", 5000)
         else:
             QMessageBox.warning(self._app, "Push Failed", result.message)
@@ -237,8 +237,8 @@ class FileOperationsHandler:
             path, container_name, container_root, host_container_root,
         )
         if result.success:
+            # remove_pushed emits stateChanged → auto_save persists (app.py:400).
             self._app._mount_data_tree.remove_pushed(path)
-            self._app.config_manager.save_config()
             self._app.statusBar().showMessage(f"Removed {path.name} from container", 5000)
         else:
             QMessageBox.warning(self._app, "Remove Failed", result.message)
