@@ -142,22 +142,36 @@ class ScopeView(QWidget):
 
     def _connect_signals(self) -> None:
         self._model.stateChanged.connect(self.stateChanged.emit)
+        # Re-render the container header's 3-signal encoding whenever
+        # mount_specs mutate. refresh() recomputes both the dot prefix and
+        # the QHeaderView stylesheet in one pass.
+        self._tree.mountSpecsChanged.connect(self.refresh)
 
     # ── Public API ────────────────────────────────────────────────
 
     def refresh(self) -> None:
         """Refresh the model after external data changes."""
-        # Dynamic column 0 header: "Container: {scope} {status}"
+        # Dynamic column 0 header: "{dot} Container: {scope} {status}"
+        signals = self._compute_header_signals()
         scope_name = self._tree.current_scope
         status_suffix, show_pushed = _query_container_state(
             self._tree.host_project_root, scope_name,
         )
         suffix_part = f" {status_suffix}" if status_suffix else ""
-        header = f"Container: {scope_name}{suffix_part}" if scope_name else "Container Scope"
+        from ..gui.app import PLACEHOLDER_SCOPE
+        show_dot = bool(scope_name) and scope_name != PLACEHOLDER_SCOPE
+        dot_prefix = (
+            f"{'●' if signals.container_running else '○'} " if show_dot else ""
+        )
+        header = (
+            f"{dot_prefix}Container: {scope_name}{suffix_part}"
+            if scope_name else "Container Scope"
+        )
         self._config.columns[0] = dc_replace(self._config.columns[0], header=header)
 
         self._model.refresh()
         apply_header_config(self._tree_view, self._config.columns)
+        self._apply_header_signals(signals)
 
         # Expand root
         root_index = self._proxy.index(0, 0)
@@ -176,7 +190,6 @@ class ScopeView(QWidget):
 
         Queries live container state and composes ``ScopeHeaderSignals`` from
         the tree's unified ``mount_specs`` list (user + extension-synthesized).
-        Consumed by Task 3.4 rendering.
         """
         running = _query_is_container_running(
             self._tree.host_project_root, self._tree.current_scope,
@@ -184,6 +197,32 @@ class ScopeView(QWidget):
         return resolve_scope_header_signals(
             running, self._tree.unified_mount_specs(),
         )
+
+    def _apply_header_signals(self, signals: ScopeHeaderSignals) -> None:
+        """Apply the 3-signal visual encoding to the Scope Config Tree header.
+
+        ``fully_virtual`` → ``QHeaderView::section background-color`` reusing
+        theme key ``visibility.virtual``.
+        ``has_mounts``    → ``QHeaderView::section border-bottom`` = 3px solid
+        ``config.mount``.
+        ``container_running`` is rendered as a text-prefix dot on column 0
+        (handled in ``refresh()``), not in the stylesheet — keeps the three
+        channels orthogonal.
+        """
+        header = self._tree_view.header()
+        rules: list[str] = []
+        if signals.fully_virtual:
+            color = self._config.color_vars.get("visibility.virtual")
+            if color:
+                rules.append(f"background-color: {color};")
+        if signals.has_mounts:
+            color = self._config.color_vars.get("config.mount")
+            if color:
+                rules.append(f"border-bottom: 3px solid {color};")
+        if not rules:
+            header.setStyleSheet("")
+            return
+        header.setStyleSheet("QHeaderView::section { " + " ".join(rules) + " }")
 
     # ── Header Context Menu ──────────────────────────────────────
 
