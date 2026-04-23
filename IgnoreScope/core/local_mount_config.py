@@ -17,7 +17,8 @@ Mount-centric architecture:
     Negated (!) pattern -> bind mount punch-through (Layer 3)
     Pattern order = volume declaration order (last-writer-wins)
 
-  Layer 4 (Isolation) is handled by ExtensionConfig.isolation_paths.
+  Extension-owned isolation volumes are synthesized into the unified
+  volume tier by ExtensionConfig.synthesize_mount_specs().
 """
 
 from __future__ import annotations
@@ -480,8 +481,10 @@ class ExtensionConfig(LocalMountConfig):
     Each installed extension creates one ExtensionConfig entry in
     ScopeDockerConfig.extensions.
 
-    Isolation volumes are Layer 4 — named Docker volumes that overlay
-    all other mounts with persistent, container-owned content.
+    isolation_paths entries are translated into MountSpecPath rows by
+    synthesize_mount_specs() and flow through the unified volume tier —
+    named Docker volumes that overlay other mounts with persistent,
+    container-owned content.
 
     Lifecycle state (inherited from LocalMountConfig.state):
       "deploy"    — user requested install, pending execution
@@ -493,7 +496,7 @@ class ExtensionConfig(LocalMountConfig):
     name: str = ""                  # Human-readable: "Claude Code", "Git", "P4 MCP Server"
     installer_class: str = ""       # Class name: "ClaudeInstaller", "GitInstaller", "P4McpInstaller"
 
-    # Container paths needing persistent isolation volumes (Layer 4)
+    # Container paths needing persistent isolation volumes
     isolation_paths: list[str] = field(default_factory=list)
 
     # How isolation volumes are initialized: "empty" or "clone" (from host)
