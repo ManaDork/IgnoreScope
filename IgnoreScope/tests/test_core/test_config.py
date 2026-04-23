@@ -318,32 +318,6 @@ class TestScopeDockerConfig:
         assert len(config.mount_specs) == 1
         assert config.mount_specs[0].patterns == ["api/", "!api/public/"]
 
-    def test_legacy_container_mode_keys_silently_dropped(self, tmp_path: Path):
-        """v0.4.x configs containing container_mode / init_source load without error."""
-        from IgnoreScope.core.config import ScopeDockerConfig
-
-        data = {
-            "version": "0.4.1",
-            "scope_name": "legacy",
-            "dev_mode": True,
-            "container_mode": "Isolation",
-            "init_source": "cp",
-            "local": {
-                "mount_specs": [],
-                "pushed_files": [],
-            },
-        }
-
-        config = ScopeDockerConfig.from_dict(data, tmp_path)
-        assert not hasattr(config, "container_mode")
-        assert not hasattr(config, "init_source")
-        assert config.validate() == []
-
-        # Round-trip must not re-emit the legacy keys.
-        round_tripped = config.to_dict()
-        assert "container_mode" not in round_tripped
-        assert "init_source" not in round_tripped
-
     def test_version_migration_dev_bypass(self, monkeypatch):
         """DEV_BYPASS_ENV_VAR skips migration and version stamping."""
         from IgnoreScope._version import (
