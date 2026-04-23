@@ -28,7 +28,6 @@ from .mount_data_tree import MountDataTree, MountDataNode, NodeSource
 from .mount_data_model import MountDataTreeModel
 from dataclasses import replace as dc_replace
 from .display_config import LocalHostDisplayConfig
-from .style_engine import resolve_delivery_tint_key
 from .view_helpers import configure_tree_view, apply_header_config
 
 
@@ -109,31 +108,6 @@ class LocalHostView(QWidget):
         self._model.stateChanged.connect(self.stateChanged.emit)
         self._tree_view.selectionModel().currentChanged.connect(
             self._on_selection_changed,
-        )
-        # Re-tint the Project Root Header whenever mount_specs mutate.
-        self._tree.mountSpecsChanged.connect(self._apply_header_tint)
-        self._apply_header_tint()
-
-    # ── Header Delivery Tint ──────────────────────────────────────
-
-    def _apply_header_tint(self) -> None:
-        """Tint the QHeaderView based on dominant mount_specs delivery.
-
-        All-bind → ``config.mount``; all-detached → ``visibility.virtual``;
-        mixed → majority by spec count (ties → ``config.mount``); empty
-        scope → clear the override (fall back to the global QSS default).
-        """
-        key = resolve_delivery_tint_key(self._tree._mount_specs)
-        header = self._tree_view.header()
-        if key is None:
-            header.setStyleSheet("")
-            return
-        color = self._config.color_vars.get(key)
-        if not color:
-            header.setStyleSheet("")
-            return
-        header.setStyleSheet(
-            f"QHeaderView::section {{ background-color: {color}; }}"
         )
 
     # ── Public API ────────────────────────────────────────────────
