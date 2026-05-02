@@ -1,11 +1,12 @@
-"""Compose generation: project-content vs L4-only shapes.
+"""Compose generation: full-stack vs empty-project-content shapes.
 
 Structural assertions verifying that generate_compose_with_masks:
   - Preserves the full structure when project-content volumes are provided.
   - Omits project-content volumes when caller passes empty project lists
     (the shape produced by an all-detached scope).
-  - Emits extension-synthesized L_volume entries (formerly "L4 + auth" —
-    unified into the vol_* tier in Phase 1 Tasks 1.3-1.7).
+  - Emits extension-synthesized entries through the unified L_volume tier
+    (former separate Layer 4 emission tier — unified into the vol_* scheme
+    in Phase 1 Tasks 1.3-1.7 of unify-l4-reclaim-isolation-term).
 
 compose.py is a pure formatter — it emits whatever lists it's given.
 """
@@ -48,9 +49,9 @@ def _rich_hierarchy(tmp_path: Path):
     """Fixture hierarchy with L1 mount + L2 mask + L3 reveal + L_volume tier entry.
 
     Post-Task-1.3, extension isolation paths flow through the unified-synth
-    pipeline; L4 output surfaces on ``volume_entries`` / ``volume_names``
-    (renamed from ``stencil_volume_*`` in Task 1.6) under the
-    ``vol_{owner_segment}_{path}`` naming scheme introduced in Task 1.4.
+    pipeline; extension-owned volume tier output surfaces on ``volume_entries``
+    / ``volume_names`` (renamed from ``stencil_volume_*`` in Task 1.6) under
+    the ``vol_{owner_segment}_{path}`` naming scheme introduced in Task 1.4.
     """
     src = tmp_path / "src"
     api = src / "api"
@@ -72,13 +73,13 @@ def _volumes_section(compose: str) -> str:
 
 
 # =============================================================================
-# Hybrid mode — structure preserved
+# Full-stack compose — all layers present, structure preserved
 # =============================================================================
 
-class TestHybridMode:
-    """Hybrid mode emits all project-content volumes + L4."""
+class TestFullStackCompose:
+    """Project-content volumes + extension-synthesized volume tier emit together."""
 
-    def test_hybrid_preserves_volume_structure(self, tmp_path: Path):
+    def test_full_stack_preserves_volume_structure(self, tmp_path: Path):
         hierarchy = _rich_hierarchy(tmp_path)
 
         compose = generate_compose_with_masks(
@@ -113,13 +114,13 @@ class TestHybridMode:
 
 
 # =============================================================================
-# Isolation mode — project content omitted, L_volume preserved
+# Empty project content — caller-stripped L1-L3, L_volume tier preserved
 # =============================================================================
 
-class TestIsolationMode:
-    """Isolation mode (caller passes empty project lists) strips project content."""
+class TestEmptyProjectContent:
+    """Caller passing empty project lists strips L1-L3 but keeps the volume tier."""
 
-    def test_isolation_omits_project_content_volumes(self, tmp_path: Path):
+    def test_empty_project_omits_project_content_volumes(self, tmp_path: Path):
         hierarchy = _rich_hierarchy(tmp_path)
 
         compose = generate_compose_with_masks(
@@ -150,7 +151,7 @@ class TestIsolationMode:
         # Ports preserved
         assert '"3900:3900"' in compose
 
-    def test_isolation_with_no_l4_emits_no_volume_layers_block(self, tmp_path: Path):
+    def test_empty_project_with_no_volume_tier_emits_no_volume_layers_block(self, tmp_path: Path):
         """No L1-L3 (caller passed []) and no L_volume → skip the volume layers block."""
         compose = generate_compose_with_masks(
             ordered_volumes=[],
@@ -171,13 +172,13 @@ class TestIsolationMode:
         assert "-claude-auth" not in compose
         assert "\nvolumes:\n" not in compose
 
-    def test_isolation_with_only_l4(self, tmp_path: Path):
-        """Empty project lists + one L4 → L4 emits; no mask_* anywhere."""
+    def test_empty_project_with_only_volume_tier(self, tmp_path: Path):
+        """Empty project lists + one volume-tier entry → emits; no mask_* anywhere."""
         compose = generate_compose_with_masks(
             ordered_volumes=[],
             mask_volume_names=[],
             host_project_root=tmp_path,
-            docker_container_name="test-l4-only",
+            docker_container_name="test-volume-only",
             container_root="/workspace",
             project_name=tmp_path.name,
             volume_entries=["vol_claude_code_root_.local:/root/.local"],
@@ -217,11 +218,11 @@ class TestStencilVolumeMode:
             for l in volumes_section.split("\n")
         )
 
-    def test_stencil_volume_coexists_with_l1_l2_l4(self, tmp_path: Path):
-        """Bind/mask + volume tier (L4 + user-volume) all emit in the same compose file."""
+    def test_stencil_volume_coexists_with_l1_l2_and_extension_volume(self, tmp_path: Path):
+        """Bind/mask + volume tier (extension + user-volume) all emit in the same compose file."""
         hierarchy = _rich_hierarchy(tmp_path)
 
-        # Combine the L4 extension-synth volume entries with an explicit
+        # Combine the extension-synthesized volume entries with an explicit
         # user-declared volume-delivery spec. Post-Task-1.3 both live on the
         # ``volume_entries`` output list; compose renders the unified list.
         volume_entries = list(hierarchy.volume_entries) + [
@@ -247,12 +248,12 @@ class TestStencilVolumeMode:
             l.strip().startswith("vol_user_workspace_data:")
             for l in volumes_section.split("\n")
         )
-        # L4 extension-synthesized entry also renders.
+        # Extension-synthesized volume-tier entry also renders.
         assert any(":/root/.local" in e for e in volume_entries)
         assert any(":/root/.local" in l for l in compose.split("\n"))
 
     def test_no_stencil_volumes_omits_nothing_else(self, tmp_path: Path):
-        """Volume tier populated only by the L4 extension synth output."""
+        """Volume tier populated only by the extension-synth output."""
         compose = generate_compose_with_masks(
             ordered_volumes=[],
             mask_volume_names=[],
@@ -264,7 +265,7 @@ class TestStencilVolumeMode:
             volume_names=["vol_claude_code_root_.local"],
         )
 
-        # Only the single L4-origin volume-tier entry is present.
+        # Only the single extension-origin volume-tier entry is present.
         assert "vol_claude_code_root_.local:/root/.local" in compose
         volumes_section = _volumes_section(compose)
         volume_lines = [

@@ -33,7 +33,7 @@ Everything else (volumes, YAML, docker cp) exists to enforce that visibility.
 2. `ApplyNodeStateFromScope(config, paths)` — computes NodeState per path from config sets
 3. Validation (in hierarchy.py) — relationship checks (mask under mount, reveal under mask)
 4. `Write(scope_docker.json)` — persist config
-5. `ComposeDocker(ordered_volumes, *kwargs)` — YAML structure, masks, isolation volumes, Dockerfile
+5. `ComposeDocker(ordered_volumes, *kwargs)` — YAML structure, masks, volume tier (user + extension isolation), Dockerfile
 6. `File_Ops` — host-side file operations, ancestor queries, path lookups
 7. `Container_Ops` — container-side operations (docker inspect/cp, lifecycle, push/pull/remove)
 8. `Reconcile_Extensions` — post-start verify/re-deploy loop (config.extensions × binary presence → state matrix)
@@ -300,8 +300,9 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                              L1-L3 entries. Extension-synthesized
                              isolation specs (auth, Claude, Git)
                              share this same L_volume tier post Unify
-                             L4 Phase 1 Task 1.3 — there is no
-                             separate Layer 4 emission block. `name:`
+                             L4 Phase 1 Task 1.3 — user-authored and
+                             extension-owned isolation volumes emit
+                             from the single volume tier. `name:`
                              appears in the top-level `volumes:`
                              section without extra options (empty
                              declaration → Docker creates/reattaches
@@ -324,14 +325,13 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                              name matches across the down/up cycle and
                              content persists without staging.
 
-    Extension isolation paths (e.g. /root/.claude, /root/.local) are
-    NOT a separate Layer 4 emission tier post Unify L4 Phase 1 Task
-    1.3. ExtensionConfig.synthesize_mount_specs() materializes them
-    as container-only delivery="volume" specs, and
+    Extension isolation paths (e.g. /root/.claude, /root/.local) share
+    the unified L_volume tier with user-authored Volume Mounts post
+    Unify L4 Phase 1 Task 1.3. ExtensionConfig.synthesize_mount_specs()
+    materializes them as container-only delivery="volume" specs, and
     compute_container_hierarchy(extensions=...) merges them into
-    mount_specs at the top of the function. They flow through the
-    same L_volume tier as user-authored Volume Mounts and emit under
-    the unified vol_{owner_segment}_{path} naming scheme. The merge
+    mount_specs at the top of the function. They emit under the
+    unified vol_{owner_segment}_{path} naming scheme. The merge
     happens regardless of any user-authored spec's delivery choice
     — extensions still always emit, but via the unified pipeline,
     not a side-channel.

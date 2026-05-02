@@ -150,10 +150,10 @@ def generate_compose_with_masks(
                 volume = str(mount)
             lines.append(f"      - \"{volume}\"{comment}")
 
-    # Volume layers: L1-L3 + siblings (ordered_volumes, skipped by caller in Isolation mode)
-    # followed by the unified L_volume tier entries (every delivery="volume"
-    # spec — user-authored plus extension-synthesized, including Claude auth at
-    # /root/.claude as of Task 1.7).
+    # Volume layers: L1-L3 + siblings (ordered_volumes) followed by the
+    # unified L_volume tier entries (every delivery="volume" spec —
+    # user-authored plus extension-synthesized, including Claude auth at
+    # /root/.claude).
     if ordered_volumes or volume_entries:
         lines.append("      # === Volume layers (bind mounts, masks, reveals, named volumes) ===")
         for entry in ordered_volumes:
