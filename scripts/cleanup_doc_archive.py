@@ -152,6 +152,35 @@ def is_tracked(rel: str) -> bool:
     return rel in TRACKED_PATHS
 
 
+def _send_to_recycle(path: Path) -> tuple[bool, str]:
+    """Send `path` to the Windows Recycle Bin per CLAUDE.md (recycle.py canonical, PowerShell fallback).
+
+    Filesystem deletes for gitignored files must be recoverable. `Path.unlink()`
+    is not — it bypasses the recycle bin. Always route through this helper.
+    """
+    helper = Path(r"C:\_dev_env\bin\recycle.py")
+    if helper.exists():
+        result = subprocess.run(
+            [sys.executable, str(helper), str(path)],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, (result.stderr or result.stdout).strip()
+    ps_cmd = (
+        "Add-Type -AssemblyName Microsoft.VisualBasic; "
+        "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile("
+        f"'{path}', 'OnlyErrorDialogs', 'SendToRecycleBin')"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps_cmd],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return True, ""
+    return False, result.stderr.strip()
+
+
 def do_move(src: str, dst: str, apply: bool) -> bool:
     src_path = PROJECT_ROOT / src
     dst_path = PROJECT_ROOT / dst
@@ -196,7 +225,10 @@ def do_delete(src: str, apply: bool) -> bool:
                 print(f"  ERROR (git rm): {src}: {result.stderr.strip()}")
                 return False
         else:
-            src_path.unlink()
+            ok, err = _send_to_recycle(src_path)
+            if not ok:
+                print(f"  ERROR (recycle): {src}: {err}")
+                return False
         print(f"  DELETE ({marker}): {src}")
     else:
         print(f"  PLAN-DELETE ({marker}): {src}")
