@@ -29,6 +29,7 @@ from .delegates import TreeStyleDelegate
 from .display_filter_proxy import DisplayFilterProxy
 from .mount_data_tree import MountDataTree, MountDataNode
 from .mount_data_model import MountDataTreeModel
+from .selection_coordinator import _ClickAwareTreeView
 from .display_config import ScopeDisplayConfig
 from .style_engine import ScopeHeaderSignals, resolve_scope_header_signals
 from .view_helpers import configure_tree_view, apply_header_config
@@ -114,7 +115,7 @@ class ScopeView(QWidget):
         self._config = ScopeDisplayConfig()
         self._model = MountDataTreeModel(tree, self._config)
         self._proxy = DisplayFilterProxy(self._model, self._config)
-        self._tree_view = QTreeView()
+        self._tree_view = _ClickAwareTreeView()
         self._tree_view.setObjectName("scopeTree")
 
         self._setup_ui()

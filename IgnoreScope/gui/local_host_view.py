@@ -26,6 +26,7 @@ from .delegates import TreeStyleDelegate
 from .display_filter_proxy import DisplayFilterProxy
 from .mount_data_tree import MountDataTree, MountDataNode, NodeSource
 from .mount_data_model import MountDataTreeModel
+from .selection_coordinator import _ClickAwareTreeView
 from dataclasses import replace as dc_replace
 from .display_config import LocalHostDisplayConfig
 from .view_helpers import configure_tree_view, apply_header_config
@@ -59,7 +60,7 @@ class LocalHostView(QWidget):
         self._config = LocalHostDisplayConfig()
         self._model = MountDataTreeModel(tree, self._config)
         self._proxy = DisplayFilterProxy(self._model, self._config)
-        self._tree_view = QTreeView()
+        self._tree_view = _ClickAwareTreeView()
         self._tree_view.setObjectName("localHostTree")
         # Optional callable() -> bool, set by parent, indicates container exists.
         # When None, container-dependent gestures are hidden.

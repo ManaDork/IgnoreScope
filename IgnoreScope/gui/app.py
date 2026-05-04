@@ -181,6 +181,15 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self._scope_view = ScopeView(self._mount_data_tree)
         self.scope_config_container.layout().addWidget(self._scope_view)
 
+        # Cross-tree selection coordinator: clicking in one tree clears
+        # the sibling tree's selection; empty-space click clears both.
+        from .selection_coordinator import TreeSelectionCoordinator
+        self._selection_coord = TreeSelectionCoordinator(
+            self._local_host.tree_view,
+            self._scope_view.tree_view,
+            parent=self,
+        )
+
         # Arrange docks after views are injected — dock sizeHints must
         # reflect actual content for Qt to compute correct proportions
         self._arrange_default_layout()
