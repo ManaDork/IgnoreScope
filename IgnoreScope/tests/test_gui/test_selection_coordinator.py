@@ -43,9 +43,13 @@ def two_views():
     Avoids spinning up a full IgnoreScopeApp — the coordinator only depends
     on the QTreeView contract (selectionModel + clearSelection + the new
     userRowClicked / emptySpaceClicked signals).
+
+    Note: the constructor positional order is `(local_host, scope, parent)`
+    — view_a (first) plays the LocalHost role, view_b plays Scope. Asymmetric
+    coordinator: only Scope→LocalHost click clears.
     """
-    model_a = QStringListModel(["a0", "a1", "a2", "a3"])
-    model_b = QStringListModel(["b0", "b1", "b2"])
+    model_a = QStringListModel(["a0", "a1", "a2", "a3"])  # plays LocalHost
+    model_b = QStringListModel(["b0", "b1", "b2"])         # plays Scope
 
     view_a = _ClickAwareTreeView()
     view_a.setModel(model_a)
@@ -91,45 +95,45 @@ def _user_ctrl_click_row(view, row: int) -> None:
 
 
 class TestSelectionCoordinator:
-    def test_user_click_in_a_clears_b(self, two_views):
-        view_a, view_b, _coord = two_views
-        _select_row(view_b, 0)
-        _add_row(view_b, 1)
-        assert view_b.selectionModel().hasSelection()
+    def test_local_host_click_clears_scope(self, two_views):
+        """Symmetric: clicking LocalHost clears Scope's selection (single-context)."""
+        local_host, scope, _coord = two_views
+        _select_row(scope, 0)
+        _add_row(scope, 1)
+        assert scope.selectionModel().hasSelection()
 
-        _user_click_row(view_a, 2)
+        _user_click_row(local_host, 2)
 
-        assert view_a.selectionModel().hasSelection()
-        assert not view_b.selectionModel().hasSelection()
+        assert local_host.selectionModel().hasSelection()
+        assert not scope.selectionModel().hasSelection()
 
-    def test_user_click_in_b_clears_a(self, two_views):
-        view_a, view_b, _coord = two_views
-        _select_row(view_a, 0)
-        _add_row(view_a, 1)
-        assert view_a.selectionModel().hasSelection()
+    def test_scope_click_clears_local_host(self, two_views):
+        """Symmetric: clicking Scope clears LocalHost's selection (single-context)."""
+        local_host, scope, _coord = two_views
+        _select_row(local_host, 0)
+        _add_row(local_host, 1)
+        assert local_host.selectionModel().hasSelection()
 
-        _user_click_row(view_b, 1)
+        _user_click_row(scope, 1)
 
-        assert view_b.selectionModel().hasSelection()
-        assert not view_a.selectionModel().hasSelection()
+        assert scope.selectionModel().hasSelection()
+        assert not local_host.selectionModel().hasSelection()
 
-    def test_user_ctrl_click_does_not_clear_own_selection(self, two_views):
-        """Ctrl+click adding to view_a's selection must not clear view_a.
+    def test_ctrl_multi_click_within_tree_does_not_clear_own(self, two_views):
+        """Ctrl+click multi-select within one tree must not collapse to single row.
 
-        This is the bug the previous (selectionChanged-wired) coordinator
-        triggered: a programmatic `expand_to_path` on view_b would fire
-        view_b.selectionChanged, the coordinator would clear view_a, and
-        the user's multi-select would collapse to one row each click.
+        The previous (selectionChanged-wired) coordinator fired on every
+        selection change including programmatic ones, so each Ctrl+click
+        triggered a cascade that wiped its own selection. The user-gesture-
+        wired coordinator only fires on mousePress, so Ctrl+click adds to
+        the active tree's selection without disturbing it.
         """
-        view_a, view_b, _coord = two_views
-        _user_click_row(view_a, 0)
-        assert list(view_a.selectionModel().selectedIndexes())
+        local_host, _scope, _coord = two_views
+        _user_click_row(local_host, 0)
+        _user_ctrl_click_row(local_host, 1)
 
-        _user_ctrl_click_row(view_a, 1)
-        # Both rows should remain selected in view_a
-        selected_rows = {i.row() for i in view_a.selectionModel().selectedIndexes()}
-        assert selected_rows == {0, 1}
-        assert not view_b.selectionModel().hasSelection()
+        rows = {i.row() for i in local_host.selectionModel().selectedIndexes()}
+        assert rows == {0, 1}
 
     def test_programmatic_selection_does_not_clear_other(self, two_views):
         """Setting selection programmatically (no userRowClicked emit) does NOT
@@ -182,18 +186,17 @@ class TestSelectionCoordinator:
         assert not view_a.selectionModel().hasSelection()
         assert not view_b.selectionModel().hasSelection()
 
-    def test_user_click_on_already_selected_row_clears_other(self, two_views):
-        """Re-clicking the same row in view_a still clears view_b — the
+    def test_scope_re_click_still_clears_local_host(self, two_views):
+        """Re-clicking the same row in Scope still clears LocalHost — the
         coordinator runs on every user click, not just selection changes.
         """
-        view_a, view_b, _coord = two_views
-        _user_click_row(view_a, 0)
-        # Programmatically populate view_b (simulating expand_to_path)
-        _select_row(view_b, 0)
-        assert view_b.selectionModel().hasSelection()
+        local_host, scope, _coord = two_views
+        _user_click_row(scope, 0)
+        _select_row(local_host, 0)
+        assert local_host.selectionModel().hasSelection()
 
-        # User re-clicks the same row in view_a
-        _user_click_row(view_a, 0)
+        # User re-clicks the same row in Scope
+        _user_click_row(scope, 0)
 
-        assert view_a.selectionModel().hasSelection()
-        assert not view_b.selectionModel().hasSelection()
+        assert scope.selectionModel().hasSelection()
+        assert not local_host.selectionModel().hasSelection()

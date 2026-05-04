@@ -1,22 +1,26 @@
 """Cross-tree selection coordination for LocalHostView <-> ScopeView.
 
-Single-context selection model: a USER click on a row in one tree clears
-the sibling tree's selection; an empty-space click in either tree clears
-both.
+Symmetric single-context selection model:
+  - User click on EITHER tree clears the other tree's selection.
+  - Empty-space click in either tree clears BOTH selections.
 
 The coordinator wires the two views' `userRowClicked` and `emptySpaceClicked`
 signals — both fired from `_ClickAwareTreeView.mousePressEvent` ONLY on a
 user mouse press. Programmatic selection changes (e.g., from
-`LocalHostView.nodeSelected -> ScopeView.expand_to_path` chain in app.py)
-do NOT trigger cross-tree clearing, so multi-select within a single tree
-remains intact and the auto-expand-to-path UX continues to work.
+`selectionChangedPaths -> set_tracked_paths`) do NOT trigger cross-tree
+clearing, so the tracked-overlay chain remains independent.
+
+The tracked-path overlay (separate visual layer in `delegates.py`) is
+orthogonal to this coordinator: clearing Scope's `selectionModel` does
+not clear the tracked outline. The outline auto-clears only when LocalHost's
+own selection becomes empty (which fires `selectionChangedPaths([])`).
 
 Keyboard navigation in one tree does not clear the other (intentional —
 arrow-key nav is exploration, not single-context selection). If desired
 later, override `keyPressEvent` and emit `userRowClicked` from there.
 
-If drag-drop between trees ever lands, the "clear sibling on click" rule
-will fight the drag gesture — gate `_on_user_select` on a key modifier or
+If drag-drop between trees ever lands, the cross-tree clear rule will
+fight the drag gesture — gate `_on_user_select` on a key modifier or
 suspend the coordinator during drag in that case.
 """
 
@@ -53,31 +57,43 @@ class _ClickAwareTreeView(QTreeView):
 
 
 class TreeSelectionCoordinator(QObject):
-    """Cross-tree single-context selection mediator.
+    """Cross-tree symmetric single-context selection mediator.
 
-    Wires the two views' user-gesture signals so that:
-      - A user click on a row in one view clears the sibling view's selection.
-      - An empty-space click in either view clears BOTH views' selections.
+    Wires user-gesture signals so that:
+      - A user click on EITHER view clears the sibling view's selection.
+      - Empty-space click in either view clears BOTH views' selections.
 
-    No `_suppress` re-entry guard is needed because the signals are user-
-    gesture-only — clearing one view programmatically does NOT re-trigger
-    the coordinator.
+    The tracked-path overlay (separate visual layer) is independent of this
+    coordinator. When a Scope click clears LocalHost's selection, LocalHost
+    fires `selectionChangedPaths([])`, which separately clears the Scope
+    tracked outline via the chain in `app.py`. The two layers compose
+    without interfering.
+
+    Constructor positional order is `(local_host_view, scope_view, parent)`
+    by convention — but the coordinator is fully symmetric so swapping
+    them produces the same behavior.
     """
 
     def __init__(
         self,
-        view_a: _ClickAwareTreeView,
-        view_b: _ClickAwareTreeView,
+        local_host_view: _ClickAwareTreeView,
+        scope_view: _ClickAwareTreeView,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._a = view_a
-        self._b = view_b
+        self._local_host = local_host_view
+        self._scope = scope_view
 
-        view_a.userRowClicked.connect(lambda: self._on_user_select(view_a, view_b))
-        view_b.userRowClicked.connect(lambda: self._on_user_select(view_b, view_a))
-        view_a.emptySpaceClicked.connect(self._clear_both)
-        view_b.emptySpaceClicked.connect(self._clear_both)
+        # Symmetric: each view's click clears the sibling.
+        local_host_view.userRowClicked.connect(
+            lambda: self._on_user_select(local_host_view, scope_view)
+        )
+        scope_view.userRowClicked.connect(
+            lambda: self._on_user_select(scope_view, local_host_view)
+        )
+        # Empty-space click clears both, regardless of which tree fired it.
+        local_host_view.emptySpaceClicked.connect(self._clear_both)
+        scope_view.emptySpaceClicked.connect(self._clear_both)
 
     def _on_user_select(
         self, active: _ClickAwareTreeView, other: _ClickAwareTreeView,
@@ -87,5 +103,5 @@ class TreeSelectionCoordinator(QObject):
         other.clearSelection()
 
     def _clear_both(self) -> None:
-        self._a.clearSelection()
-        self._b.clearSelection()
+        self._local_host.clearSelection()
+        self._scope.clearSelection()

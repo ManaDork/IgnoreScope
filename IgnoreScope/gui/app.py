@@ -408,8 +408,19 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
             self._on_push_toggle
         )
 
-        # Selection sync: left panel node → right panel expand
-        self._local_host.nodeSelected.connect(self._scope_view.expand_to_path)
+        # Selection sync: LocalHost's full selection set drives Scope's
+        # tracked-paths overlay (decoupled from Scope's selectionModel so
+        # Scope user-multi-select + RMB context survive LocalHost clicks).
+        # See `selection_coordinator.py` and `ScopeView.set_tracked_paths`.
+        # `selectionChangedPaths` fires on every LocalHost selection-set
+        # change including clears (empty list) — covers single click,
+        # Ctrl+click multi-select, and programmatic clearSelection() calls
+        # from the coordinator's Scope→LocalHost direction (which would
+        # otherwise leave a stale tracked-overlay since clearSelection
+        # doesn't fire currentChanged).
+        self._local_host.selectionChangedPaths.connect(
+            self._scope_view.set_tracked_paths
+        )
 
         # Sync (force re-push) from LocalHostView context menu
         self._local_host.syncRequested.connect(fo.on_update)

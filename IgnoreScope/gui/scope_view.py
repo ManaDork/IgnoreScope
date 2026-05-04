@@ -120,6 +120,9 @@ class ScopeView(QWidget):
 
         self._setup_ui()
         self._connect_signals()
+        # Drop tracked_path automatically on project/scope switch so a
+        # stale outline doesn't follow the user into an unrelated tree.
+        self._tree.structureChanged.connect(self._validate_tracked_path)
 
     # ── UI Setup ──────────────────────────────────────────────────
 
@@ -559,51 +562,108 @@ class ScopeView(QWidget):
 
     # ── Selection Sync ────────────────────────────────────────────
 
-    def expand_to_path(self, path: Path) -> None:
-        """Expand tree to show a path, select and scroll to it.
+    def _validate_tracked_path(self) -> None:
+        """Drop stale tracked-paths after project switch / scope switch / clear.
 
-        Walks proxy indices from invisible root, expanding each level
-        until the target path is found or the walk runs out of matches.
+        Wired to `tree.structureChanged` so a tracked_paths set that points
+        outside the new root (or has no root at all) is cleared — otherwise
+        the delegate retains a phantom outline on an unrelated row in the
+        new project.
         """
+        if not self._delegate._tracked_paths:
+            return
+        root = self._tree.root_node
+        if root is None:
+            self.set_tracked_paths([])
+            return
+        kept = []
+        for p in self._delegate._tracked_paths:
+            try:
+                p.relative_to(root.path)
+                kept.append(p)
+            except ValueError:
+                pass
+        if len(kept) != len(self._delegate._tracked_paths):
+            self.set_tracked_paths(kept)
+
+    def set_tracked_paths(self, paths) -> None:
+        """Update the tracked-paths overlay (decoupled from selectionModel).
+
+        Accepts an iterable of `Path` objects (may be empty to clear).
+        Walks the tree expanding only ANCESTORS of each path so each row
+        is reachable, then stores all paths in the delegate's set. Paint
+        renders one outline per tracked path. Scope's own user-driven
+        selection is left untouched.
+
+        Used by `app.py`'s `LocalHostView.selectionChangedPaths -> set_tracked_paths`
+        chain — fires on every LocalHost selection-set change including
+        clears (empty list).
+        """
+        paths_list = [p for p in paths if p is not None]
+        self._delegate.set_tracked_paths(paths_list)
+
+        if not paths_list:
+            self._tree_view.viewport().update()
+            return
+
         root_node = self._tree.root_node
         if root_node is None:
-            return
-        try:
-            rel = path.relative_to(root_node.path)
-        except ValueError:
-            return
-        parts = rel.parts
-        if not parts:
+            self._tree_view.viewport().update()
             return
 
-        current_parent = QModelIndex()  # invisible root
+        # For each tracked path: expand its ancestors. Track the first matched
+        # proxy index so we scroll to it (showing the user where the new
+        # selection landed in Scope without forcing a scroll-jump per path).
+        first_matched = QModelIndex()
         model = self._proxy
-        matched = QModelIndex()
-
-        for part in parts:
-            found = False
-            for row in range(model.rowCount(current_parent)):
-                child_proxy = model.index(row, 0, current_parent)
-                if not child_proxy.isValid():
-                    continue
-                source_idx = self._proxy.mapToSource(child_proxy)
-                node = source_idx.internalPointer()
-                if node is not None and node.path.name == part:
-                    self._tree_view.expand(child_proxy)
-                    current_parent = child_proxy
-                    matched = child_proxy
-                    found = True
+        for path in paths_list:
+            try:
+                rel = path.relative_to(root_node.path)
+            except ValueError:
+                continue
+            parts = rel.parts
+            if not parts:
+                continue
+            current_parent = QModelIndex()
+            matched = QModelIndex()
+            last_idx = len(parts) - 1
+            for i, part in enumerate(parts):
+                found = False
+                for row in range(model.rowCount(current_parent)):
+                    child_proxy = model.index(row, 0, current_parent)
+                    if not child_proxy.isValid():
+                        continue
+                    source_idx = self._proxy.mapToSource(child_proxy)
+                    node = source_idx.internalPointer()
+                    if node is not None and node.path.name == part:
+                        # Expand ancestors only; leave the final matched
+                        # folder closed (Bug 3 contract). Chevron-mirror
+                        # chain (Change B) handles explicit expansion.
+                        if i < last_idx:
+                            self._tree_view.expand(child_proxy)
+                        current_parent = child_proxy
+                        matched = child_proxy
+                        found = True
+                        break
+                if not found:
                     break
-            if not found:
-                break
+            if matched.isValid() and not first_matched.isValid():
+                first_matched = matched
 
-        if matched.isValid():
-            self._tree_view.selectionModel().setCurrentIndex(
-                matched,
-                self._tree_view.selectionModel().SelectionFlag.ClearAndSelect
-                | self._tree_view.selectionModel().SelectionFlag.Rows,
-            )
-            self._tree_view.scrollTo(matched)
+        if first_matched.isValid():
+            self._tree_view.scrollTo(first_matched)
+        self._tree_view.viewport().update()
+
+    # Single-path convenience wrapper — used internally by _validate and
+    # callers that only have one path. Routes to the set form.
+    def set_tracked_path(self, path: Optional[Path]) -> None:
+        """Set a single tracked path (or clear with None). Wraps set_tracked_paths."""
+        self.set_tracked_paths([path] if path is not None else [])
+
+    # Backwards-compat alias — kept for any stale external callers.
+    def expand_to_path(self, path: Path) -> None:
+        """DEPRECATED — use `set_tracked_path` / `set_tracked_paths`."""
+        self.set_tracked_path(path)
 
     # ── Helpers ───────────────────────────────────────────────────
 

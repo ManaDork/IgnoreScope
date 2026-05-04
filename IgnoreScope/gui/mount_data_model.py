@@ -25,6 +25,7 @@ from .display_config import TreeDisplayConfig
 NodeStateRole = Qt.ItemDataRole.UserRole + 1
 NodeIsFileRole = Qt.ItemDataRole.UserRole + 2
 NodeStencilTierRole = Qt.ItemDataRole.UserRole + 3
+NodePathRole = Qt.ItemDataRole.UserRole + 4
 
 
 # ── Model ─────────────────────────────────────────────────────────
@@ -174,6 +175,9 @@ class MountDataTreeModel(QAbstractItemModel):
 
         if role == NodeStencilTierRole:
             return node.stencil_tier if node.is_stencil_node else "mirrored"
+
+        if role == NodePathRole:
+            return node.path
 
         if role == Qt.ItemDataRole.ToolTipRole:
             return self._get_tooltip(node)
