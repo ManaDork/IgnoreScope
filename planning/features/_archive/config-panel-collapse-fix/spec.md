@@ -48,4 +48,4 @@ None — all design decisions resolved during discovery.
 
 ## Related Bug Report
 
-`_workbench/_bugs/config-panel-collapse-expand-cycle.md`
+`_workbench/_bugs/_archive/config-panel-collapse-expand-cycle.md`
