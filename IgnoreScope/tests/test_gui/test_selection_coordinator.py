@@ -3,10 +3,19 @@
 Covers the bug where LocalHost and Scope tree selections accumulated
 independently — see `_workbench/_bugs/cross-tree-selection-coordination.md`.
 
-Two contracts:
-  1. Selecting a row in one view clears the sibling view's selection.
-  2. Empty-space click in either view clears BOTH views' selections.
-  3. The re-entry guard prevents infinite A->B->A clear cascade.
+The coordinator reacts to USER GESTURES only (`userRowClicked`,
+`emptySpaceClicked`), not arbitrary `selectionChanged`. This avoids a
+feedback loop with the existing
+`LocalHostView.nodeSelected -> ScopeView.expand_to_path` chain in
+`app.py`, which programmatically updates ScopeView selection — without
+the user-gesture gate, that programmatic change would trigger the
+coordinator to clear LocalHost's selection, breaking multi-select.
+
+Tests synthesize the user gesture by emitting `userRowClicked` /
+`emptySpaceClicked` directly after setting up the underlying selection
+state programmatically. This mirrors the runtime path: Qt's mousePressEvent
+updates selection via `super().mousePressEvent`, then the override emits
+the user-gesture signal.
 """
 
 from __future__ import annotations
@@ -33,7 +42,7 @@ def two_views():
 
     Avoids spinning up a full IgnoreScopeApp — the coordinator only depends
     on the QTreeView contract (selectionModel + clearSelection + the new
-    emptySpaceClicked signal).
+    userRowClicked / emptySpaceClicked signals).
     """
     model_a = QStringListModel(["a0", "a1", "a2", "a3"])
     model_b = QStringListModel(["b0", "b1", "b2"])
@@ -48,6 +57,7 @@ def two_views():
 
 
 def _select_row(view, row: int) -> None:
+    """Programmatic selection update — does NOT trigger coordinator."""
     idx = view.model().index(row, 0)
     view.selectionModel().select(
         idx, QItemSelectionModel.SelectionFlag.ClearAndSelect,
@@ -55,39 +65,89 @@ def _select_row(view, row: int) -> None:
 
 
 def _add_row(view, row: int) -> None:
+    """Programmatic selection add — does NOT trigger coordinator."""
     idx = view.model().index(row, 0)
     view.selectionModel().select(
         idx, QItemSelectionModel.SelectionFlag.Select,
     )
 
 
+def _user_click_row(view, row: int) -> None:
+    """Synthesize a user click on a valid row.
+
+    In the runtime path, Qt's `mousePressEvent.super()` updates the
+    selection and then `_ClickAwareTreeView.mousePressEvent` emits
+    `userRowClicked`. The test mirrors this by setting the selection
+    programmatically THEN emitting the signal.
+    """
+    _select_row(view, row)
+    view.userRowClicked.emit()
+
+
+def _user_ctrl_click_row(view, row: int) -> None:
+    """Synthesize a user Ctrl+click adding `row` to the existing selection."""
+    _add_row(view, row)
+    view.userRowClicked.emit()
+
+
 class TestSelectionCoordinator:
-    def test_select_in_a_clears_b(self, two_views):
+    def test_user_click_in_a_clears_b(self, two_views):
         view_a, view_b, _coord = two_views
         _select_row(view_b, 0)
         _add_row(view_b, 1)
         assert view_b.selectionModel().hasSelection()
 
-        _select_row(view_a, 2)
+        _user_click_row(view_a, 2)
+
         assert view_a.selectionModel().hasSelection()
         assert not view_b.selectionModel().hasSelection()
 
-    def test_select_in_b_clears_a(self, two_views):
-        """Symmetric to test_select_in_a_clears_b."""
+    def test_user_click_in_b_clears_a(self, two_views):
         view_a, view_b, _coord = two_views
         _select_row(view_a, 0)
         _add_row(view_a, 1)
         assert view_a.selectionModel().hasSelection()
 
-        _select_row(view_b, 1)
+        _user_click_row(view_b, 1)
+
         assert view_b.selectionModel().hasSelection()
         assert not view_a.selectionModel().hasSelection()
 
-    def test_empty_space_click_on_a_clears_a(self, two_views):
-        """Empty-space click on the tree that has a selection clears it."""
+    def test_user_ctrl_click_does_not_clear_own_selection(self, two_views):
+        """Ctrl+click adding to view_a's selection must not clear view_a.
+
+        This is the bug the previous (selectionChanged-wired) coordinator
+        triggered: a programmatic `expand_to_path` on view_b would fire
+        view_b.selectionChanged, the coordinator would clear view_a, and
+        the user's multi-select would collapse to one row each click.
+        """
         view_a, view_b, _coord = two_views
-        _select_row(view_a, 0)
-        _add_row(view_a, 1)
+        _user_click_row(view_a, 0)
+        assert list(view_a.selectionModel().selectedIndexes())
+
+        _user_ctrl_click_row(view_a, 1)
+        # Both rows should remain selected in view_a
+        selected_rows = {i.row() for i in view_a.selectionModel().selectedIndexes()}
+        assert selected_rows == {0, 1}
+        assert not view_b.selectionModel().hasSelection()
+
+    def test_programmatic_selection_does_not_clear_other(self, two_views):
+        """Setting selection programmatically (no userRowClicked emit) does NOT
+        trigger the coordinator — this is the contract that protects the
+        nodeSelected -> expand_to_path chain in app.py.
+        """
+        view_a, view_b, _coord = two_views
+        _select_row(view_a, 0)  # programmatic — coordinator should ignore
+        # Now programmatically set view_b's selection (simulating expand_to_path)
+        _select_row(view_b, 0)
+        # Both views still have their selections — coordinator did not interfere
+        assert view_a.selectionModel().hasSelection()
+        assert view_b.selectionModel().hasSelection()
+
+    def test_empty_space_click_on_a_clears_a(self, two_views):
+        view_a, view_b, _coord = two_views
+        _user_click_row(view_a, 0)
+        _user_ctrl_click_row(view_a, 1)
         assert view_a.selectionModel().hasSelection()
 
         view_a.emptySpaceClicked.emit()
@@ -98,25 +158,21 @@ class TestSelectionCoordinator:
     def test_empty_space_click_on_b_clears_a(self, two_views):
         """Empty-space click on the EMPTY tree still clears the OTHER tree's selection.
 
-        The coordinator enforces single-context selection (selecting in A
-        clears B), so at any moment only one tree has a non-empty selection.
-        Empty-space click on EITHER tree must clear that selection regardless
-        of which tree the click landed on.
+        The coordinator's empty-space handler is symmetric — it clears
+        BOTH views regardless of which view the click landed in.
         """
         view_a, view_b, _coord = two_views
-        _select_row(view_a, 0)
-        _add_row(view_a, 1)
+        _user_click_row(view_a, 0)
+        _user_ctrl_click_row(view_a, 1)
         assert view_a.selectionModel().hasSelection()
         assert not view_b.selectionModel().hasSelection()
 
-        # Click empty space in the OTHER (empty) tree — should still clear A
         view_b.emptySpaceClicked.emit()
 
         assert not view_a.selectionModel().hasSelection()
         assert not view_b.selectionModel().hasSelection()
 
     def test_clear_both_handles_already_empty_state(self, two_views):
-        """Calling _clear_both with both views already empty is a safe no-op."""
         view_a, view_b, coord = two_views
         assert not view_a.selectionModel().hasSelection()
         assert not view_b.selectionModel().hasSelection()
@@ -126,54 +182,18 @@ class TestSelectionCoordinator:
         assert not view_a.selectionModel().hasSelection()
         assert not view_b.selectionModel().hasSelection()
 
-    def test_clear_selection_does_not_cascade_infinitely(self, two_views):
-        """Calling clearSelection on A must not cause B's clear to retrigger A's clear."""
+    def test_user_click_on_already_selected_row_clears_other(self, two_views):
+        """Re-clicking the same row in view_a still clears view_b — the
+        coordinator runs on every user click, not just selection changes.
+        """
         view_a, view_b, _coord = two_views
-        _select_row(view_a, 0)
+        _user_click_row(view_a, 0)
+        # Programmatically populate view_b (simulating expand_to_path)
         _select_row(view_b, 0)
+        assert view_b.selectionModel().hasSelection()
 
-        # Track selectionChanged on B; should fire 0 times when A is cleared
-        # (A's clear triggers _on_select with active=A having no selection,
-        #  which short-circuits early — so B is never cleared by the coordinator).
-        b_emit_count = [0]
-        view_b.selectionModel().selectionChanged.connect(
-            lambda *_: b_emit_count[0].__iadd__(1) if False else b_emit_count.__setitem__(0, b_emit_count[0] + 1)
-        )
+        # User re-clicks the same row in view_a
+        _user_click_row(view_a, 0)
 
-        view_a.clearSelection()
-
-        # B was already-selected before; its selection is unchanged because the
-        # coordinator's _on_select short-circuits on `not active.hasSelection()`.
-        # The key assertion is no infinite loop happened (test would hang or
-        # exhaust recursion). Counter sanity-check: B's selectionChanged fired
-        # at most once (and likely zero times since no actual change was made).
-        assert b_emit_count[0] <= 1
-
-    def test_programmatic_clear_no_infinite_loop_via_coordinator(self, two_views):
-        """The _suppress guard prevents A's clearSelection from triggering B's clear from triggering A's clear."""
-        view_a, view_b, coord = two_views
-        _select_row(view_a, 0)
-        _select_row(view_b, 0)
-
-        # _clear_both must not re-enter; if it did, the test would never return.
-        coord._clear_both()
-
-        assert not view_a.selectionModel().hasSelection()
-        assert not view_b.selectionModel().hasSelection()
-
-    def test_select_already_selected_does_not_clear_sibling(self, two_views):
-        """Re-selecting the same row in A shouldn't disturb B (no actual selection change)."""
-        view_a, view_b, _coord = two_views
-        _select_row(view_a, 0)
-        _select_row(view_b, 0)
-
-        # Re-issue the same selection in A — Qt may emit selectionChanged with
-        # empty selected/deselected indexes. Coordinator's hasSelection check
-        # still passes (A has a selection), so B WOULD be cleared by spec.
-        # This test documents the expected behavior: even idempotent selects
-        # in A clear B. If users re-tap a row in A intending to keep B's
-        # selection, that's a Qt limitation — they should empty-click instead.
-        _select_row(view_a, 0)
         assert view_a.selectionModel().hasSelection()
-        # B is cleared because A's selectionChanged fires and coordinator runs.
         assert not view_b.selectionModel().hasSelection()
