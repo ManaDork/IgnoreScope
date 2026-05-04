@@ -196,12 +196,31 @@ class MountDataTree(QObject):
             self._rebuild_tree()
 
     def _rebuild_tree(self) -> None:
-        """Rebuild tree with current filter settings."""
-        if self._root_node:
-            self._root_node.children_loaded = False
-            self._root_node.children = []
-            self._root_node.load_children()  # Reload now — Qt won't re-fetch expanded nodes
-            self.structureChanged.emit()
+        """Recursively invalidate lazy-load cache so toggle re-scans every loaded subtree.
+
+        Resets `children_loaded=False` for every previously-expanded directory in the
+        tree (root + siblings, DFS). Eager-reloads the root since it's always visible;
+        deeper subtrees re-fetch via Qt's `fetchMore` when re-expanded — the gate is
+        now open. Calls `_recompute_states()` so newly-loaded dotfile nodes get fresh
+        `NodeState` before the proxy queries them.
+        """
+        if not self._root_node:
+            return
+        self._invalidate_loaded(self._root_node)
+        for sib in self._sibling_nodes:
+            self._invalidate_loaded(sib)
+        self._root_node.load_children(folders_only=False)
+        self._recompute_states()
+        self.structureChanged.emit()
+
+    def _invalidate_loaded(self, node: MountDataNode) -> None:
+        """DFS reset of children_loaded for every previously-expanded directory."""
+        if not node.children_loaded or node.is_file or node.is_stencil_node:
+            return
+        for child in node.children:
+            self._invalidate_loaded(child)
+        node.children_loaded = False
+        node.children = []
 
     # ── Batch Mode ────────────────────────────────────────────────
 
