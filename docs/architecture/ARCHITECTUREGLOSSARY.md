@@ -664,7 +664,7 @@ Both owner strata participate:
 
 The compound term is the appropriate vocabulary for guard-variable names, log strings, and documentation prose where the tier distinction (`detached` vs `volume`) is **not** load-bearing. When a site's behavior depends on the specific mechanism, the mechanism axes (`delivery`, `owner`, `content_seed`, `preserve_on_update`) are the source of truth — `isolation` as a blanket rename would hide meaningful distinctions.
 
-Public field names on `MountSpecPath` (`delivery`, `owner`, `content_seed`, `preserve_on_update`, `host_path`) are NOT renamed to anything involving "isolation" — the compound lives in local variables, comments, and narrative documentation only. The mechanical audit classifying every candidate rename site lives at `planning/features/unify-l4-reclaim-isolation-term/audit-report.md`.
+Public field names on `MountSpecPath` (`delivery`, `owner`, `content_seed`, `preserve_on_update`, `host_path`) are NOT renamed to anything involving "isolation" — the compound lives in local variables, comments, and narrative documentation only. The mechanical audit classifying every candidate rename site lives at `planning/features/_archive/unify-l4-reclaim-isolation-term/audit-report.md`.
 
 **Domains:** Documentation vocabulary, Config (read-only reference to `delivery` / `owner`)
 
