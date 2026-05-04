@@ -651,9 +651,9 @@ One menu builder. Both panels. RMB never duplicates checkbox actions.
 | Scope Configuration (folder) | True | Folders | Expand, Collapse, [Pull All if pushed inside] |
 | Scope Configuration (file) | True | Files | Pull File(s) |
 
-### G. LocalHost Tree RMB — Six-Gesture Delivery State Machine (Phase 3 Task 4.7)
+### G. LocalHost Tree RMB — Six-Gesture Delivery State Machine
 
-The LocalHost Tree RMB and Project Root Header RMB share a single helper, `_add_delivery_gestures(menu, path)`, keyed off `is_in_raw_set("mounted", path)` / `is_in_raw_set("detached_mounted", path)`. Header invocation falls back to a disabled "No valid actions" entry when the gesture set is empty (Phase 2 silent-no-op fix).
+The LocalHost Tree RMB and Project Root Header RMB share a single helper, `_add_delivery_gestures(menu, path)`, keyed off `is_in_raw_set("mounted", path)` / `is_in_raw_set("detached_mounted", path)`. Header invocation falls back to a disabled "No valid actions" entry when the gesture set is empty.
 
 Gesture matrix (NONE state offers all three host-backed creation gestures; existing-spec states surface tier conversions and removals):
 
@@ -665,9 +665,9 @@ Gesture matrix (NONE state offers all three host-backed creation gestures; exist
 
 Virtual Folder produces a host-backed folder-seed spec (`delivery="detached", content_seed="folder", host_path=mount_root`). The container side mkdir's at create time without a cp walk; content is filled via `pushed_files` or inside-container writes. Distinct from Scope Config "Make Folder" (Section H), which is container-only (`host_path=None`).
 
-### H. Scope Config Tree RMB — Stencil Gesture State Machine (Phase 3 Task 4.6)
+### H. Scope Config Tree RMB — Stencil Gesture State Machine
 
-The Scope Config Tree RMB surfaces container-only folder gestures with no LocalHost analogue. Parallels the LocalHost six-gesture state machine but is keyed off the `MountSpecPath.delivery` + `content_seed` + `preserve_on_update` triple rather than host-backed tier checks. Header RMB follows the Phase 2 silent-no-op fix pattern (disabled "No valid actions" when empty).
+The Scope Config Tree RMB surfaces container-only folder gestures with no LocalHost analogue. Parallels the LocalHost six-gesture state machine but is keyed off the `MountSpecPath.delivery` + `content_seed` + `preserve_on_update` triple rather than host-backed tier checks. Header RMB follows the silent-no-op fallback pattern (disabled "No valid actions" when empty).
 
 Gesture matrix:
 
@@ -811,3 +811,13 @@ All `text_color` values use **variable indirection** — the string `"text_prima
 | Scope Configuration (`undo_scope=selection_history`) | Push/Pull actions | HISTORY_DESTRUCTIVE, HISTORY_DESTRUCTIVE_SELECTED, HISTORY_REDO_AVAILABLE |
 
 Session History displays entries from BOTH panels interleaved chronologically. Each entry carries its source panel so the delegate knows which entry_type applies.
+
+---
+
+## Provenance
+
+Domain prose above is timeless. Feature-rollout history (Task X.Y, PR #N, commit hashes, branch names) lives here so the body stays canonical. Full project chronology: `docs/architecture/EVOLUTION.md`.
+
+- **Virtual Mount per-spec delivery (`MountSpecPath.delivery`, `host_path`, `content_seed`, `preserve_on_update`):** shipped via PRs #17–#29 (2026-04-20 – 2026-04-21). Replaced the earlier scope-level `container_mode` binary. Phase 3 added the LocalHost six-gesture state machine and Scope Config Tree stencil gesture state machine documented in Sections G and H above (PRs #21–#29, #51–#54).
+- **Architecture Blueprint timeless-prose policy:** Phase/Task/PR identifiers are removed from domain prose and parked in this footer. Reference: CLAUDE.md `Feature-Emergence Posture` and `_workbench/_evaluations/project-cleanup-2026-05-02.md` Wave 2-2.
+

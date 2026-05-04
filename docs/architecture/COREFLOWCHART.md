@@ -299,8 +299,8 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                              appears in services.volumes after the
                              L1-L3 entries. Extension-synthesized
                              isolation specs (auth, Claude, Git)
-                             share this same L_volume tier post Unify
-                             L4 Phase 1 Task 1.3 — user-authored and
+                             share this same L_volume tier —
+                             user-authored and
                              extension-owned isolation volumes emit
                              from the single volume tier. `name:`
                              appears in the top-level `volumes:`
@@ -326,8 +326,8 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                              content persists without staging.
 
     Extension isolation paths (e.g. /root/.claude, /root/.local) share
-    the unified L_volume tier with user-authored Volume Mounts post
-    Unify L4 Phase 1 Task 1.3. ExtensionConfig.synthesize_mount_specs()
+    the unified L_volume tier with user-authored Volume Mounts.
+    ExtensionConfig.synthesize_mount_specs()
     materializes them as container-only delivery="volume" specs, and
     compute_container_hierarchy(extensions=...) merges them into
     mount_specs at the top of the function. They emit under the
@@ -595,3 +595,14 @@ The `ExtensionInstaller` abstract base class (`container_ext/install_extension.p
 7. **Validation is layered** — PHASE 4 validates relationships. utils/validation.py validates host state. Different concerns, different passes.
 8. **Phase 7 → Phase 8** — every user action flows through CORE, triggers a refresh to the appropriate earlier phase.
 9. **Import from package API** — GUI and CLI modules import docker functions from docker/__init__.py (package public API), not from internal modules directly. Internal module structure may change; __init__.py exports are stable.
+
+---
+
+## Provenance
+
+Domain prose above is timeless. Feature-rollout history (Task X.Y, PR #N, commit hashes, branch names) lives here so the body stays canonical. Full project chronology: `docs/architecture/EVOLUTION.md`.
+
+- **Unify L4 / reclaim-isolation-term Phase 1 (extension synthesizer, unified `vol_{owner_segment}_{path}` naming, `MountSpecPath.owner`):** shipped via PRs #30–#37 (2026-04-22 – 2026-04-25). Collapsed the prior standalone Layer-4 isolation emission tier into the unified L_volume tier so user-authored Volume Mounts and extension isolation paths share one named-volume emission surface.
+- **Virtual Mount per-spec delivery (`MountSpecPath.delivery`, `host_path`, `content_seed`, `preserve_on_update`):** shipped via PRs #17–#29 (2026-04-20 – 2026-04-21). The volume tier (Phase 6a above) and the validator gates around `delivery="volume" + content_seed="folder"` come from this phase chain.
+- **Architecture Blueprint timeless-prose policy:** Phase/Task/PR identifiers are removed from domain prose and parked in this footer. Reference: CLAUDE.md `Feature-Emergence Posture` and `_workbench/_evaluations/project-cleanup-2026-05-02.md` Wave 2-2.
+

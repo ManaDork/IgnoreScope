@@ -11,7 +11,7 @@ These tests use mocked subprocess calls (``push_file_to_container``,
 ``exec_in_container``, ``ensure_container_running``) so they do not need
 Docker to be running.
 
-Coverage (AC from planning/tasks/virtual-mount-phase-1.md § 2.10):
+Coverage (AC from planning/tasks/done/virtual-mount-phase-1.md § 2.10):
   - Create + recreate bind-only scope → stable compose shape.
   - Create detached-only scope → cp walk runs, no volumes emitted.
   - Detached + mask → post-cp rm -rf inside container.

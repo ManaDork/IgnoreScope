@@ -292,7 +292,7 @@ cmd_push(host_project_root, scope_name, files, force=False)
     └── Print results
 ```
 
-### Scope Config Tree RMB — Stencil Gesture Flow (Phase 3 Task 4.6)
+### Scope Config Tree RMB — Stencil Gesture Flow
 
 The Scope Config Tree RMB mutates `MountDataTree._mount_specs` directly (parallel to LocalHost's `toggle_mounted` / `toggle_detached_mount` flow) rather than going through a Handler class. Empty-area clicks and stencil-spec clicks both dispatch via `ScopeView._add_scope_config_gestures`.
 
@@ -351,7 +351,7 @@ ConfigManager (listens to MountDataTree.mountSpecsChanged)
 - `host_path=None` is the single indicator of container-only provenance — enforced by `add_stencil_folder` / `add_stencil_volume`, cross-checked by validators in `MountSpecPath.validate`.
 - Volume Mount is the only scope-side gesture that emits `recreateRequested`; all others are config-only mutations that downstream execute paths (container refresh, compose regen) handle natively.
 - Header RMB and empty-area RMB both fall back to a disabled "No valid actions" entry when the state machine contributes no gestures (Phase 2 silent-no-op fix extended to scope side).
-- **Extension auth stencil nodes (Task 4.9)** are read-only in the GUI — `_show_context_menu` short-circuits when `node.is_stencil_node and node.stencil_tier == "auth"`, leaving the menu empty so the silent-no-op fallback is the only entry. Container_lifecycle owns the lifecycle of named extension-owned volumes; the GUI only renders their container-side mount points.
+- **Extension auth stencil nodes** are read-only in the GUI — `_show_context_menu` short-circuits when `node.is_stencil_node and node.stencil_tier == "auth"`, leaving the menu empty so the silent-no-op fallback is the only entry. Container_lifecycle owns the lifecycle of named extension-owned volumes; the GUI only renders their container-side mount points.
 
 ### Preflight Checks
 
@@ -457,14 +457,14 @@ MountDataTree.load_config(config)
           Appended to root_node.children; never lazy-loads
           (children_loaded=True on construction)
 
-          Unify L4 Task 1.11: container_ops_ui._track_extension routes
-          post-install refresh through this same generic intake path —
-          tree.load_config(config) then _local_host.refresh() +
-          _scope_view.refresh(). The dedicated set_extensions shortcut
-          was retired; there is now one tree-rebuild call path.
+          Post-install extension refresh routes through this same generic
+          intake path — container_ops_ui._track_extension calls
+          tree.load_config(config), then _local_host.refresh() +
+          _scope_view.refresh(). There is one tree-rebuild call path for
+          both scope loads and post-install refreshes.
 
-          Unify L4 Task 1.9: NodeState for each stencil path is produced by
-            CORE's apply_node_states_from_scope — GUI merges synthesized
+          NodeState for each stencil path is produced by CORE's
+            apply_node_states_from_scope — GUI merges synthesized
             specs into a temporary LocalMountConfig before the CORE call.
             compute_node_state derives container_only=True from
             spec.host_path is None; compute_visibility emits "virtual"
@@ -477,10 +477,10 @@ MountDataTree.load_config(config)
             compose-generation time. Extension specs merge into
             mount_specs and emit through the unified L_volume tier under
             vol_{owner_segment}_{path} — a single compose-emission path
-            for user-authored and extension-owned isolation volumes alike
-            (see Unify L4 Phase 1 Task 1.3). GUI calls synthesize at load
-            time (above); CORE calls it at compute time — both paths
-            route through the same MountSpecPath shape.
+            for user-authored and extension-owned isolation volumes alike.
+            GUI calls synthesize at load time (above); CORE calls it at
+            compute time — both paths route through the same MountSpecPath
+            shape.
 ```
 
 ---
@@ -560,3 +560,14 @@ style_engine.py       → Rendering   (StyleGui: gradients, colors, consolidated
 container_root_panel.py → Config UI (header + pattern list + JSON viewer, themed via config_panel section)
 delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
 ```
+
+---
+
+## Provenance
+
+Domain prose above is timeless. Feature-rollout history (Task X.Y, PR #N, commit hashes, branch names) lives here so the body stays canonical. Full project chronology: `docs/architecture/EVOLUTION.md`.
+
+- **Virtual Mount Phase 3 GUI gesture flow (Scope Config Tree RMB stencil gestures, recreateRequested signal):** shipped via PRs #21–#29 and #51–#54 (2026-04-21 – 2026-05-01). Established the Scope Config Tree RMB → `_add_scope_config_gestures` → `MountDataTree._mount_specs` mutation flow documented above.
+- **Unify L4 / reclaim-isolation-term (CORE-driven synthetic states + post-install extension refresh through generic intake):** shipped via PRs #30–#56 (2026-04-22 – 2026-05-02). The `apply_node_states_from_scope` synthetic-state path and the unified `tree.load_config(config)` post-install refresh route described in this document come from this phase chain.
+- **Architecture Blueprint timeless-prose policy:** Phase/Task/PR identifiers are removed from domain prose and parked in this footer. Reference: CLAUDE.md `Feature-Emergence Posture` and `_workbench/_evaluations/project-cleanup-2026-05-02.md` Wave 2-2.
+

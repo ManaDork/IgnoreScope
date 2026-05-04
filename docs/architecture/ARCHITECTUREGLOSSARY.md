@@ -162,21 +162,21 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 2. **Detached mount roots** — `MountSpecPath` entries with `delivery="detached"` whose container content is cp-delivered (UX label: "Virtual Mount").
 3. **Extension auth volume nodes** — per-extension auth mount points injected by container extensions (see `auth volume`).
 4. **Container-only folders** — directory entries discovered by container scan diff that have no host counterpart (see `container_only`; distinct bool field, still a stencil category at the tree layer).
-5. **Permanent volume nodes** — named-volume stencils for `MountSpecPath` entries with `delivery="volume"` (Phase 3 Task 4.4 shipped). Routed to `FOLDER_STENCIL_VOLUME` via `stencil_tier="volume"`. UX label: "Volume Mount".
+5. **Permanent volume nodes** — named-volume stencils for `MountSpecPath` entries with `delivery="volume"`. Routed to `FOLDER_STENCIL_VOLUME` via `stencil_tier="volume"`. UX label: "Volume Mount".
 
 **Identifiers (internal — NOT UX):**
 - `NodeSource.STENCIL` — MountDataTree source discriminator
 - `MountDataNode.is_stencil_node: bool`, `MountDataNode.stencil_tier: str` (values: `mirrored`, `volume`, `auth`)
 - `MountSpecPath.get_stencil_paths()` — derives stencil paths from mask/reveal patterns
-- `MountSpecPath.owner: str` — `"user"` or `"extension:{name}"`. Discriminates user-authored specs from extension-synthesized specs. Foundation for the unified volume synthesizer, read-only RMB re-key, and volume-name derivation landing in Phase 1 Tasks 1.2–1.10 of `unify-l4-reclaim-isolation-term`. Task 1.1 adds the field; downstream tasks consume it.
-- `ExtensionConfig.synthesize_mount_specs() -> list[MountSpecPath]` — unified-synth entrypoint (Phase 1 Task 1.2). Translates `ExtensionConfig.isolation_paths` into container-only named-volume specs (`delivery="volume"`, `content_seed="folder"`, `host_path=None`, `owner="extension:{name}"`). Task 1.3 lands the consumer: `compute_container_hierarchy(extensions=...)` merges the synthesized specs into `mount_specs` at the top of the function, collapsing the inline extension-isolation loop into the existing volume-tier pipeline (`_compute_volume_tier_entries` post Task 1.4). The legacy `_collect_isolation_paths` helper was retired in Task 1.5; all lifecycle callers pass `extensions=cfg.extensions or None` directly.
+- `MountSpecPath.owner: str` — `"user"` or `"extension:{name}"`. Discriminates user-authored specs from extension-synthesized specs. Consumed by the unified volume synthesizer, the read-only RMB guard for extension-owned specs, and volume-name derivation.
+- `ExtensionConfig.synthesize_mount_specs() -> list[MountSpecPath]` — unified-synth entrypoint. Translates `ExtensionConfig.isolation_paths` into container-only named-volume specs (`delivery="volume"`, `content_seed="folder"`, `host_path=None`, `owner="extension:{name}"`). `compute_container_hierarchy(extensions=...)` merges the synthesized specs into `mount_specs` at the top of the function, then renders them through the volume-tier pipeline (`_compute_volume_tier_entries`). All lifecycle callers pass `extensions=cfg.extensions or None` directly.
 - `_compute_stencil_paths_from_config()`, `_cross_reference_stencil_paths()` in `core/node_state.py`
 - `display_stencil_nodes: bool` on TreeDisplayConfig
 - Theme variables: `stencil.volume`, `stencil.auth`, `inherited.stencil_volume`, `inherited.stencil_auth`, `text_stencil_purple`
 - Folder states: `FOLDER_STENCIL_VOLUME`, `FOLDER_STENCIL_AUTH`
 - GUI tier routing: `MountDataTreeModel.NodeStencilTierRole` (Qt UserRole+3) returns `node.stencil_tier` for stencil nodes, `"mirrored"` otherwise. `TreeStyleDelegate._resolve_style` reads it and forwards into `resolve_tree_state(state, is_folder, stencil_tier)`.
-- Extension auth synthesizer: `MountDataTree._rebuild_extension_stencil_nodes()` (idempotent — drops extension-owned stencils from `root_node.children` then re-emits one per spec returned by `ExtensionConfig.synthesize_mount_specs()`). Driven exclusively by `MountDataTree.load_config(config)`; post-install refresh (Task 1.11, `unify-l4`) routes through the same generic config-intake path that scope loads use (`container_ops_ui._track_extension` calls `tree.load_config(config)` then `_local_host.refresh()` + `_scope_view.refresh()` — the prior `set_extensions` shortcut was retired). Post Task 1.9 (unify-l4) the synth pipeline consumes the same `synthesize_mount_specs()` output that `compute_container_hierarchy(extensions=)` merges into `mount_specs`; CORE derives `container_only=True` for `host_path=None` specs and `compute_visibility` produces `visibility="virtual"` without any GUI-side direct-write to `_states`.
-- CORE-driven synthetic states (Task 1.9): extension-synthesized specs are merged into a temporary `LocalMountConfig` inside `MountDataTree._recompute_states`, and `apply_node_states_from_scope` returns the `visibility="virtual"` states directly. The former GUI direct-write that injected `replace(_DEFAULT_NODE_STATE, visibility="virtual")` post-pipeline is retired; routing to `FOLDER_STENCIL_AUTH` in `_resolve_folder_state` now gates the `stencil_tier` branches ahead of the generic `container_only` fallback.
+- Extension auth synthesizer: `MountDataTree._rebuild_extension_stencil_nodes()` (idempotent — drops extension-owned stencils from `root_node.children` then re-emits one per spec returned by `ExtensionConfig.synthesize_mount_specs()`). Driven exclusively by `MountDataTree.load_config(config)`; post-install extension refresh routes through the same generic config-intake path that scope loads use (`container_ops_ui._track_extension` calls `tree.load_config(config)` then `_local_host.refresh()` + `_scope_view.refresh()`). The synth pipeline consumes the same `synthesize_mount_specs()` output that `compute_container_hierarchy(extensions=)` merges into `mount_specs`; CORE derives `container_only=True` for `host_path=None` specs and `compute_visibility` produces `visibility="virtual"` without any GUI-side direct-write to `_states`.
+- CORE-driven synthetic states: extension-synthesized specs are merged into a temporary `LocalMountConfig` inside `MountDataTree._recompute_states`, and `apply_node_states_from_scope` returns the `visibility="virtual"` states directly. Routing to `FOLDER_STENCIL_AUTH` in `_resolve_folder_state` gates the `stencil_tier` branches ahead of the generic `container_only` fallback.
 
 **`stencil_tier` taxonomy** (three values; surfaced via `NodeStencilTierRole`, consumed by `resolve_tree_state`):
 | Value | Source | Folder state | Theme key |
@@ -185,7 +185,7 @@ Internal umbrella term for nodes added to the unified tree that are NOT filesyst
 | `"volume"` | `delivery="volume"` mount specs (L_volume tier) | `FOLDER_STENCIL_VOLUME` | `stencil.volume` |
 | `"auth"` | Extension-synthesized container-only specs (`_rebuild_extension_stencil_nodes` consumes `ExtensionConfig.synthesize_mount_specs()`) | `FOLDER_STENCIL_AUTH` | `stencil.auth` |
 
-**Read-only stencil RMB rule (silent-no-op pattern):** Stencil nodes whose lifecycle is owned outside the GUI never expose RMB gestures — the context menu falls through to `_append_fallback_if_empty` ("No valid actions", disabled). Three sites apply this rule today: (a) Project Root Header on LocalHost when no host node is targetable (Phase 2 silent-no-op fix), (b) Project Root Header on Scope Config Tree (Task 4.6), (c) Extension auth stencil nodes in Scope Config Tree (Task 4.9 — container_lifecycle owns the named-volume lifecycle). Mirrored intermediates and user-authored `delivery="volume"` stencils route through their normal RMB branches; only extension-auth and header-empty cases short-circuit.
+**Read-only stencil RMB rule (silent-no-op pattern):** Stencil nodes whose lifecycle is owned outside the GUI never expose RMB gestures — the context menu falls through to `_append_fallback_if_empty` ("No valid actions", disabled). Three sites apply this rule today: (a) Project Root Header on LocalHost when no host node is targetable, (b) Project Root Header on Scope Config Tree, (c) Extension auth stencil nodes in Scope Config Tree (container_lifecycle owns the named-volume lifecycle). Mirrored intermediates and user-authored `delivery="volume"` stencils route through their normal RMB branches; only extension-auth and header-empty cases short-circuit.
 
 **Distinction from `visibility="virtual"`:** `visibility` is the per-node MatrixState axis returned by `compute_visibility()`; it stays `"virtual"` to preserve the CORE/GUI coloring contract. STENCIL is the category label for *why a node exists*; `visibility="virtual"` is the container-side *state* of that (or any other restricted-with-structure) node. Many stencils end up with `visibility="virtual"`, but the two axes are not interchangeable.
 
@@ -462,8 +462,8 @@ Auto-masked to prevent config directory appearing in container (DATAFLOWCHART Ru
 
 Named Docker volume that persists LLM credentials across container rebuilds. Mounted at `/root/.claude`.
 
-**Naming:** `vol_claude_code_root_.claude` — emitted by the unified extension-synth pipeline (Phase 1 Task 1.7 of `unify-l4-reclaim-isolation-term` retired the standalone `{docker_name}-claude-auth` special case; `ClaudeInstaller.get_isolation_paths()` now returns `["/root/.local", "/root/.claude"]` and the latter flows through `_compute_volume_tier_entries` / `_derive_volume_name` like every other `delivery="volume"` spec).
-**Persistence:** Survives stop/start and `docker compose up/down`. Destroyed by `down -v`. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration — matches the mask-volume pattern, unlike the pre-1.7 `name:`-pinned auth declaration).
+**Naming:** `vol_claude_code_root_.claude` — emitted by the unified extension-synth pipeline. `ClaudeInstaller.get_isolation_paths()` returns `["/root/.local", "/root/.claude"]`; both flow through `_compute_volume_tier_entries` / `_derive_volume_name` like every other `delivery="volume"` spec.
+**Persistence:** Survives stop/start and `docker compose up/down`. Destroyed by `down -v`. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration — matches the mask-volume pattern).
 
 **Domains:** Generation (docker-compose.yml volumes section)
 
@@ -512,10 +512,9 @@ L_volume: Volume tier                            — named Docker volumes for
                                                     isolation paths (auth, Claude,
                                                     Git). Emitted in mount_specs
                                                     order after L1-L3. Post Unify
-                                                    L4 Phase 1 Task 1.3 the volume
-                                                    tier is the single named-volume
-                                                    emission surface; extension
-                                                    specs are merged into
+                                                    The volume tier is the single
+                                                    named-volume emission surface;
+                                                    extension specs are merged into
                                                     mount_specs by
                                                     compute_container_hierarchy(
                                                     extensions=...) via
@@ -528,7 +527,7 @@ Pattern order = volume declaration order = correct nested layering. A reveal aft
 
 **Stencil volumes (L_volume):** Named volumes backing `delivery="volume"` specs (the Permanent Folder → Volume Mount UX tier plus extension-synthesized isolation paths). Volume naming: `vol_{owner_segment}_{sanitized_container_path}` via `_derive_volume_name(owner, container_path)`. `owner_segment` is `"user"` for user-authored specs and `sanitize_volume_name(extension_name)` for extension-synthesized specs (so `"extension:Claude Code"` → `"claude_code"`). Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration — matches the mask-volume pattern, not the auth-volume pattern). `content_seed="folder"` is required; tree-seed into a named volume is not supported at this phase.
 
-**Extension isolation volumes:** Named volumes backing extension install paths (e.g., `/root/.local` and `/root/.claude` for Claude). Declared via `ExtensionConfig.isolation_paths` and — from Phase 1 Task 1.3 onward — materialized through the unified-synth pipeline: `ExtensionConfig.synthesize_mount_specs()` emits owner-tagged `delivery="volume"` specs that `compute_container_hierarchy` merges into `mount_specs` and renders via `_compute_volume_tier_entries`. Extension output surfaces on `ContainerHierarchy.volume_entries` / `volume_names` (renamed from `stencil_volume_*` in Task 1.6) under the unified `vol_{owner_segment}_{path}` naming scheme (e.g., `vol_claude_code_root_.local`, `vol_claude_code_root_.claude`). The legacy `isolation_volume_entries` / `isolation_volume_names` fields and the `iso_{ext}_{path}` naming were removed in Task 1.4; the `_collect_isolation_paths` helper was retired in Task 1.5; the `stencil_volume_*` → `volume_*` field rename and the `generate_compose_with_masks` signature collapse landed in Task 1.6. Task 1.7 retired the third parallel scheme — the hard-coded `{docker_name}-claude-auth` special case in `compose.py` and the matching `_compute_resource_names` return slot — by adding `/root/.claude` to `ClaudeInstaller.get_isolation_paths()` so the auth volume flows through the same unified pipeline as every other extension isolation path. Task 1.8 stripped the vestigial `(old_iso - new_iso)` orphan-diff clause from `execute_update` phase 4: named `vol_*` volumes (user Permanent Folders + extension isolation paths alike) are designed to persist across ordinary recreate and are never orphaned at update time; destruction requires explicit `docker compose down -v`. Only the mask tier (`mask_*`) orphans on update. Nothing punches through isolation — it is the final overlay. Orthogonal to user-authored mount_specs delivery modes — extension isolation volumes are emitted regardless.
+**Extension isolation volumes:** Named volumes backing extension install paths (e.g., `/root/.local` and `/root/.claude` for Claude). Declared via `ExtensionConfig.isolation_paths` and materialized through the unified-synth pipeline: `ExtensionConfig.synthesize_mount_specs()` emits owner-tagged `delivery="volume"` specs that `compute_container_hierarchy` merges into `mount_specs` and renders via `_compute_volume_tier_entries`. Extension output surfaces on `ContainerHierarchy.volume_entries` / `volume_names` under the unified `vol_{owner_segment}_{path}` naming scheme (e.g., `vol_claude_code_root_.local`, `vol_claude_code_root_.claude`). Named `vol_*` volumes (user Permanent Folders + extension isolation paths alike) persist across ordinary recreate and are never orphaned at update time; destruction requires explicit `docker compose down -v`. Only the mask tier (`mask_*`) orphans on update. Nothing punches through isolation — it is the final overlay. Orthogonal to user-authored mount_specs delivery modes — extension isolation volumes are emitted regardless.
 
 **Domains:** Computation (core/hierarchy.py computes ordering), Generation (docker/compose.py formats into YAML)
 
@@ -543,10 +542,10 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 - `mount_root: Path` — absolute path to the mount root. Interpreted as a host path when `host_path` is set; interpreted as a container-logical path when `host_path is None` (container-only specs produced by the Scope Config "Make Folder" family).
 - `patterns: list[str]` — ordered gitignore-style patterns, relative to mount_root
 - `delivery: Literal["bind", "detached", "volume"] = "bind"` — how content is delivered to the container. `"bind"` emits a live bind-mount (host changes propagate). `"detached"` emits no bind-mount and instead cp's the content at container create (container-only copy, no live host link; destroyed on recreate unless `preserve_on_update`). `"volume"` emits a named Docker volume (survives ordinary recreate; destroyed only via `docker compose down -v`). See **Mount Delivery Terms** section.
-- `host_path: Optional[Path] = None` — host-side source for content. `None` = container-only (no host read side). Required when `delivery == "bind"` — auto-filled from `mount_root` by `__post_init__` for legacy Phase 1/2 construction.
-- `content_seed: Literal["tree", "folder"] = "tree"` — controls initial container-side content for non-bind specs. `"tree"` cp-walks the whole subtree from host (Phase 1 behavior). `"folder"` only `mkdir -p`'s the mount root; content is filled via `pushed_files` or inside-container writes.
+- `host_path: Optional[Path] = None` — host-side source for content. `None` = container-only (no host read side). Required when `delivery == "bind"` — auto-filled from `mount_root` by `__post_init__` so older bind-only construction sites that omit `host_path` continue to work.
+- `content_seed: Literal["tree", "folder"] = "tree"` — controls initial container-side content for non-bind specs. `"tree"` cp-walks the whole subtree from host. `"folder"` only `mkdir -p`'s the mount root; content is filled via `pushed_files` or inside-container writes.
 - `preserve_on_update: bool = False` — if `True`, the update lifecycle cp's this spec's container contents to a host tmp staging area across recreate. Only valid when `delivery == "detached"` and `content_seed == "folder"` (tree-seed specs re-read from host; `delivery="volume"` survives natively).
-- `owner: str = "user"` — provenance tag. `"user"` for user-authored specs (default). `"extension:{name}"` (e.g. `"extension:claude"`) for extension-synthesized specs. Load-bearing for unified volume naming, GUI read-only RMB gating, and Scope Config header signal derivation across Phase 1 Tasks 1.2–1.10 of `unify-l4-reclaim-isolation-term`. Validated to `"user"` or `"extension:{non-empty-name}"` format; no other shapes permitted. Round-trippable as a flat string (extension name embedded) so the spec stays self-describing.
+- `owner: str = "user"` — provenance tag. `"user"` for user-authored specs (default). `"extension:{name}"` (e.g. `"extension:claude"`) for extension-synthesized specs. Load-bearing for unified volume naming, GUI read-only RMB gating, and Scope Config header signal derivation. Validated to `"user"` or `"extension:{non-empty-name}"` format; no other shapes permitted. Round-trippable as a flat string (extension name embedded) so the spec stays self-describing.
 
 **Pattern syntax (gitignore native, applies to both delivery modes):**
 - `"vendor/"` — mask (deny) the vendor directory
@@ -558,7 +557,7 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 
 **Mount overlap rule:** No mount root can be a descendant of another mount root, regardless of delivery. Hard block validated by `validate_no_overlap()`.
 
-**Cross-field validator constraints (Phase 3):**
+**Cross-field validator constraints:**
 - `host_path is None` → `delivery != "bind"` (bind needs a host source)
 - `delivery == "volume"` → `content_seed == "folder"` (no tree-seeding into a named volume at this phase)
 - `preserve_on_update == True` → `delivery == "detached"` and `content_seed == "folder"` (meaningless elsewhere)
@@ -575,7 +574,7 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 ]
 ```
 
-`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs). `host_path`, `content_seed`, `preserve_on_update`, and `owner` are omitted from JSON when at their defaults, so Phase 1/2 configs round-trip unchanged.
+`delivery` defaults to `"bind"` on read (backward-compatible with pre-0.5 configs). `host_path`, `content_seed`, `preserve_on_update`, and `owner` are omitted from JSON when at their defaults, so configs that pre-date the extended schema round-trip unchanged.
 
 **Domains:** Config (mount_spec_path.py), Computation (node_state.py pathspec eval, hierarchy.py volume generation), Presentation (future rule list panel)
 
@@ -583,11 +582,11 @@ Dataclass representing a single mount root with an ordered list of gitignore-sty
 
 ## Mount Delivery Terms
 
-Per-spec `delivery` mode on `MountSpecPath` (`"bind"`, `"detached"`, or `"volume"`; default `"bind"`) selects how mount content reaches the container. Introduced in 0.5 to replace the earlier scope-level `container_mode` binary; extended in Phase 3 with the `"volume"` tier and container-only (`host_path is None`) specs. A single scope may mix delivery modes across its mount_specs — each spec is independent.
+Per-spec `delivery` mode on `MountSpecPath` (`"bind"`, `"detached"`, or `"volume"`; default `"bind"`) selects how mount content reaches the container. Replaced the earlier scope-level `container_mode` binary in v0.5. The `"volume"` tier and container-only (`host_path is None`) specs are part of the current schema. A single scope may mix delivery modes across its mount_specs — each spec is independent.
 
-**Seed & persistence fields (Phase 3):**
+**Seed & persistence fields:**
 - `host_path: Optional[Path]` — host-side source. `None` = container-only (produced by Scope Config "Make Folder" family).
-- `content_seed: Literal["tree", "folder"]` — `"tree"` cp-walks the whole host subtree (Phase 1 behavior); `"folder"` only `mkdir -p`'s the mount root. Non-bind specs only.
+- `content_seed: Literal["tree", "folder"]` — `"tree"` cp-walks the whole host subtree; `"folder"` only `mkdir -p`'s the mount root. Non-bind specs only.
 - `preserve_on_update: bool` — soft-permanent flag for `delivery="detached" + content_seed="folder"` specs. Update lifecycle cp's contents to a host tmp stage across recreate. Meaningless (and validator-rejected) on other combinations.
 
 ### Mount (delivery="bind")
@@ -642,7 +641,7 @@ Soft-permanent variant. Update lifecycle cp's folder contents to a host tmp stag
 
 Hard-permanent variant. Backed by a Docker named volume emitted in compose. Survives `docker compose up` with arbitrary config changes; content is stored by Docker outside the container layer. Destroyed only by explicit `docker compose down -v` (recreate path warns and redirects user to the Diff view when available).
 
-**UX label:** "Make Permanent Folder → Volume Mount" (Scope Config RMB). Container-only (no host_path). Does not support host-backed volume-tier specs in Phase 3.
+**UX label:** "Make Permanent Folder → Volume Mount" (Scope Config RMB). Container-only (no host_path). Host-backed volume-tier specs are not currently supported.
 **Persistence:** Native Docker volume persistence.
 **Constraints:** `content_seed` must be `"folder"` — no tree-seeding into a named volume at this phase. `preserve_on_update` is meaningless (volume survives natively) and validator-rejected.
 **Volume naming:** `stencil_{spec_index}_{sanitized_container_path}` — `spec_index` is the position within `mount_specs`, `sanitized_container_path` is the container-logical path with slashes flattened and sanitized via `sanitize_volume_name`. Names are stable across config round-trip. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration). See also **volume layering order → Stencil volumes (L_volume)**.
@@ -653,7 +652,7 @@ Hard-permanent variant. Backed by a Docker named volume emitted in compose. Surv
 
 ### isolation (compound)
 
-Umbrella term for "host-isolated content" — any `MountSpecPath` where `delivery != "bind"`. Introduced in Phase 2 of `unify-l4-reclaim-isolation-term` to reclaim the word "isolation" as a compound concept after Phase 1 eliminated the standalone "Layer 4 isolation" emission tier.
+Umbrella term for "host-isolated content" — any `MountSpecPath` where `delivery != "bind"`. Replaces the earlier scope-level "Layer 4 isolation" emission tier (a single named-volume tier dedicated to extension isolation paths); under the unified delivery model, isolation is a compound that spans both detached and volume tiers.
 
 Spans:
 - `delivery="detached"` (cp-delivered snapshot; container-fs only; lost on recreate unless `preserve_on_update=True`).
@@ -665,7 +664,7 @@ Both owner strata participate:
 
 The compound term is the appropriate vocabulary for guard-variable names, log strings, and documentation prose where the tier distinction (`detached` vs `volume`) is **not** load-bearing. When a site's behavior depends on the specific mechanism, the mechanism axes (`delivery`, `owner`, `content_seed`, `preserve_on_update`) are the source of truth — `isolation` as a blanket rename would hide meaningful distinctions.
 
-Public field names on `MountSpecPath` (`delivery`, `owner`, `content_seed`, `preserve_on_update`, `host_path`) are NOT renamed to anything involving "isolation" — the compound lives in local variables, comments, and narrative documentation only. Task 2.2's mechanical audit (local reference: `planning/features/unify-l4-reclaim-isolation-term/audit-report.md`) classifies each candidate site as either (a) compound improves clarity or (b) keep mechanism axes explicit, plus a (c) "Layer 4 / L4 stale phrasing" bucket feeding Task 2.4; targeted renames in Task 2.3 apply only to bucket (a) and — per the audit's colocation finding — ship bundled with the Task 2.4 drops in a single PR.
+Public field names on `MountSpecPath` (`delivery`, `owner`, `content_seed`, `preserve_on_update`, `host_path`) are NOT renamed to anything involving "isolation" — the compound lives in local variables, comments, and narrative documentation only. The mechanical audit classifying every candidate rename site lives at `planning/features/unify-l4-reclaim-isolation-term/audit-report.md`.
 
 **Domains:** Documentation vocabulary, Config (read-only reference to `delivery` / `owner`)
 
@@ -673,7 +672,7 @@ Public field names on `MountSpecPath` (`delivery`, `owner`, `content_seed`, `pre
 
 ### CLI surface (mount delivery)
 
-Phase 3 Task 4.8 surfaces every Mount Delivery gesture on the `python -m IgnoreScope` CLI. Each command mirrors a GUI gesture and persists via `save_config` only — no implicit container recreate. Container-affecting gestures append a recreate hint to the success message when a container exists.
+Every Mount Delivery gesture is surfaced on the `python -m IgnoreScope` CLI. Each command mirrors a GUI gesture and persists via `save_config` only — no implicit container recreate. Container-affecting gestures append a recreate hint to the success message when a container exists.
 
 | UX gesture | CLI invocation |
 |---|---|
@@ -723,7 +722,7 @@ Shift-select supports batch Remove across multiple Virtual Mount entries.
 
 ### ScopeHeaderSignals (Scope Config Tree container header)
 
-Three-signal aggregate that drives the Scope Config Tree's container header in the GUI. Computed by `gui/style_engine.py::resolve_scope_header_signals` and consumed by the renderer in `gui/scope_view.py` (Phase 3 of `unify-l4-reclaim-isolation-term`).
+Three-signal aggregate that drives the Scope Config Tree's container header in the GUI. Computed by `gui/style_engine.py::resolve_scope_header_signals` and consumed by the renderer in `gui/scope_view.py`.
 
 **Fields:**
 - `container_running: bool` — True iff the scope's docker container is running (sourced from `docker/container_ops.py::get_container_info(docker_name)['running']`).
@@ -741,11 +740,11 @@ Three-signal aggregate that drives the Scope Config Tree's container header in t
 | T | F | T | Has bind, running |
 | T | T | F | Fully virtual, running |
 
-**Input-list convention:** The resolver consumes the **unified** `mount_specs` list — user-authored specs plus extension-synthesized specs (from `ExtensionConfig.synthesize_mount_specs()`, Phase 1 Task 1.2). This matches what `compute_container_hierarchy(extensions=...)` sees, so the header and the compose emitter read identical state.
+**Input-list convention:** The resolver consumes the **unified** `mount_specs` list — user-authored specs plus extension-synthesized specs (from `ExtensionConfig.synthesize_mount_specs()`). This matches what `compute_container_hierarchy(extensions=...)` sees, so the header and the compose emitter read identical state.
 
 **Why a structured signal instead of a single theme key:** The prior (retired) `resolve_delivery_tint_key` returned one theme key (`config.mount` or `visibility.virtual`) representing a single axis. Container running, fully-virtual, and has-mounts are three independent axes with independent visual encodings (status dot + background tint + border). The dataclass shape lets each axis route to its own theme key without collapsing information at resolve time.
 
-**Visual encoding (Phase 3 Tasks 3.3 + 3.4):** three orthogonal channels; canonical mapping in `THEME_WORKFLOW.md § Scope Header Signal Mapping`.
+**Visual encoding:** three orthogonal channels; canonical mapping in `THEME_WORKFLOW.md § Scope Header Signal Mapping`.
 
 | Signal | Channel | Theme key / glyph |
 |---|---|---|
@@ -765,7 +764,7 @@ Detached delivery uses a conservative policy for host symlinks and Windows junct
 
 **Rationale:** Scoped trees often contain Perforce/UE5 junctions that could silently deref gigabytes if followed. Skip-and-stub is safe by default; users opt in to content by pushing explicitly.
 
-**Deferred Presentation (Phase 2+):** a dedicated deferred-style node state can indicate a placeholder directory that exists in the container but has not been populated. Not shipped in Phase 1.
+**Deferred Presentation (future):** a dedicated deferred-style node state can indicate a placeholder directory that exists in the container but has not been populated. Not currently shipped.
 
 **Domains:** Lifecycle (detached init), Presentation (future deferred-style state for symlink nodes)
 
@@ -796,7 +795,7 @@ Container update flow recreates the container while preserving content for `pres
 
 ### `recreateRequested` signal
 
-Qt signal emitted by `ScopeView` when a Scope Config Tree gesture (Task 4.6) produces a config change that requires container recreate (e.g., "Make Permanent Folder → Volume Mount" on a scope with an existing container). The host application connects it to the existing recreate-confirmation dialog. Decouples config mutation from lifecycle invocation — config writes are immediate; recreate is gated on user confirm.
+Qt signal emitted by `ScopeView` when a Scope Config Tree gesture produces a config change that requires container recreate (e.g., "Make Permanent Folder → Volume Mount" on a scope with an existing container). The host application connects it to the existing recreate-confirmation dialog. Decouples config mutation from lifecycle invocation — config writes are immediate; recreate is gated on user confirm.
 
 **Domains:** Presentation (`gui/scope_view.py` emit, host app slot)
 
@@ -1142,3 +1141,15 @@ Two-phase pattern for all file and container operations. Separates validation fr
 **Modules:** `docker/container_ops.py` (file operations), `docker/container_lifecycle.py` (container operations)
 
 **Domains:** Orchestration (Phase 7)
+
+---
+
+## Provenance
+
+Domain prose above is timeless. Feature-rollout history (Task X.Y, PR #N, commit hashes, branch names) lives here so the body stays canonical. Full project chronology: `docs/architecture/EVOLUTION.md`.
+
+- **Virtual Mount per-spec delivery (`MountSpecPath.delivery`, `host_path`, `content_seed`, `preserve_on_update`):** shipped via PRs #17–#29 (2026-04-20 – 2026-04-21). Replaced the earlier scope-level `container_mode` binary. Phase chain: Phase 1 added per-spec `delivery`/STENCIL rename (PRs #17–#19); Phase 2 added schema extensions (PR #20); Phase 3 added the Scope Config Tree gesture surface, header signals, CLI surface, and integration tests (PRs #21–#29, #51–#54).
+- **Unify L4 / reclaim-isolation-term (extension synthesizer, unified `vol_{owner_segment}_{path}` naming, `MountSpecPath.owner`, isolation compound term):** shipped via PRs #30–#56 (2026-04-22 – 2026-05-02). Phase 1 unified the volume tier (PRs #30–#37); Phase 2 retired Layer-4 stale phrasing and bundled the audit-driven renames (PR #56); Phase 3 wired Scope Config Tree header signal rendering and signal-wiring hygiene (PRs #51–#55).
+- **STENCIL rename (`NodeSource.STENCIL`, `is_stencil_node`, `stencil_tier`):** shipped in PR #19 (2026-04-20).
+- **Architecture Blueprint timeless-prose policy:** Phase/Task/PR identifiers are removed from domain prose and parked in this footer. Reference: CLAUDE.md `Feature-Emergence Posture` and `_workbench/_evaluations/project-cleanup-2026-05-02.md` Wave 2-2.
+

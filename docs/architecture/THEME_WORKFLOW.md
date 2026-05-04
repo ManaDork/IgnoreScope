@@ -216,7 +216,7 @@ No new theme keys are introduced. If a future UX pass wants header-only keys dis
 
 Selector mechanism: `ScopeView._apply_header_signals(signals)` composes the stylesheet; `refresh()` recomputes the dot prefix. Re-render is driven off `MountDataTree.mountSpecsChanged`. Runtime container-state polling lives in `_query_is_container_running` (module-level helper in `scope_view.py`).
 
-LocalHost panel: the Phase 2 Project Root Header delivery-tint was retired in Phase 3 Task 3.5. LocalHost header now falls back to the global QSS default; scope-level signal affordance is localized to the Scope Config Tree.
+LocalHost panel: the LocalHost Project Root Header has no delivery-tint affordance — it falls back to the global QSS default. Scope-level signal affordance is localized to the Scope Config Tree.
 
 ---
 
@@ -228,8 +228,19 @@ Stencil nodes (`visibility="virtual"`) are sub-classified by `MountDataNode.sten
 |---|---|---|---|---|
 | `"mirrored"` | Structural intermediates (CORE Stage 2) | `FOLDER_MIRRORED` (+ revealed/masked variants) | existing mirrored stops | `stencil_mirrored` |
 | `"volume"` | `delivery="volume"` mount specs (L_volume tier) | `FOLDER_STENCIL_VOLUME` | `stencil.volume` | `stencil_volume` |
-| `"auth"` | Extension `isolation_paths` (extension isolation tier, Task 4.9) | `FOLDER_STENCIL_AUTH` | `stencil.auth` | `stencil_auth` |
+| `"auth"` | Extension `isolation_paths` (extension isolation tier) | `FOLDER_STENCIL_AUTH` | `stencil.auth` | `stencil_auth` |
 
-**Extension auth tier (Task 4.9 → unify-l4 Task 1.9):** `MountDataTree._rebuild_extension_stencil_nodes()` synthesizes one `MountDataNode` per spec returned by `ExtensionConfig.synthesize_mount_specs()` with `stencil_tier="auth"`, `is_stencil_node=True`. Post Task 1.9, `_recompute_states` merges those synthesized specs into a temporary `LocalMountConfig` and lets CORE's `apply_node_states_from_scope` produce `visibility="virtual"` (driven off `host_path is None` → `container_only=True` → `compute_visibility` returning `"virtual"`). `_resolve_folder_state` checks `stencil_tier` ahead of the generic `container_only` fallback so auth/volume stencils keep their explicit style. These nodes remain read-only in the GUI — RMB silent-no-ops because container_lifecycle owns the named volume lifecycle.
+**Extension auth tier:** `MountDataTree._rebuild_extension_stencil_nodes()` synthesizes one `MountDataNode` per spec returned by `ExtensionConfig.synthesize_mount_specs()` with `stencil_tier="auth"`, `is_stencil_node=True`. `_recompute_states` merges those synthesized specs into a temporary `LocalMountConfig` and lets CORE's `apply_node_states_from_scope` produce `visibility="virtual"` (driven off `host_path is None` → `container_only=True` → `compute_visibility` returning `"virtual"`). `_resolve_folder_state` checks `stencil_tier` ahead of the generic `container_only` fallback so auth/volume stencils keep their explicit style. These nodes remain read-only in the GUI — RMB silent-no-ops because container_lifecycle owns the named volume lifecycle.
 
-`stencil.auth` and `stencil.volume` palette entries already exist in `glassmorphism_v1_theme.json` (added during the Task 4.1 STENCIL rename); Task 4.9 only wires the runtime path.
+`stencil.auth` and `stencil.volume` palette entries live in `glassmorphism_v1_theme.json` and back the runtime stencil tier theme keys.
+
+---
+
+## Provenance
+
+Domain prose above is timeless. Feature-rollout history (Task X.Y, PR #N, commit hashes, branch names) lives here so the body stays canonical. Full project chronology: `docs/architecture/EVOLUTION.md`.
+
+- **STENCIL rename (`NodeSource.STENCIL`, `is_stencil_node`, `stencil_tier`):** shipped in PR #19 (2026-04-20). Established the stencil-tier vocabulary used by the auth/volume/mirrored routing tables above.
+- **Extension auth tier (`stencil.auth` runtime wiring + CORE-driven synthetic states):** shipped via the Unify L4 / reclaim-isolation-term phase chain (PRs #30–#56, 2026-04-22 – 2026-05-02). `stencil.auth` and `stencil.volume` palette entries were added during the STENCIL rename; the Unify L4 work wired the runtime path through `apply_node_states_from_scope`.
+- **Architecture Blueprint timeless-prose policy:** Phase/Task/PR identifiers are removed from domain prose and parked in this footer. Reference: CLAUDE.md `Feature-Emergence Posture` and `_workbench/_evaluations/project-cleanup-2026-05-02.md` Wave 2-2.
+
