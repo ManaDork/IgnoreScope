@@ -421,6 +421,17 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self._local_host.selectionChangedPaths.connect(
             self._scope_view.set_tracked_paths
         )
+        # Branch-indicator mirror chain (Bug 3 part 2 — one-way LH → Scope).
+        # User toggles a folder's branch indicator in LocalHost → Scope's
+        # corresponding folder mirrors the toggle. Icon-agnostic; the chain
+        # is wired via Qt's QTreeView.expanded/.collapsed which fire
+        # regardless of the indicator's visual form.
+        self._local_host.folderExpanded.connect(
+            self._scope_view.expand_path
+        )
+        self._local_host.folderCollapsed.connect(
+            self._scope_view.collapse_path
+        )
 
         # Sync (force re-push) from LocalHostView context menu
         self._local_host.syncRequested.connect(fo.on_update)

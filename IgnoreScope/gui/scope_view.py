@@ -665,6 +665,91 @@ class ScopeView(QWidget):
         """DEPRECATED — use `set_tracked_path` / `set_tracked_paths`."""
         self.set_tracked_path(path)
 
+    # ── Branch-Indicator Mirror Chain ─────────────────────────────
+    #
+    # `expand_path` / `collapse_path` mirror LocalHost's branch-indicator
+    # toggles (see LocalHostView.folderExpanded / folderCollapsed).
+    # Icon-agnostic — works regardless of how the indicator renders
+    # (currently a small square placeholder; chevron icon work tracked
+    # separately). One-way chain: LocalHost drives Scope. NO reverse
+    # mirror, so no re-entry guard is needed; if Scope→LocalHost is
+    # ever added, a guard MUST be introduced to prevent feedback loops.
+
+    def expand_path(self, path: Path) -> None:
+        """Expand the proxy row matching `path` (and all ancestors).
+
+        Walks the tree, calling `_tree_view.expand` on each matched part
+        INCLUDING the final folder. Used by the LocalHost→Scope mirror
+        chain for explicit user expand. Does NOT touch tracked_paths or
+        selection. Silently no-ops if path is outside root or filter-rejected.
+        """
+        target = self._walk_to_path(path, expand_during_walk=True)
+        # `target` is the final matched proxy index; the walk already
+        # called expand on each part. Nothing else needed.
+
+    def collapse_path(self, path: Path) -> None:
+        """Collapse the proxy row matching `path`.
+
+        Walks the tree without expanding, then collapses the matched
+        final folder. Used by the LocalHost→Scope mirror chain for
+        explicit user collapse. Does NOT touch tracked_paths or selection.
+        Silently no-ops if path is outside root or filter-rejected.
+        """
+        target = self._walk_to_path(path, expand_during_walk=False)
+        if target.isValid():
+            self._tree_view.collapse(target)
+
+    def _walk_to_path(
+        self, path: Path, *, expand_during_walk: bool,
+    ) -> QModelIndex:
+        """Walk the proxy tree to find the row matching `path`.
+
+        Returns the final matched proxy QModelIndex (or invalid if any
+        part doesn't match — e.g., path outside root, lazy-not-loaded
+        ancestor, or filter-rejected row). When `expand_during_walk` is
+        True, calls `_tree_view.expand` on each matched part during the
+        walk (used by `expand_path`); when False, walks without expanding
+        (used by `collapse_path`).
+        """
+        root_node = self._tree.root_node
+        if root_node is None:
+            return QModelIndex()
+        try:
+            rel = path.relative_to(root_node.path)
+        except ValueError:
+            return QModelIndex()
+        parts = rel.parts
+        if not parts:
+            return QModelIndex()
+
+        current_parent = QModelIndex()
+        model = self._proxy
+        matched = QModelIndex()
+        for part in parts:
+            # Trigger lazy-load if children haven't been fetched yet so the
+            # walk can see deeper subtrees that haven't been expanded by the
+            # user. Required for both expand_path / collapse_path / tracking
+            # of paths inside not-yet-fetched subdirs.
+            if model.canFetchMore(current_parent):
+                model.fetchMore(current_parent)
+            found = False
+            for row in range(model.rowCount(current_parent)):
+                child_proxy = model.index(row, 0, current_parent)
+                if not child_proxy.isValid():
+                    continue
+                source_idx = self._proxy.mapToSource(child_proxy)
+                node = source_idx.internalPointer()
+                if node is not None and node.path.name == part:
+                    if expand_during_walk:
+                        self._tree_view.expand(child_proxy)
+                    current_parent = child_proxy
+                    matched = child_proxy
+                    found = True
+                    break
+            if not found:
+                return QModelIndex()
+        return matched
+
     # ── Helpers ───────────────────────────────────────────────────
 
     def _expand_recursive(self, index) -> None:

@@ -47,6 +47,8 @@ class LocalHostView(QWidget):
     nodeSelected = pyqtSignal(Path)
     selectionCleared = pyqtSignal()  # emitted when current index becomes invalid (legacy — see selectionChangedPaths)
     selectionChangedPaths = pyqtSignal(list)  # list[Path] of all selected rows; emitted on every selection-set change including clears (empty list)
+    folderExpanded = pyqtSignal(Path)  # emitted when user toggles branch indicator on a folder (Bug 3 part 2 mirror chain)
+    folderCollapsed = pyqtSignal(Path)  # symmetric to folderExpanded
     syncRequested = pyqtSignal(Path)
     removeSiblingRequested = pyqtSignal(object)  # Path emitted
     convertDeliveryRequested = pyqtSignal(object, str)  # (path, target)
@@ -121,6 +123,10 @@ class LocalHostView(QWidget):
         self._tree_view.selectionModel().selectionChanged.connect(
             self._on_selection_set_changed,
         )
+        # Branch-indicator mirror chain (Bug 3 part 2 — one-way LH → Scope).
+        # Folder-only; files and stencil nodes are skipped at the handler.
+        self._tree_view.expanded.connect(self._on_tree_expanded)
+        self._tree_view.collapsed.connect(self._on_tree_collapsed)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -177,6 +183,31 @@ class LocalHostView(QWidget):
             if node is not None:
                 paths.append(node.path)
         self.selectionChangedPaths.emit(paths)
+
+    def _on_tree_expanded(self, proxy_index) -> None:
+        """Emit folderExpanded(path) when user toggles a folder's branch indicator.
+
+        Driven by `QTreeView.expanded` (Qt-built-in). Folder-only —
+        files and stencil nodes do not emit. Powers the one-way
+        LocalHost → Scope mirror chain (see ScopeView.expand_path).
+        """
+        if not proxy_index.isValid():
+            return
+        source_idx = self._proxy.mapToSource(proxy_index)
+        node = source_idx.internalPointer()
+        if node is None or node.is_file or node.is_stencil_node:
+            return
+        self.folderExpanded.emit(node.path)
+
+    def _on_tree_collapsed(self, proxy_index) -> None:
+        """Emit folderCollapsed(path); symmetric to _on_tree_expanded."""
+        if not proxy_index.isValid():
+            return
+        source_idx = self._proxy.mapToSource(proxy_index)
+        node = source_idx.internalPointer()
+        if node is None or node.is_file or node.is_stencil_node:
+            return
+        self.folderCollapsed.emit(node.path)
 
     # ── Header Context Menu ──────────────────────────────────────
 
