@@ -69,6 +69,64 @@ class TestPreflightUpdate:
 
 
 # =============================================================================
+# Extension validation smoke (regression for `_validate_hierarchy` HCR fix)
+# =============================================================================
+
+class TestExtensionValidation:
+    """Lifecycle smoke test mirroring the GUI 'Update Container' repro shape:
+    a project with an installed extension whose synth specs carry container
+    paths (host_path=None) must NOT trip the HCR residency check.
+    """
+
+    def test_preflight_create_with_extension_synth_specs(self, tmp_path):
+        """Bug repro: ExtensionConfig.isolation_paths produce host_path=None
+        specs whose mount_root is a container path (e.g. /root/.local).
+        preflight_create must pass these through validation without firing
+        VALIDATION_FAILED with 'not under host container root'.
+        """
+        from IgnoreScope.core.config import ScopeDockerConfig
+        from IgnoreScope.core.local_mount_config import ExtensionConfig
+        from IgnoreScope.docker.container_lifecycle import preflight_create
+
+        host_container_root = tmp_path
+        host_project_root = tmp_path / "myproject"
+        host_project_root.mkdir()
+
+        config = ScopeDockerConfig(
+            scope_name="test-scope",
+            host_project_root=host_project_root,
+            host_container_root=host_container_root,
+            container_root="/workspace",
+            extensions=[
+                ExtensionConfig(
+                    name="Claude Code",
+                    installer_class="ClaudeInstaller",
+                    isolation_paths=["/root/.local"],
+                    state="installed",
+                ),
+            ],
+        )
+
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.is_docker_running",
+            return_value=(True, "ok"),
+        ):
+            result = preflight_create(host_project_root, config)
+
+        # Either success, or a non-validation error. The fix's specific
+        # contract is that we do NOT fire VALIDATION_FAILED for the synth
+        # spec's container path.
+        if not result.success:
+            details_str = " ".join(result.details or [])
+            assert result.error != OpError.VALIDATION_FAILED or (
+                "not under host container root" not in details_str
+            ), (
+                f"Extension synth spec tripped HCR validation: "
+                f"error={result.error}, details={result.details}"
+            )
+
+
+# =============================================================================
 # execute_update
 # =============================================================================
 
