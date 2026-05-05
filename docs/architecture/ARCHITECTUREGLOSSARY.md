@@ -644,7 +644,7 @@ Hard-permanent variant. Backed by a Docker named volume emitted in compose. Surv
 **UX label:** "Make Permanent Folder → Volume Mount" (Scope Config RMB). Container-only (no host_path). Host-backed volume-tier specs are not currently supported.
 **Persistence:** Native Docker volume persistence.
 **Constraints:** `content_seed` must be `"folder"` — no tree-seeding into a named volume at this phase. `preserve_on_update` is meaningless (volume survives natively) and validator-rejected.
-**Volume naming:** `stencil_{spec_index}_{sanitized_container_path}` — `spec_index` is the position within `mount_specs`, `sanitized_container_path` is the container-logical path with slashes flattened and sanitized via `sanitize_volume_name`. Names are stable across config round-trip. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration). See also **volume layering order → Stencil volumes (L_volume)**.
+**Volume naming:** `vol_{owner_segment}_{sanitized_container_path}` via `_derive_volume_name(owner, container_path)`. `owner_segment` is `"user"` for user-authored specs and `sanitize_volume_name(extension_name)` for extension-synthesized specs. `sanitized_container_path` is the container-logical path with slashes flattened and sanitized. Names are stable across config round-trip. Cross-scope uniqueness comes from docker compose project namespacing (no explicit `name:` on the declaration). See also **volume layering order → Stencil volumes (L_volume)**.
 
 **Domains:** Generation (compose — named volume entry + top-level `volumes:`), Config (`add_stencil_volume()` constructor)
 
