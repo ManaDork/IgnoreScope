@@ -29,7 +29,7 @@ from .mount_data_model import MountDataTreeModel
 from .selection_coordinator import _ClickAwareTreeView
 from dataclasses import replace as dc_replace
 from .display_config import LocalHostDisplayConfig
-from .view_helpers import configure_tree_view, apply_header_config
+from .view_helpers import configure_tree_view, apply_header_config, resolve_action_target
 
 
 class LocalHostView(QWidget):
@@ -295,17 +295,18 @@ class LocalHostView(QWidget):
     # ── Context Menu ──────────────────────────────────────────────
 
     def _show_context_menu(self, pos: QPoint) -> None:
-        selected_indexes = self._tree_view.selectionModel().selectedRows(0)
-        if not selected_indexes:
-            return
+        """Cursor-primary RMB: indexAt(pos) drives the action target.
 
-        nodes: list[MountDataNode] = []
-        for idx in selected_indexes:
-            source_idx = self._proxy.mapToSource(idx)
-            node = source_idx.internalPointer()
-            if node is not None:
-                nodes.append(node)
-        if not nodes:
+        See `view_helpers.resolve_action_target` for the cursor-vs-selection
+        precedence rules. RMB on an unselected row operates on that row
+        alone; RMB on a selected row with active multi-select operates on
+        the full selection. Empty-area click is a silent no-op (LocalHost
+        has no empty-area menu — that's a Scope concept).
+        """
+        index_at_pos, nodes = resolve_action_target(
+            self._tree_view, self._proxy, pos,
+        )
+        if not index_at_pos.isValid() or not nodes:
             return
 
         menu = QMenu(self)
@@ -315,7 +316,7 @@ class LocalHostView(QWidget):
                 self._build_file_menu(menu, node)
             else:
                 # Pass proxy index for expand/collapse operations
-                self._build_single_select_menu(menu, node, selected_indexes[0])
+                self._build_single_select_menu(menu, node, index_at_pos)
         else:
             # Separate files and folders for multi-select
             file_nodes = [n for n in nodes if n.is_file]
@@ -348,9 +349,12 @@ class LocalHostView(QWidget):
 
             ms = self._tree._find_owning_spec(path)
             if ms and state:
-                # Check if THIS folder has its own explicit pattern
+                # Check if THIS folder has its own explicit pattern.
+                # `as_posix()` returns canonical forward-slash form across
+                # platforms — replaces the prior str(...).replace("\\","/")
+                # which was platform-specific string manipulation.
                 try:
-                    rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
+                    rel = path.relative_to(ms.mount_root).as_posix()
                 except ValueError:
                     rel = None
 

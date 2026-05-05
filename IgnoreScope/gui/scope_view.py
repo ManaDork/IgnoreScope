@@ -32,7 +32,7 @@ from .mount_data_model import MountDataTreeModel
 from .selection_coordinator import _ClickAwareTreeView
 from .display_config import ScopeDisplayConfig
 from .style_engine import ScopeHeaderSignals, resolve_scope_header_signals
-from .view_helpers import configure_tree_view, apply_header_config
+from .view_helpers import configure_tree_view, apply_header_config, resolve_action_target
 
 
 def _query_container_state(
@@ -250,25 +250,30 @@ class ScopeView(QWidget):
     # ── Context Menu ──────────────────────────────────────────────
 
     def _show_context_menu(self, pos: QPoint) -> None:
-        index_at_pos = self._tree_view.indexAt(pos)
-        selected_indexes = self._tree_view.selectionModel().selectedRows(0)
+        """Cursor-primary RMB: indexAt(pos) drives the action target.
+
+        See `view_helpers.resolve_action_target` for the cursor-vs-selection
+        precedence rules. The empty-area Scope Config gestures menu fires
+        ONLY when `indexAt(pos)` is invalid — having no selection but
+        clicking on a valid row now operates on that row, not on the
+        empty-area fallback (the prior dual-condition gate was the bug).
+        """
+        index_at_pos, nodes = resolve_action_target(
+            self._tree_view, self._proxy, pos,
+        )
 
         menu = QMenu(self)
 
-        # Empty area click — Scope Config gesture set.
-        if not index_at_pos.isValid() or not selected_indexes:
+        # Empty area click — Scope Config gesture set (only when cursor is
+        # on truly empty area, not when selection happens to be empty).
+        if not index_at_pos.isValid():
             self._add_scope_config_gestures(menu, node=None)
             self._append_fallback_if_empty(menu)
             menu.exec(self._tree_view.viewport().mapToGlobal(pos))
             return
 
-        nodes: list[MountDataNode] = []
-        for idx in selected_indexes:
-            source_idx = self._proxy.mapToSource(idx)
-            node = source_idx.internalPointer()
-            if node is not None:
-                nodes.append(node)
         if not nodes:
+            # Cursor on a valid index but no node resolved — defensive fallback.
             self._add_scope_config_gestures(menu, node=None)
             self._append_fallback_if_empty(menu)
             menu.exec(self._tree_view.viewport().mapToGlobal(pos))
@@ -276,7 +281,7 @@ class ScopeView(QWidget):
 
         if len(nodes) == 1:
             node = nodes[0]
-            proxy_index = selected_indexes[0]
+            proxy_index = index_at_pos
             any_spec = self._tree.get_any_spec_at(node.path)
             if (
                 any_spec is not None
