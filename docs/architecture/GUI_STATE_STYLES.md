@@ -348,6 +348,9 @@ The following values are used in rendering but don't correspond to gradient stat
 | `hover_color` | `#333A52` | Delegate hover overlay | `base.delegate.hover_color` |
 | `hover_alpha` | 60 | Delegate hover overlay alpha | `base.delegate.hover_alpha` |
 | `selection_alpha` | 100 | Delegate selection overlay alpha | `base.delegate.selection_alpha` |
+| `tracked_outline_color` | `#00D4AA` | Layer-4 outline for cross-tree tracked-path visual | `base.delegate.tracked_outline_color` |
+| `tracked_outline_alpha` | 220 | Tracked-outline alpha | `base.delegate.tracked_outline_alpha` |
+| `tracked_outline_width` | 2 | Tracked-outline pen width (px) | `base.delegate.tracked_outline_width` |
 
 **ListDisplayConfig** — injected from `base.text` section:
 

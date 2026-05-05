@@ -547,21 +547,67 @@ mount_data_tree.py    → Runtime State Host (hosts NodeState instances from cor
                          GUI hosts runtime instances and Stage 2 (mirrored) descendant walk.
                          See: COREFLOWCHART.md Phase 3 for computation rules.
 mount_data_model.py   → Qt Adapter  (MountDataTreeModel wraps tree + DisplayConfig)
+                         Roles: NodeStateRole, NodeIsFileRole, NodeStencilTierRole, NodePathRole
 display_config.py     → View Rules  (columns, filtering, checkbox behavior)
 local_host_view.py    → Left Panel  (widget + RMB menu + undo)
+                         Signals: nodeSelected, selectionCleared, selectionChangedPaths,
+                                  folderExpanded, folderCollapsed
 scope_view.py         → Right Panel (widget + RMB menu + file ops signals)
+                         Methods: set_tracked_paths, expand_path, collapse_path
 file_ops_ui.py        → File Op UI  (thin layer: preflight dialog → CORE execute → tree refresh)
                          Calls docker/file_ops.py orchestrators, shows dialogs, updates tree
 container_ops_ui.py   → Container UI (thin layer: CORE execute_create/remove → progress → refresh)
                          Calls docker/container_lifecycle.py, no CLI imports
 config_manager.py     → Orchestrator (open/switch/save project+scope)
 app.py                → Wiring      (creates shared tree, connects signals)
+selection_coordinator.py → Cross-Tree (TreeSelectionCoordinator + _ClickAwareTreeView)
+                         Symmetric single-context selection: clicking either tree
+                         clears the sibling. Empty-space click clears both.
 style_engine.py       → Rendering   (StyleGui: gradients, colors, consolidated *_theme.json)
 container_root_panel.py → Config UI (header + pattern list + JSON viewer, themed via config_panel section)
-delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate, HistoryDelegate)
+delegates.py          → Paint       (GradientDelegate base, TreeStyleDelegate with
+                                     Layer-4 tracked-path outline, HistoryDelegate)
+view_helpers.py       → Shared Helpers (configure_tree_view, apply_header_config,
+                                        resolve_action_target — cursor-primary RMB)
 ```
 
 ---
+
+## Cross-Tree Coordination
+
+LocalHostView and ScopeView each own a `_ClickAwareTreeView` (subclass of
+`QTreeView` that emits `userRowClicked` and `emptySpaceClicked` from
+`mousePressEvent`, distinguishing user gestures from programmatic
+selection changes). Two layers compose orthogonally:
+
+1. **Selection layer (single-context):** `TreeSelectionCoordinator`
+   wires `userRowClicked` so that clicking either tree clears the
+   sibling's `selectionModel`. Empty-space click clears both. Driven
+   by user gestures only — programmatic `clearSelection()` does not
+   re-trigger the coordinator. RMB context menus read
+   `selectionModel.selectedRows(0)` for multi-select extension via
+   `view_helpers.resolve_action_target` (cursor-primary).
+
+2. **Tracked-paths overlay (cross-view visual cue):** when LocalHost's
+   selection set changes (`selectionChangedPaths(list[Path])` signal,
+   driven by `selectionModel.selectionChanged` so it fires on every
+   set change including programmatic clears), `ScopeView.set_tracked_paths`
+   stores the set in `TreeStyleDelegate._tracked_paths` and walks the
+   tree expanding ANCESTORS only — never the matched folder itself.
+   The delegate paints a teal outline (Layer 4, on top of selection)
+   for every row whose path is in the set. Independent of `selectionModel`,
+   so Scope's user multi-select and RMB context survive every LocalHost
+   click. `_validate_tracked_path` wired to `tree.structureChanged`
+   drops stale paths on project / scope switch.
+
+3. **Branch-indicator mirror chain (one-way LocalHost → Scope):**
+   `LocalHostView` emits `folderExpanded(path)` / `folderCollapsed(path)`
+   when the user toggles a folder's branch indicator (driven by
+   `QTreeView.expanded` / `.collapsed`). `app.py` wires these to
+   `ScopeView.expand_path` / `collapse_path` so Scope mirrors the
+   toggle. Files and stencil nodes do not emit. Loop-prevention is
+   trivial because Scope's `expanded`/`collapsed` signals are not
+   wired anywhere.
 
 ## Provenance
 
