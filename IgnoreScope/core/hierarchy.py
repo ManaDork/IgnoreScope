@@ -408,14 +408,25 @@ def _validate_hierarchy(
         for err in ms.validate():
             errors.append(f"Mount '{ms.mount_root.name}': {err}")
 
-    # All mount roots must be under host_container_root (when provided)
+    # All mount roots must be under host_container_root (when provided).
+    # Skip container-only specs (host_path=None) — their mount_root is a
+    # container path (per MountSpecPath docstring "container-logical path
+    # when host_path is None"; produced by extension synth AND user
+    # stencil gestures via add_stencil_folder / add_stencil_volume).
+    # Belt-and-suspenders: also exclude delivery="bind" so a spec that
+    # bypassed `__post_init__` host_path auto-fill (e.g. via
+    # `dataclasses.replace(host_path=None)`) cannot escape HCR validation.
+    # A bind spec's mount_root is always a host path.
     if host_container_root is not None:
         for ms in mount_specs:
+            if ms.host_path is None and ms.delivery != "bind":
+                continue
             try:
                 ms.mount_root.relative_to(host_container_root)
             except ValueError:
                 errors.append(
-                    f"Mount '{ms.mount_root.name}' is not under host container root"
+                    f"Mount root {ms.mount_root!s} is not under "
+                    f"host container root {host_container_root!s}"
                 )
 
     return errors

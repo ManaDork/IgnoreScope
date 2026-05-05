@@ -916,6 +916,100 @@ class TestValidationPathUnderHCR:
         assert len(hcr_errors) == 1
         assert "Mount" in hcr_errors[0]
 
+    def test_container_only_spec_skips_hcr_check(self, tmp_path: Path):
+        """Bug fix repro: extension-synth spec with host_path=None must skip HCR."""
+        synth = MountSpecPath(
+            mount_root=Path("/root/.local"),
+            host_path=None,
+            delivery="volume",
+            content_seed="folder",
+            owner="extension:Claude Code",
+            patterns=[],
+        )
+        errors = _validate_hierarchy([synth], host_container_root=tmp_path)
+        assert not any("not under host container root" in e for e in errors)
+
+    def test_user_stencil_volume_spec_skips_hcr_check(self, tmp_path: Path):
+        """User-authored stencil spec (add_stencil_volume) is also host_path=None."""
+        user_stencil = MountSpecPath(
+            mount_root=Path("/root/.cache"),
+            host_path=None,
+            delivery="volume",
+            content_seed="folder",
+            owner="user",
+            patterns=[],
+        )
+        errors = _validate_hierarchy([user_stencil], host_container_root=tmp_path)
+        assert not any("not under host container root" in e for e in errors)
+
+    def test_hybrid_user_specs_plus_extension_synth(self, tmp_path: Path):
+        """Hybrid scope: bind + detached + user-volume(stencil) + extension-synth."""
+        src = tmp_path / "src"
+        src.mkdir()
+        bind_spec = MountSpecPath(mount_root=src, delivery="bind", patterns=[])
+        detached_spec = MountSpecPath(
+            mount_root=src / "data",
+            host_path=src / "data",
+            delivery="detached",
+            patterns=[],
+        )
+        user_stencil = MountSpecPath(
+            mount_root=Path("/root/.cache"),
+            host_path=None,
+            delivery="volume",
+            content_seed="folder",
+            owner="user",
+            patterns=[],
+        )
+        ext_synth = MountSpecPath(
+            mount_root=Path("/root/.local"),
+            host_path=None,
+            delivery="volume",
+            content_seed="folder",
+            owner="extension:Claude Code",
+            patterns=[],
+        )
+        errors = _validate_hierarchy(
+            [bind_spec, detached_spec, user_stencil, ext_synth],
+            host_container_root=tmp_path,
+        )
+        assert not any("not under host container root" in e for e in errors)
+
+    def test_bind_with_host_path_none_still_HCR_checked(self, tmp_path: Path):
+        """Defense-in-depth: a bind spec with host_path=None must still be
+        HCR-checked. Reachable via dataclasses.replace bypass of __post_init__.
+        """
+        import dataclasses
+
+        src = tmp_path / "src"
+        src.mkdir()
+        bind_spec = MountSpecPath(mount_root=src, delivery="bind", patterns=[])
+        # Bypass __post_init__ to force the bad state.
+        bypass = dataclasses.replace(bind_spec, host_path=None)
+        foreign = Path("D:/foreign/mount")
+        bypass = dataclasses.replace(bypass, mount_root=foreign)
+        errors = _validate_hierarchy([bypass], host_container_root=tmp_path)
+        # MUST fire HCR error — the gate's `delivery != "bind"` clause prevents
+        # the spec from skipping validation.
+        assert any("not under host container root" in e for e in errors)
+
+    def test_from_dict_round_trip_windows_path_synth(self, tmp_path: Path):
+        """synthesize_mount_specs constructs Path('/root/.local') from a POSIX
+        string. On Windows this becomes WindowsPath with no drive — verify the
+        gate handles it via host_path=None skip rather than relative_to edge.
+        """
+        ext = ExtensionConfig(
+            name="Test",
+            installer_class="TestInstaller",
+            isolation_paths=["/root/.local"],
+        )
+        synth = ext.synthesize_mount_specs()
+        assert len(synth) == 1
+        assert synth[0].host_path is None
+        assert synth[0].mount_root == Path("/root/.local")
+        errors = _validate_hierarchy(synth, host_container_root=tmp_path)
+        assert not any("not under host container root" in e for e in errors)
+
 
 # =============================================================================
 # Walk Mirrored Intermediates (Unified Walk)

@@ -136,30 +136,39 @@ def generate_compose_with_masks(
         f"    container_name: {container_name}",
         f"    image: {image_name}",
         "    build: .",
-        "    volumes:",
     ]
+
+    # Build the service-level volumes list into a buffer first so the
+    # `volumes:` key is only emitted when there is at least one entry.
+    # An empty `volumes:` line is a YAML null and docker compose rejects it
+    # with "services.<svc>.volumes must be a array".
+    volume_lines: list[str] = []
 
     # Extra mounts (e.g. .llm → .claude, .igs → .ignore_scope)
     if extra_mounts:
-        lines.append("      # === Extra mounts ===")
+        volume_lines.append("      # === Extra mounts ===")
         for mount in extra_mounts:
             comment = f"  # {mount.get('reason', '')}" if isinstance(mount, dict) and mount.get('reason') else ""
             if isinstance(mount, dict):
                 volume = mount.get('volume', '')
             else:
                 volume = str(mount)
-            lines.append(f"      - \"{volume}\"{comment}")
+            volume_lines.append(f"      - \"{volume}\"{comment}")
 
     # Volume layers: L1-L3 + siblings (ordered_volumes) followed by the
     # unified L_volume tier entries (every delivery="volume" spec —
     # user-authored plus extension-synthesized, including Claude auth at
     # /root/.claude).
     if ordered_volumes or volume_entries:
-        lines.append("      # === Volume layers (bind mounts, masks, reveals, named volumes) ===")
+        volume_lines.append("      # === Volume layers (bind mounts, masks, reveals, named volumes) ===")
         for entry in ordered_volumes:
-            lines.append(f"      - \"{entry}\"")
+            volume_lines.append(f"      - \"{entry}\"")
         for entry in (volume_entries or []):
-            lines.append(f"      - \"{entry}\"")
+            volume_lines.append(f"      - \"{entry}\"")
+
+    if volume_lines:
+        lines.append("    volumes:")
+        lines.extend(volume_lines)
 
     lines.extend([
         "",
