@@ -49,6 +49,16 @@ Each extracted color maps to a specific key in `glassmorphism_v1_theme.json`:
 | Restricted Folder    | `visibility.restricted`       |
 | Virtual Structural   | `visibility.virtual`          |
 
+#### Non-State Visual Cues → `base.delegate`
+
+Some visual cues are decoupled from `NodeState` and live under the global delegate section. They render via `TreeStyleDelegate` paint layers, not via the state-color resolution pipeline.
+
+| Visual Element            | JSON Key                            | Purpose |
+|---------------------------|-------------------------------------|---------|
+| Selection overlay         | `base.delegate.selection_color` + `_alpha` | Layer 2 — semi-transparent fill for selected rows |
+| Hover overlay             | `base.delegate.hover_color` + `_alpha` | Layer 2 — semi-transparent fill on mouseover |
+| Tracked-path outline      | `base.delegate.tracked_outline_color` + `_alpha` + `_width` | Layer 4 — colored outline marking cross-tree linkage (e.g., Scope rows whose path matches LocalHost selection). Drawn with `setClipping(False)` so the outline spans the full row across all columns. Decoupled from `selectionModel`, so user multi-select and RMB context coexist with the overlay. See `DATAFLOWCHART.md § Cross-Tree Coordination`. |
+
 #### Panel Backgrounds → `gradients` section
 
 | Visual Element        | JSON Key                          |

@@ -29,9 +29,10 @@ from .delegates import TreeStyleDelegate
 from .display_filter_proxy import DisplayFilterProxy
 from .mount_data_tree import MountDataTree, MountDataNode
 from .mount_data_model import MountDataTreeModel
+from .selection_coordinator import _ClickAwareTreeView
 from .display_config import ScopeDisplayConfig
 from .style_engine import ScopeHeaderSignals, resolve_scope_header_signals
-from .view_helpers import configure_tree_view, apply_header_config
+from .view_helpers import configure_tree_view, apply_header_config, resolve_action_target
 
 
 def _query_container_state(
@@ -114,11 +115,14 @@ class ScopeView(QWidget):
         self._config = ScopeDisplayConfig()
         self._model = MountDataTreeModel(tree, self._config)
         self._proxy = DisplayFilterProxy(self._model, self._config)
-        self._tree_view = QTreeView()
+        self._tree_view = _ClickAwareTreeView()
         self._tree_view.setObjectName("scopeTree")
 
         self._setup_ui()
         self._connect_signals()
+        # Drop tracked_path automatically on project/scope switch so a
+        # stale outline doesn't follow the user into an unrelated tree.
+        self._tree.structureChanged.connect(self._validate_tracked_path)
 
     # ── UI Setup ──────────────────────────────────────────────────
 
@@ -246,25 +250,30 @@ class ScopeView(QWidget):
     # ── Context Menu ──────────────────────────────────────────────
 
     def _show_context_menu(self, pos: QPoint) -> None:
-        index_at_pos = self._tree_view.indexAt(pos)
-        selected_indexes = self._tree_view.selectionModel().selectedRows(0)
+        """Cursor-primary RMB: indexAt(pos) drives the action target.
+
+        See `view_helpers.resolve_action_target` for the cursor-vs-selection
+        precedence rules. The empty-area Scope Config gestures menu fires
+        ONLY when `indexAt(pos)` is invalid — having no selection but
+        clicking on a valid row now operates on that row, not on the
+        empty-area fallback (the prior dual-condition gate was the bug).
+        """
+        index_at_pos, nodes = resolve_action_target(
+            self._tree_view, self._proxy, pos,
+        )
 
         menu = QMenu(self)
 
-        # Empty area click — Scope Config gesture set.
-        if not index_at_pos.isValid() or not selected_indexes:
+        # Empty area click — Scope Config gesture set (only when cursor is
+        # on truly empty area, not when selection happens to be empty).
+        if not index_at_pos.isValid():
             self._add_scope_config_gestures(menu, node=None)
             self._append_fallback_if_empty(menu)
             menu.exec(self._tree_view.viewport().mapToGlobal(pos))
             return
 
-        nodes: list[MountDataNode] = []
-        for idx in selected_indexes:
-            source_idx = self._proxy.mapToSource(idx)
-            node = source_idx.internalPointer()
-            if node is not None:
-                nodes.append(node)
         if not nodes:
+            # Cursor on a valid index but no node resolved — defensive fallback.
             self._add_scope_config_gestures(menu, node=None)
             self._append_fallback_if_empty(menu)
             menu.exec(self._tree_view.viewport().mapToGlobal(pos))
@@ -272,7 +281,7 @@ class ScopeView(QWidget):
 
         if len(nodes) == 1:
             node = nodes[0]
-            proxy_index = selected_indexes[0]
+            proxy_index = index_at_pos
             any_spec = self._tree.get_any_spec_at(node.path)
             if (
                 any_spec is not None
@@ -558,28 +567,176 @@ class ScopeView(QWidget):
 
     # ── Selection Sync ────────────────────────────────────────────
 
-    def expand_to_path(self, path: Path) -> None:
-        """Expand tree to show a path, select and scroll to it.
+    def _validate_tracked_path(self) -> None:
+        """Drop stale tracked-paths after project switch / scope switch / clear.
 
-        Walks proxy indices from invisible root, expanding each level
-        until the target path is found or the walk runs out of matches.
+        Wired to `tree.structureChanged` so a tracked_paths set that points
+        outside the new root (or has no root at all) is cleared — otherwise
+        the delegate retains a phantom outline on an unrelated row in the
+        new project.
+        """
+        if not self._delegate._tracked_paths:
+            return
+        root = self._tree.root_node
+        if root is None:
+            self.set_tracked_paths([])
+            return
+        kept = []
+        for p in self._delegate._tracked_paths:
+            try:
+                p.relative_to(root.path)
+                kept.append(p)
+            except ValueError:
+                pass
+        if len(kept) != len(self._delegate._tracked_paths):
+            self.set_tracked_paths(kept)
+
+    def set_tracked_paths(self, paths) -> None:
+        """Update the tracked-paths overlay (decoupled from selectionModel).
+
+        Accepts an iterable of `Path` objects (may be empty to clear).
+        Walks the tree expanding only ANCESTORS of each path so each row
+        is reachable, then stores all paths in the delegate's set. Paint
+        renders one outline per tracked path. Scope's own user-driven
+        selection is left untouched.
+
+        Used by `app.py`'s `LocalHostView.selectionChangedPaths -> set_tracked_paths`
+        chain — fires on every LocalHost selection-set change including
+        clears (empty list).
+        """
+        paths_list = [p for p in paths if p is not None]
+        self._delegate.set_tracked_paths(paths_list)
+
+        if not paths_list:
+            self._tree_view.viewport().update()
+            return
+
+        root_node = self._tree.root_node
+        if root_node is None:
+            self._tree_view.viewport().update()
+            return
+
+        # For each tracked path: expand its ancestors. Track the first matched
+        # proxy index so we scroll to it (showing the user where the new
+        # selection landed in Scope without forcing a scroll-jump per path).
+        first_matched = QModelIndex()
+        model = self._proxy
+        for path in paths_list:
+            try:
+                rel = path.relative_to(root_node.path)
+            except ValueError:
+                continue
+            parts = rel.parts
+            if not parts:
+                continue
+            current_parent = QModelIndex()
+            matched = QModelIndex()
+            last_idx = len(parts) - 1
+            for i, part in enumerate(parts):
+                found = False
+                for row in range(model.rowCount(current_parent)):
+                    child_proxy = model.index(row, 0, current_parent)
+                    if not child_proxy.isValid():
+                        continue
+                    source_idx = self._proxy.mapToSource(child_proxy)
+                    node = source_idx.internalPointer()
+                    if node is not None and node.path.name == part:
+                        # Expand ancestors only; leave the final matched
+                        # folder closed (Bug 3 contract). Chevron-mirror
+                        # chain (Change B) handles explicit expansion.
+                        if i < last_idx:
+                            self._tree_view.expand(child_proxy)
+                        current_parent = child_proxy
+                        matched = child_proxy
+                        found = True
+                        break
+                if not found:
+                    break
+            if matched.isValid() and not first_matched.isValid():
+                first_matched = matched
+
+        if first_matched.isValid():
+            self._tree_view.scrollTo(first_matched)
+        self._tree_view.viewport().update()
+
+    # Single-path convenience wrapper — used internally by _validate and
+    # callers that only have one path. Routes to the set form.
+    def set_tracked_path(self, path: Optional[Path]) -> None:
+        """Set a single tracked path (or clear with None). Wraps set_tracked_paths."""
+        self.set_tracked_paths([path] if path is not None else [])
+
+    # Backwards-compat alias — kept for any stale external callers.
+    def expand_to_path(self, path: Path) -> None:
+        """DEPRECATED — use `set_tracked_path` / `set_tracked_paths`."""
+        self.set_tracked_path(path)
+
+    # ── Branch-Indicator Mirror Chain ─────────────────────────────
+    #
+    # `expand_path` / `collapse_path` mirror LocalHost's branch-indicator
+    # toggles (see LocalHostView.folderExpanded / folderCollapsed).
+    # Icon-agnostic — works regardless of how the indicator renders
+    # (currently a small square placeholder; chevron icon work tracked
+    # separately). One-way chain: LocalHost drives Scope. NO reverse
+    # mirror, so no re-entry guard is needed; if Scope→LocalHost is
+    # ever added, a guard MUST be introduced to prevent feedback loops.
+
+    def expand_path(self, path: Path) -> None:
+        """Expand the proxy row matching `path` (and all ancestors).
+
+        Walks the tree, calling `_tree_view.expand` on each matched part
+        INCLUDING the final folder. Used by the LocalHost→Scope mirror
+        chain for explicit user expand. Does NOT touch tracked_paths or
+        selection. Silently no-ops if path is outside root or filter-rejected.
+        """
+        target = self._walk_to_path(path, expand_during_walk=True)
+        # `target` is the final matched proxy index; the walk already
+        # called expand on each part. Nothing else needed.
+
+    def collapse_path(self, path: Path) -> None:
+        """Collapse the proxy row matching `path`.
+
+        Walks the tree without expanding, then collapses the matched
+        final folder. Used by the LocalHost→Scope mirror chain for
+        explicit user collapse. Does NOT touch tracked_paths or selection.
+        Silently no-ops if path is outside root or filter-rejected.
+        """
+        target = self._walk_to_path(path, expand_during_walk=False)
+        if target.isValid():
+            self._tree_view.collapse(target)
+
+    def _walk_to_path(
+        self, path: Path, *, expand_during_walk: bool,
+    ) -> QModelIndex:
+        """Walk the proxy tree to find the row matching `path`.
+
+        Returns the final matched proxy QModelIndex (or invalid if any
+        part doesn't match — e.g., path outside root, lazy-not-loaded
+        ancestor, or filter-rejected row). When `expand_during_walk` is
+        True, calls `_tree_view.expand` on each matched part during the
+        walk (used by `expand_path`); when False, walks without expanding
+        (used by `collapse_path`).
         """
         root_node = self._tree.root_node
         if root_node is None:
-            return
+            return QModelIndex()
         try:
             rel = path.relative_to(root_node.path)
         except ValueError:
-            return
+            return QModelIndex()
         parts = rel.parts
         if not parts:
-            return
+            return QModelIndex()
 
-        current_parent = QModelIndex()  # invisible root
+        current_parent = QModelIndex()
         model = self._proxy
         matched = QModelIndex()
-
         for part in parts:
+            # Trigger lazy-load if children haven't been fetched yet so the
+            # walk can see deeper subtrees that haven't been expanded by the
+            # user. Required for both expand_path / collapse_path / tracking
+            # of paths inside not-yet-fetched subdirs.
+            if model.canFetchMore(current_parent):
+                model.fetchMore(current_parent)
             found = False
             for row in range(model.rowCount(current_parent)):
                 child_proxy = model.index(row, 0, current_parent)
@@ -588,21 +745,15 @@ class ScopeView(QWidget):
                 source_idx = self._proxy.mapToSource(child_proxy)
                 node = source_idx.internalPointer()
                 if node is not None and node.path.name == part:
-                    self._tree_view.expand(child_proxy)
+                    if expand_during_walk:
+                        self._tree_view.expand(child_proxy)
                     current_parent = child_proxy
                     matched = child_proxy
                     found = True
                     break
             if not found:
-                break
-
-        if matched.isValid():
-            self._tree_view.selectionModel().setCurrentIndex(
-                matched,
-                self._tree_view.selectionModel().SelectionFlag.ClearAndSelect
-                | self._tree_view.selectionModel().SelectionFlag.Rows,
-            )
-            self._tree_view.scrollTo(matched)
+                return QModelIndex()
+        return matched
 
     # ── Helpers ───────────────────────────────────────────────────
 

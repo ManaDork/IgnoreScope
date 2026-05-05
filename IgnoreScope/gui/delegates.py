@@ -18,12 +18,14 @@ Config-parameterized delegates — state derivation via resolve_tree_state().
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QModelIndex
-from PyQt6.QtGui import QBrush, QColor, QPalette
+from PyQt6.QtGui import QBrush, QColor, QPalette, QPen
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from .display_config import TreeDisplayConfig, ColumnDef, resolve_tree_state
 from .list_display_config import ListDisplayConfig
-from .mount_data_model import NodeStateRole, NodeIsFileRole, NodeStencilTierRole
+from .mount_data_model import (
+    NodeStateRole, NodeIsFileRole, NodeStencilTierRole, NodePathRole,
+)
 from .session_history import HistoryStateRole
 from .style_engine import StyleGui, StateStyleClass
 
@@ -132,6 +134,29 @@ class TreeStyleDelegate(GradientDelegate):
         super().__init__(parent)
         self._config = config
         self._sg = StyleGui.instance()
+        # Tracked-paths overlay (decoupled from selectionModel).
+        # Set by ScopeView.set_tracked_paths; LocalHostView leaves it empty.
+        # Drawn as Layer 4 outline on top of selection — see paint().
+        # Multi-element so LocalHost multi-select shows one outline per
+        # selected path.
+        self._tracked_paths: set = set()
+
+    def set_tracked_paths(self, paths) -> None:
+        """Update tracked-paths set. Caller must trigger viewport().update()."""
+        self._tracked_paths = set(paths) if paths else set()
+
+    # Backwards-compat shim — single-path callers route to the set form.
+    def set_tracked_path(self, path) -> None:
+        """DEPRECATED — use set_tracked_paths."""
+        self._tracked_paths = {path} if path else set()
+
+    @property
+    def _tracked_path(self):
+        """Backwards-compat — returns one element of the set or None.
+
+        Tests reference this attribute directly; preserve as read accessor.
+        """
+        return next(iter(self._tracked_paths), None) if self._tracked_paths else None
 
     # ── Style Resolution ──────────────────────────────────────────
 
@@ -223,6 +248,42 @@ class TreeStyleDelegate(GradientDelegate):
         self._cached_style = style
         super().paint(painter, option, index)
         self._cached_style = None
+
+        # Layer 4: tracked-paths outline overlay (decoupled from selection).
+        # Drawn after text so it sits on top. Painted only in column 0 with
+        # clipping disabled so the outline spans the full row across all
+        # columns — Qt's default per-cell clip rect would otherwise truncate
+        # the right edge at the column-0 boundary.
+        if (
+            self._tracked_paths
+            and index.column() == 0
+            and index.data(NodePathRole) in self._tracked_paths
+        ):
+            view = option.widget
+            full_width = (
+                view.header().length()
+                if view is not None and hasattr(view, "header")
+                else option.rect.width()
+            )
+            painter.save()
+            try:
+                painter.setClipping(False)  # break out of column-0's cell clip
+                pen = QPen(self._sg.tracked_outline_color())
+                pen.setWidth(self._sg.tracked_outline_width())
+                painter.setPen(pen)
+                painter.setBrush(QBrush())  # outline only, no fill
+                from PyQt6.QtCore import QRect
+                rect = QRect(
+                    option.rect.x(),
+                    option.rect.y(),
+                    full_width,
+                    option.rect.height(),
+                )
+                # Inset by half the pen width so the stroke stays inside the row
+                inset = max(1, self._sg.tracked_outline_width() // 2)
+                painter.drawRect(rect.adjusted(inset, inset, -inset, -inset))
+            finally:
+                painter.restore()
 
 
 

@@ -181,6 +181,15 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self._scope_view = ScopeView(self._mount_data_tree)
         self.scope_config_container.layout().addWidget(self._scope_view)
 
+        # Cross-tree selection coordinator: clicking in one tree clears
+        # the sibling tree's selection; empty-space click clears both.
+        from .selection_coordinator import TreeSelectionCoordinator
+        self._selection_coord = TreeSelectionCoordinator(
+            self._local_host.tree_view,
+            self._scope_view.tree_view,
+            parent=self,
+        )
+
         # Arrange docks after views are injected — dock sizeHints must
         # reflect actual content for Qt to compute correct proportions
         self._arrange_default_layout()
@@ -399,8 +408,30 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
             self._on_push_toggle
         )
 
-        # Selection sync: left panel node → right panel expand
-        self._local_host.nodeSelected.connect(self._scope_view.expand_to_path)
+        # Selection sync: LocalHost's full selection set drives Scope's
+        # tracked-paths overlay (decoupled from Scope's selectionModel so
+        # Scope user-multi-select + RMB context survive LocalHost clicks).
+        # See `selection_coordinator.py` and `ScopeView.set_tracked_paths`.
+        # `selectionChangedPaths` fires on every LocalHost selection-set
+        # change including clears (empty list) — covers single click,
+        # Ctrl+click multi-select, and programmatic clearSelection() calls
+        # from the coordinator's Scope→LocalHost direction (which would
+        # otherwise leave a stale tracked-overlay since clearSelection
+        # doesn't fire currentChanged).
+        self._local_host.selectionChangedPaths.connect(
+            self._scope_view.set_tracked_paths
+        )
+        # Branch-indicator mirror chain (Bug 3 part 2 — one-way LH → Scope).
+        # User toggles a folder's branch indicator in LocalHost → Scope's
+        # corresponding folder mirrors the toggle. Icon-agnostic; the chain
+        # is wired via Qt's QTreeView.expanded/.collapsed which fire
+        # regardless of the indicator's visual form.
+        self._local_host.folderExpanded.connect(
+            self._scope_view.expand_path
+        )
+        self._local_host.folderCollapsed.connect(
+            self._scope_view.collapse_path
+        )
 
         # Sync (force re-push) from LocalHostView context menu
         self._local_host.syncRequested.connect(fo.on_update)

@@ -315,7 +315,15 @@ See `GUI_STATE_STYLES.md` Section 8 for full legacy correspondence table.
 > Sets up the QTreeView inside the Folder Configuration dock: assigns MountDataTreeModel + StyleDelegate(LocalHostDisplayConfig), configures header columns, and provides two RMB surfaces:
 >
 > - **Project Root Header RMB** (`_show_header_context_menu`) — targets `host_project_root` only. Exposes the Mount Delivery six-gesture state machine (see glossary → Mount Delivery Terms): Mount, Virtual Mount, Virtual Folder, Unmount, Convert to Virtual Mount / Convert to Mount, Remove Virtual Mount, Remove But Keep Children, and container-dependent actions (Remove Folder from Container, Remove Folder Tree from Container) when a container exists. Menu is always non-empty when a scope is loaded — at minimum Mount + Virtual Mount + Virtual Folder are offered when the root has no mount set.
-> - **Tree Node RMB** (`_show_context_menu`) — targets selected node(s). Same six-gesture state machine as Project Root Header, scoped to the selected path(s). Mount / Virtual Mount / Virtual Folder visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs). Shift-select supports batch Remove across multiple Virtual Mount entries.
+> - **Tree Node RMB** (`_show_context_menu`) — cursor-primary action target via `view_helpers.resolve_action_target`: RMB on an unselected row operates on that row alone; RMB on a selected row with active multi-select extends to the full selection (file-manager UX pattern). Same six-gesture state machine as Project Root Header, scoped to the cursor-resolved node(s). Mount / Virtual Mount / Virtual Folder visible only when `can_mount(path)` passes (no ancestor or descendant overlap with existing mount specs). Shift-select supports batch Remove across multiple Virtual Mount entries.
+
+### Cross-Tree Coordination (LocalHost ↔ Scope)
+
+LocalHost and Scope share three coordination layers (see `DATAFLOWCHART.md § Cross-Tree Coordination` for the full data-flow trace):
+
+- **Selection (single-context):** symmetric coordinator clears the sibling tree's `selectionModel` on user click; empty-space click clears both. Driven by user gestures only — programmatic selection changes don't trigger cross-tree clearing.
+- **Tracked-paths overlay:** LocalHost selection drives a teal-outline overlay (Layer 4 in `TreeStyleDelegate`) on the corresponding Scope rows. Multi-select in LocalHost produces multiple Scope outlines. The overlay rides on a separate visual layer from `selectionModel`, so Scope's user multi-select and RMB context survive every LocalHost click.
+- **Branch-indicator mirror (one-way LocalHost → Scope):** clicking a folder's branch indicator in LocalHost (currently rendered as a small square placeholder pending icon work) emits `folderExpanded(path)` / `folderCollapsed(path)`, which `ScopeView.expand_path` / `collapse_path` mirror in Scope. Files and stencil nodes do not emit. Scope→LocalHost is intentionally absent — loop-prevention is trivial.
 >
 > Does NOT own the data model, manage state, or load configs.
 

@@ -26,9 +26,10 @@ from .delegates import TreeStyleDelegate
 from .display_filter_proxy import DisplayFilterProxy
 from .mount_data_tree import MountDataTree, MountDataNode, NodeSource
 from .mount_data_model import MountDataTreeModel
+from .selection_coordinator import _ClickAwareTreeView
 from dataclasses import replace as dc_replace
 from .display_config import LocalHostDisplayConfig
-from .view_helpers import configure_tree_view, apply_header_config
+from .view_helpers import configure_tree_view, apply_header_config, resolve_action_target
 
 
 class LocalHostView(QWidget):
@@ -44,6 +45,10 @@ class LocalHostView(QWidget):
 
     stateChanged = pyqtSignal()
     nodeSelected = pyqtSignal(Path)
+    selectionCleared = pyqtSignal()  # emitted when current index becomes invalid (legacy — see selectionChangedPaths)
+    selectionChangedPaths = pyqtSignal(list)  # list[Path] of all selected rows; emitted on every selection-set change including clears (empty list)
+    folderExpanded = pyqtSignal(Path)  # emitted when user toggles branch indicator on a folder (Bug 3 part 2 mirror chain)
+    folderCollapsed = pyqtSignal(Path)  # symmetric to folderExpanded
     syncRequested = pyqtSignal(Path)
     removeSiblingRequested = pyqtSignal(object)  # Path emitted
     convertDeliveryRequested = pyqtSignal(object, str)  # (path, target)
@@ -59,7 +64,7 @@ class LocalHostView(QWidget):
         self._config = LocalHostDisplayConfig()
         self._model = MountDataTreeModel(tree, self._config)
         self._proxy = DisplayFilterProxy(self._model, self._config)
-        self._tree_view = QTreeView()
+        self._tree_view = _ClickAwareTreeView()
         self._tree_view.setObjectName("localHostTree")
         # Optional callable() -> bool, set by parent, indicates container exists.
         # When None, container-dependent gestures are hidden.
@@ -106,9 +111,22 @@ class LocalHostView(QWidget):
 
     def _connect_signals(self) -> None:
         self._model.stateChanged.connect(self.stateChanged.emit)
+        # currentChanged drives the legacy nodeSelected/selectionCleared
+        # path (single focused node — used by callers that need just the
+        # current index, e.g., tooltip drivers).
         self._tree_view.selectionModel().currentChanged.connect(
             self._on_selection_changed,
         )
+        # selectionChanged fires on EVERY change to the selection set,
+        # including clearSelection() calls that don't move the current
+        # index. Drives the multi-path tracked-overlay chain in ScopeView.
+        self._tree_view.selectionModel().selectionChanged.connect(
+            self._on_selection_set_changed,
+        )
+        # Branch-indicator mirror chain (Bug 3 part 2 — one-way LH → Scope).
+        # Folder-only; files and stencil nodes are skipped at the handler.
+        self._tree_view.expanded.connect(self._on_tree_expanded)
+        self._tree_view.collapsed.connect(self._on_tree_collapsed)
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -135,13 +153,61 @@ class LocalHostView(QWidget):
     # ── Selection Sync ──────────────────────────────────────────
 
     def _on_selection_changed(self, current, previous) -> None:
-        """Emit nodeSelected when any node is selected."""
+        """Emit nodeSelected when current index becomes valid; emit selectionCleared otherwise.
+
+        Driven by `currentChanged` — fires when the current (focused) row
+        moves. Does NOT fire when only the selection set changes
+        (e.g. clearSelection() called programmatically by the coordinator).
+        For full-selection tracking, see `_on_selection_set_changed`.
+        """
         if not current.isValid():
+            self.selectionCleared.emit()
             return
         source_idx = self._proxy.mapToSource(current)
         node = source_idx.internalPointer()
         if node is not None:
             self.nodeSelected.emit(node.path)
+
+    def _on_selection_set_changed(self, selected, deselected) -> None:
+        """Emit selectionChangedPaths with the full set of currently-selected rows.
+
+        Driven by `selectionChanged` — fires on EVERY selection-set change,
+        including programmatic `clearSelection()` calls that leave the
+        current index untouched. Carries `list[Path]` (may be empty).
+        """
+        sel_model = self._tree_view.selectionModel()
+        paths: list[Path] = []
+        for idx in sel_model.selectedRows(0):
+            source_idx = self._proxy.mapToSource(idx)
+            node = source_idx.internalPointer()
+            if node is not None:
+                paths.append(node.path)
+        self.selectionChangedPaths.emit(paths)
+
+    def _on_tree_expanded(self, proxy_index) -> None:
+        """Emit folderExpanded(path) when user toggles a folder's branch indicator.
+
+        Driven by `QTreeView.expanded` (Qt-built-in). Folder-only —
+        files and stencil nodes do not emit. Powers the one-way
+        LocalHost → Scope mirror chain (see ScopeView.expand_path).
+        """
+        if not proxy_index.isValid():
+            return
+        source_idx = self._proxy.mapToSource(proxy_index)
+        node = source_idx.internalPointer()
+        if node is None or node.is_file or node.is_stencil_node:
+            return
+        self.folderExpanded.emit(node.path)
+
+    def _on_tree_collapsed(self, proxy_index) -> None:
+        """Emit folderCollapsed(path); symmetric to _on_tree_expanded."""
+        if not proxy_index.isValid():
+            return
+        source_idx = self._proxy.mapToSource(proxy_index)
+        node = source_idx.internalPointer()
+        if node is None or node.is_file or node.is_stencil_node:
+            return
+        self.folderCollapsed.emit(node.path)
 
     # ── Header Context Menu ──────────────────────────────────────
 
@@ -229,17 +295,18 @@ class LocalHostView(QWidget):
     # ── Context Menu ──────────────────────────────────────────────
 
     def _show_context_menu(self, pos: QPoint) -> None:
-        selected_indexes = self._tree_view.selectionModel().selectedRows(0)
-        if not selected_indexes:
-            return
+        """Cursor-primary RMB: indexAt(pos) drives the action target.
 
-        nodes: list[MountDataNode] = []
-        for idx in selected_indexes:
-            source_idx = self._proxy.mapToSource(idx)
-            node = source_idx.internalPointer()
-            if node is not None:
-                nodes.append(node)
-        if not nodes:
+        See `view_helpers.resolve_action_target` for the cursor-vs-selection
+        precedence rules. RMB on an unselected row operates on that row
+        alone; RMB on a selected row with active multi-select operates on
+        the full selection. Empty-area click is a silent no-op (LocalHost
+        has no empty-area menu — that's a Scope concept).
+        """
+        index_at_pos, nodes = resolve_action_target(
+            self._tree_view, self._proxy, pos,
+        )
+        if not index_at_pos.isValid() or not nodes:
             return
 
         menu = QMenu(self)
@@ -249,7 +316,7 @@ class LocalHostView(QWidget):
                 self._build_file_menu(menu, node)
             else:
                 # Pass proxy index for expand/collapse operations
-                self._build_single_select_menu(menu, node, selected_indexes[0])
+                self._build_single_select_menu(menu, node, index_at_pos)
         else:
             # Separate files and folders for multi-select
             file_nodes = [n for n in nodes if n.is_file]
@@ -282,9 +349,12 @@ class LocalHostView(QWidget):
 
             ms = self._tree._find_owning_spec(path)
             if ms and state:
-                # Check if THIS folder has its own explicit pattern
+                # Check if THIS folder has its own explicit pattern.
+                # `as_posix()` returns canonical forward-slash form across
+                # platforms — replaces the prior str(...).replace("\\","/")
+                # which was platform-specific string manipulation.
                 try:
-                    rel = str(path.relative_to(ms.mount_root)).replace("\\", "/")
+                    rel = path.relative_to(ms.mount_root).as_posix()
                 except ValueError:
                     rel = None
 

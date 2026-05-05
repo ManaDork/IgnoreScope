@@ -239,6 +239,9 @@ class StyleGui:
         self._selection_qcolor.setAlpha(d["selection_alpha"])
         self._hover_qcolor = QColor(d["hover_color"])
         self._hover_qcolor.setAlpha(d["hover_alpha"])
+        self._tracked_outline_qcolor = QColor(d["tracked_outline_color"])
+        self._tracked_outline_qcolor.setAlpha(d["tracked_outline_alpha"])
+        self._tracked_outline_width = int(d["tracked_outline_width"])
 
         # Widget gradients
         self._widget_gradients: dict[str, WidgetGradientDef] = {}
@@ -306,6 +309,20 @@ class StyleGui:
     def hover_color(self) -> QColor:
         """Get hover overlay color (with alpha)."""
         return self._hover_qcolor
+
+    def tracked_outline_color(self) -> QColor:
+        """Get tracked-path outline color (with alpha).
+
+        Used by `TreeStyleDelegate` to render a 1-2px outline on rows whose
+        path matches the view's tracked_path — a visual cue decoupled from
+        `selectionModel`. See `selection_coordinator.py` and
+        `ScopeView.set_tracked_path` for the chain.
+        """
+        return self._tracked_outline_qcolor
+
+    def tracked_outline_width(self) -> int:
+        """Get tracked-path outline pen width in px."""
+        return self._tracked_outline_width
 
     def palette_color(self, key: str) -> str:
         """Get palette hex value by key. KeyError if missing."""
