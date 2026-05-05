@@ -171,6 +171,35 @@ class TestEmptyProjectContent:
         # at all.
         assert "-claude-auth" not in compose
         assert "\nvolumes:\n" not in compose
+        # Bug regression: service-level `volumes:` key must be omitted when
+        # there are no entries. A dangling `volumes:` is YAML null and docker
+        # compose rejects it with "services.<svc>.volumes must be a array".
+        assert "    volumes:" not in compose
+
+    def test_full_virtual_scope_no_extension_no_dangling_volumes_key(self, tmp_path: Path):
+        """Full-virtual scope with no extensions: zero mounts of any kind.
+
+        Regression for "services.claude.volumes must be a array": the service-
+        level `volumes:` key must not be emitted when no entries follow it.
+        """
+        compose = generate_compose_with_masks(
+            ordered_volumes=[],
+            mask_volume_names=[],
+            host_project_root=tmp_path,
+            docker_container_name="test-full-virtual",
+            container_root="/workspace",
+            project_name=tmp_path.name,
+            extra_mounts=None,
+            volume_entries=[],
+            volume_names=[],
+        )
+
+        # Hard YAML check: no line with the service-level `volumes:` key.
+        for line in compose.split("\n"):
+            assert line != "    volumes:", (
+                "Service-level `volumes:` key emitted with no entries — "
+                "docker compose will reject this with 'must be a array'"
+            )
 
     def test_empty_project_with_only_volume_tier(self, tmp_path: Path):
         """Empty project lists + one volume-tier entry → emits; no mask_* anywhere."""
