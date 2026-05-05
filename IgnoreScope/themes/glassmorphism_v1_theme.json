@@ -60,7 +60,7 @@
             "hover_alpha": 60,
             "row_gradient_opacity": 217,
             "tracked_outline_color": "#00D4AA",
-            "tracked_outline_alpha": 220,
+            "tracked_outline_alpha": 90,
             "tracked_outline_width": 2
         }
     },
