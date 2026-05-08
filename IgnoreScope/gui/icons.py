@@ -19,9 +19,9 @@ def build_app_icon() -> QIcon:
     icon = QIcon()
     for size in _SIZES:
         if size == 512:
-            filename = "ignore_scope_square_512.png"
+            filename = "ignore_scope_circle.png"
         else:
-            filename = f"ignore_scope_square_512_{size}.png"
+            filename = f"ignore_scope_circle_{size}.png"
         path = _ICONS_DIR / filename
         if path.exists():
             icon.addPixmap(QPixmap(str(path)))
