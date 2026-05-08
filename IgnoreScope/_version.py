@@ -1,6 +1,6 @@
 import os
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 
 # Dev-mode bypass: when truthy in os.environ, check_version_mismatch() returns
 # data unchanged (no migration chain, no version stamping). Intended for tests
