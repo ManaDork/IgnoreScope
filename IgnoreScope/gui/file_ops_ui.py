@@ -12,17 +12,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 
 from ..core.config import load_config
+from ..core.marked_push import add_marked_push, load_marked_push
 from ..core.op_result import OpError, OpWarning, OpResult
 from ..docker import (
-    preflight_push,
     execute_push,
     preflight_pull,
     execute_pull,
     preflight_remove,
     execute_remove,
+    drain_marked_push,
 )
 
 if TYPE_CHECKING:
@@ -135,33 +137,52 @@ class FileOperationsHandler:
         return True
 
     def on_push(self, path: Path) -> None:
-        """Push a file to the container."""
-        ctx = self._get_container_context()
-        if not ctx:
-            return
-        container_name, container_root, host_container_root = ctx
-        pushed_files = set(self._app._mount_data_tree.pushed_files)
+        """Mark a file for push (config-first), then drain the queue if the container is running.
 
-        # Preflight
-        result = preflight_push(
-            path, container_name, container_root, host_container_root, pushed_files,
-        )
-        if result.error:
-            self._show_error(result)
+        Inverted relative to the old flow: the config mutation (enqueue) happens
+        immediately and unconditionally; the actual ``docker cp`` is the drain's
+        job. When the container is missing or stopped, the file stays queued and
+        is delivered by the next Create/Update Container (or ``push-marked`` /
+        the scope-load prompt).
+        """
+        if not self._app.host_project_root:
             return
-        if result.warnings and not self._confirm_warnings(result, path):
+        from .app import PLACEHOLDER_SCOPE
+        scope = self._app._current_scope
+        if scope == PLACEHOLDER_SCOPE:
             return
 
-        # Execute
-        result = execute_push(
-            path, container_name, container_root, host_container_root,
-        )
-        if result.success:
-            # add_pushed emits stateChanged → auto_save persists (app.py:400).
-            self._app._mount_data_tree.add_pushed(path)
-            self._app.statusBar().showMessage(f"Pushed {path.name}", 5000)
+        # Config-first: enqueue immediately, regardless of container state.
+        add_marked_push(self._app.host_project_root, scope, [path])
+
+        from ..docker.names import build_docker_name
+        from ..docker.container_ops import get_container_info
+        container_name = build_docker_name(self._app.host_project_root, scope)
+        info = get_container_info(container_name)
+        if info is None or not info.get("running", False):
+            self._app.statusBar().showMessage(
+                f"Marked {path.name} for push — will be pushed on next "
+                f"Create/Update Container (or run push-marked)", 6000,
+            )
+            return
+
+        # Container running: drain now (synchronous, on the main thread).
+        result = self.drain_marked_push_now()
+
+        queue_after = load_marked_push(self._app.host_project_root, scope)
+        if path not in queue_after:
+            if any("skipped and unmarked" in n and str(path) in n for n in (result.details or [])):
+                self._app.statusBar().showMessage(
+                    f"Unmarked {path.name} — host file is older than the container's copy", 6000,
+                )
+            else:
+                self._app.statusBar().showMessage(f"Pushed {path.name}", 5000)
         else:
-            QMessageBox.warning(self._app, "Push Failed", result.message)
+            detail = "\n".join(result.details) if result.details else result.message
+            QMessageBox.warning(
+                self._app, "Push Not Completed",
+                f"{path.name} is still queued for push.\n\n{detail}",
+            )
 
     def on_update(self, path: Path) -> None:
         """Update (overwrite) a file in the container."""
@@ -242,3 +263,69 @@ class FileOperationsHandler:
             self._app.statusBar().showMessage(f"Removed {path.name} from container", 5000)
         else:
             QMessageBox.warning(self._app, "Remove Failed", result.message)
+
+    # ── Marked-push drain ──────────────────────────────────────────
+
+    def drain_marked_push_now(self) -> OpResult:
+        """Drain the marked-push queue synchronously, with a progress dialog and
+        a stale-file confirmation prompt. Reloads the scope config into the tree
+        afterward so promoted ``pushed_files`` show up. Returns the drain result.
+        """
+        host_project_root = self._app.host_project_root
+        scope = self._app._current_scope
+        if not host_project_root:
+            return OpResult(success=False, message="No project loaded")
+        from .app import PLACEHOLDER_SCOPE
+        if scope == PLACEHOLDER_SCOPE:
+            return OpResult(success=False, message="No named scope")
+
+        dialog = QProgressDialog("Pushing marked files...", None, 0, 0, self._app)
+        dialog.setWindowTitle("Push")
+        # Application-modal: the drain runs on the main thread with processEvents()
+        # between files — block user-driven re-entrancy (another push / scope switch).
+        dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dialog.setMinimumDuration(400)
+        dialog.setValue(0)
+
+        def _progress(current: int, total: int) -> None:
+            dialog.setMaximum(total)
+            dialog.setValue(current)
+            QApplication.processEvents()
+
+        try:
+            result = drain_marked_push(
+                host_project_root, scope,
+                on_stale=self._confirm_stale, progress=_progress,
+            )
+        finally:
+            dialog.close()
+
+        # The drain owns config when called without one — resync the tree so a
+        # later auto_save doesn't clobber the pushed_files it just promoted.
+        # data_only=True: pushed_files changed but mount structure did not, so
+        # skip the view-level reset that would collapse tree expansion.
+        self._app.config_manager.reload_current_scope(data_only=True)
+        return result
+
+    def _confirm_stale(self, host_path: Path) -> str:
+        """Prompt for how to handle a host file older than the container's copy.
+
+        Returns one of ``"replace"`` / ``"skip"`` / ``"skip_and_unmark"``.
+        """
+        box = QMessageBox(self._app)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Stale Host File")
+        box.setText(f"{host_path.name} is older than the container's copy.")
+        box.setInformativeText("Replace it, skip this push, or skip and unmark the file?")
+        replace_btn = box.addButton("Replace", QMessageBox.ButtonRole.AcceptRole)
+        skip_btn = box.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
+        unmark_btn = box.addButton("Skip and Unmark", QMessageBox.ButtonRole.DestructiveRole)
+        box.setDefaultButton(skip_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is replace_btn:
+            return "replace"
+        if clicked is unmark_btn:
+            return "skip_and_unmark"
+        return "skip"
+

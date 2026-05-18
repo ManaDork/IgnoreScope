@@ -173,11 +173,14 @@ class ContainerOperations:
         progress.close()
 
         if success:
-            QMessageBox.information(self._app, success_title, msg)
+            # Resync FIRST — the orchestrator persisted config out-of-band
+            # (drained pushed_files, reconciled extensions). Doing this before the
+            # modal success box prevents a stale-tree auto_save from clobbering it.
+            self._app.config_manager.reload_current_scope()
             self._app.menu_manager.update_scope_list()
             self._app.menu_manager.update_docker_menu_states()
-            self._app._scope_view.refresh()
             self._app.menu_manager.add_to_recent(self._app.host_project_root)
+            QMessageBox.information(self._app, success_title, msg)
         else:
             # Split multi-line errors: first line as summary, rest as detail
             lines = msg.split("\n", 1)
@@ -258,7 +261,13 @@ class ContainerOperations:
         )
 
     def recreate_container(self) -> None:
-        """Remove and recreate the container (destroys all volumes)."""
+        """Remove and recreate the container (destroys all volumes).
+
+        Auto-dumps the current scope's pushed-files list (a timestamped ``.txt``
+        under ``.ignore_scope/<scope>/``) and re-enqueues those files into the
+        marked-push host queue, so the post-create drain re-pushes them from
+        the host. In-container edits to those files are lost.
+        """
         if not self._app.host_project_root:
             return
 
@@ -266,7 +275,11 @@ class ContainerOperations:
             self._app,
             "Recreate Container",
             f"This will remove and recreate container '{self._app._current_scope}'.\n"
-            "All data in the container will be lost.\n\nContinue?",
+            "All data in the container will be lost.\n\n"
+            "Files marked as pushed will be re-pushed from the host after recreate "
+            "(a snapshot of the list is saved to "
+            ".ignore_scope/<scope>/pushed_files_<timestamp>.txt); "
+            "in-container edits to those files will be lost.\n\nContinue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
@@ -279,6 +292,16 @@ class ContainerOperations:
 
         host_project_root = self._app.host_project_root
         scope = self._app._current_scope
+
+        # Pre-dump: write a timestamped pushed-files snapshot, then re-queue
+        # config.pushed_files into the host marked-push queue. execute_create
+        # clears pushed_files and the drain re-adds only files it actually cp's
+        # in. TODO: the lifecycle replay does not apply FileFilter (carries
+        # over the pre-existing execute_push_batch passthrough gap).
+        if config.pushed_files:
+            self.save_pushed_files_list(auto=True)
+            from ..core.marked_push import add_marked_push
+            add_marked_push(host_project_root, scope, list(config.pushed_files))
 
         def _recreate() -> OpResult:
             remove_result = execute_remove_container(
@@ -331,6 +354,87 @@ class ContainerOperations:
                 self._app._update_status()
             else:
                 QMessageBox.warning(self._app, "Remove Failed", result.message)
+
+    def save_pushed_files_list(self, *, auto: bool = False) -> "Path | None":
+        """Save the current scope's pushed-files list to a text file.
+
+        One relative-POSIX path per line.
+
+        Args:
+            auto: When True, write a timestamped ``pushed_files_<ts>.txt`` under
+                ``.ignore_scope/<scope>/`` without prompting and return the
+                resulting path. Used by Recreate so the user has a record of
+                what's about to be re-pushed (and a recovery list if anything
+                goes sideways). When False (the menu path), open a Save dialog
+                anchored at ``<project>/<scope>_pushed_files.txt`` and write
+                the user's chosen path.
+
+        Returns:
+            The written path on success (auto or interactive), or None when
+            there is no current scope, no pushed files, the user cancels the
+            dialog, or writing fails.
+        """
+        from pathlib import Path
+        from datetime import datetime
+
+        if not self._app.host_project_root:
+            if not auto:
+                QMessageBox.warning(self._app, "No Project", "Please open a project first.")
+            return None
+        from .app import PLACEHOLDER_SCOPE
+        scope = self._app._current_scope
+        if scope == PLACEHOLDER_SCOPE:
+            if not auto:
+                self._app.statusBar().showMessage("Create a named scope first", 5000)
+            return None
+
+        from ..core.config import get_container_dir, load_config
+        from ..utils.paths import to_relative_posix
+        try:
+            config = load_config(self._app.host_project_root, scope)
+        except Exception as e:
+            if not auto:
+                QMessageBox.critical(self._app, "Config Error", f"Could not load config: {e}")
+            return None
+
+        if not config.pushed_files:
+            if not auto:
+                QMessageBox.information(
+                    self._app, "No Pushed Files",
+                    f"Scope '{scope}' has no files marked as pushed.",
+                )
+            return None
+
+        if auto:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dest_dir = get_container_dir(self._app.host_project_root, scope)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            path_str = str(dest_dir / f"pushed_files_{timestamp}.txt")
+        else:
+            from PyQt6.QtWidgets import QFileDialog
+            default_path = self._app.host_project_root / f"{scope}_pushed_files.txt"
+            path_str, _ = QFileDialog.getSaveFileName(
+                self._app, "Save Pushed-Files List",
+                str(default_path), "Text files (*.txt);;All files (*)",
+            )
+            if not path_str:
+                return None
+
+        lines = sorted(
+            to_relative_posix(p, self._app.host_project_root) for p in config.pushed_files
+        )
+        try:
+            Path(path_str).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as e:
+            if not auto:
+                QMessageBox.critical(self._app, "Save Failed", f"Could not write {path_str}: {e}")
+            return None
+
+        if not auto:
+            self._app.statusBar().showMessage(
+                f"Saved {len(lines)} pushed file(s) → {path_str}", 6000,
+            )
+        return Path(path_str)
 
     def remove_scope_config(self) -> None:
         """Remove scope config (JSON) without touching Docker container.

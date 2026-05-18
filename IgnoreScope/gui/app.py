@@ -365,6 +365,7 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         mm.update_container_action.triggered.connect(co.update_container)
         mm.recreate_container_action.triggered.connect(co.recreate_container)
         mm.remove_container_action.triggered.connect(co.remove_container)
+        mm.save_pushed_files_action.triggered.connect(co.save_pushed_files_list)
         mm.deploy_llm_action.triggered.connect(co.deploy_llm_to_container)
         mm.deploy_git_action.triggered.connect(co.deploy_git_to_container)
 

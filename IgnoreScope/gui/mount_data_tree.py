@@ -178,9 +178,10 @@ class MountDataTree(QObject):
         # Display filter
         self._show_hidden: bool = False
 
-        # Batch mode (defers stateChanged)
+        # Batch mode (defers stateChanged and mountSpecsChanged)
         self._batch_mode: bool = False
         self._batch_changed: bool = False
+        self._batch_mount_specs_changed: bool = False
 
     # ── Display Filters ──────────────────────────────────────────
 
@@ -206,17 +207,23 @@ class MountDataTree(QObject):
     # ── Batch Mode ────────────────────────────────────────────────
 
     def begin_batch(self) -> None:
-        """Begin batch mode — suppresses stateChanged until end_batch()."""
+        """Begin batch mode — suppresses stateChanged and mountSpecsChanged until end_batch()."""
         self._batch_mode = True
         self._batch_changed = False
+        self._batch_mount_specs_changed = False
 
     def end_batch(self, *, emit: bool = True) -> None:
-        """End batch mode. Emits deferred stateChanged unless emit=False."""
+        """End batch mode. Emits deferred stateChanged + mountSpecsChanged unless emit=False."""
         self._batch_mode = False
-        if self._batch_changed and emit:
-            self._batch_changed = False
-            self.stateChanged.emit()
+        deferred_state = self._batch_changed
+        deferred_mount_specs = self._batch_mount_specs_changed
         self._batch_changed = False
+        self._batch_mount_specs_changed = False
+        if emit:
+            if deferred_state:
+                self.stateChanged.emit()
+            if deferred_mount_specs:
+                self.mountSpecsChanged.emit()
 
     def _emit_state_changed(self) -> None:
         """Emit stateChanged respecting batch mode."""
@@ -224,6 +231,13 @@ class MountDataTree(QObject):
             self._batch_changed = True
         else:
             self.stateChanged.emit()
+
+    def _emit_mount_specs_changed(self) -> None:
+        """Emit mountSpecsChanged respecting batch mode."""
+        if self._batch_mode:
+            self._batch_mount_specs_changed = True
+        else:
+            self.mountSpecsChanged.emit()
 
     # ── State Recomputation (CORE Wiring) ─────────────────────────
 
@@ -906,7 +920,7 @@ class MountDataTree(QObject):
         self._rebuild_extension_stencil_nodes()
 
         self._recompute_states()
-        self.mountSpecsChanged.emit()
+        self._emit_mount_specs_changed()
 
     def _rebuild_extension_stencil_nodes(self) -> None:
         """Emit synthetic stencil tree nodes for each extension-synthesized spec.

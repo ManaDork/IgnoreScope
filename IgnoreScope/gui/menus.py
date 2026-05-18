@@ -207,6 +207,11 @@ class MenuManager:
         self.remove_container_action.setToolTip("No running container")
         docker_menu.addAction(self.remove_container_action)
 
+        self.save_pushed_files_action = QAction("Save Pushed-Files List...", self._app)
+        self.save_pushed_files_action.setEnabled(False)
+        self.save_pushed_files_action.setToolTip("No scope config")
+        docker_menu.addAction(self.save_pushed_files_action)
+
         docker_menu.addSeparator()
 
         self.launch_terminal_action = QAction("Launch Container in Terminal", self._app)
@@ -434,6 +439,13 @@ class MenuManager:
         remove_tip = "Permanently remove the Docker container" if has_docker_container else "No running container"
         self.remove_container_action.setEnabled(has_docker_container)
         self.remove_container_action.setToolTip(remove_tip)
+
+        save_pushed_tip = (
+            "Save the list of files marked as pushed in this scope"
+            if has_config else "No scope config"
+        )
+        self.save_pushed_files_action.setEnabled(has_config)
+        self.save_pushed_files_action.setToolTip(save_pushed_tip)
 
         # Deploy/Terminal/LLM: need a Docker container
         deploy_llm_tip = "Install Claude CLI into the running container" if has_docker_container else "No running container"

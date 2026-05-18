@@ -198,6 +198,10 @@ class ConfigManager(QObject):
         finally:
             progress.close()
 
+        # Busy dialog is closed now — safe to surface the marked-push prompt for
+        # whichever scope ended up loaded (switch_scope skips it for _show_progress=False).
+        self._post_scope_load()
+
     def switch_scope(self, name: str, *, _show_progress: bool = True) -> None:
         """Switch to a different container configuration."""
         progress = None
@@ -248,6 +252,104 @@ class ConfigManager(QObject):
         finally:
             if progress:
                 progress.close()
+
+        # When invoked from open_project (_show_progress=False) the project's
+        # busy dialog is still up — open_project fires the prompt itself once
+        # that dialog has closed. Standalone (menu-driven) switches prompt here.
+        if _show_progress:
+            self._post_scope_load()
+
+    def _post_scope_load(self) -> None:
+        """After a scope load, offer to drain non-empty marked-push or marked-staged queues.
+
+        Keeps the MVP small — there is no background watcher; the prompt fires
+        only on scope load. On "Delay" the queues are left intact (re-prompted
+        on the next reload, or drainable via Push / ``push-marked``).
+
+        Staged entries (from a previous interrupted Update) participate in the
+        count and prompt: clicking "Now" drains them, restoring the preserved
+        folder contents into the current container.
+        """
+        if not self._app.host_project_root:
+            return
+        from .app import PLACEHOLDER_SCOPE
+        scope = self._app._current_scope
+        if scope == PLACEHOLDER_SCOPE:
+            return
+
+        from ..core.marked_push import load_marked_push
+        from ..core.marked_staged import load_marked_staged
+        queued_host = load_marked_push(self._app.host_project_root, scope)
+        queued_staged = load_marked_staged(self._app.host_project_root, scope)
+        n = len(queued_host) + len(queued_staged)
+        if not n:
+            return
+
+        box = QMessageBox(self._app)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Files Marked for Push")
+        box.setText(f"{n} file(s) marked for push — push now?")
+        now_btn = box.addButton("Now", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Delay", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(now_btn)
+        box.exec()
+
+        if box.clickedButton() is now_btn:
+            result = self._app.file_ops_handler.drain_marked_push_now()
+            self._app.statusBar().showMessage(result.message, 8000)
+        else:
+            self._app.statusBar().showMessage(
+                f"{n} file(s) still queued — reload the project to be re-prompted, "
+                f"or use Push / push-marked", 8000,
+            )
+
+    def reload_current_scope(self, *, data_only: bool = False) -> None:
+        """Re-read the current scope's config from disk into the shared tree.
+
+        Lightweight resync used after out-of-band config writes — the marked-push
+        drain saves config itself, and lifecycle ops drain + reconcile then
+        persist. Unlike ``switch_scope`` this shows no busy dialog and does not
+        re-prompt for the marked-push queue.
+
+        ``data_only=True`` is the drain path: pushed_files changed but mount
+        structure did not. Skips the view-level refresh() (which would call
+        ``beginResetModel``/``endResetModel`` and collapse the trees) and instead
+        emits ``stateChanged`` manually so the cheap dataChanged + viewer-update
+        wiring fires without resetting the models. Used by
+        ``drain_marked_push_now``; all other callers use the default structural
+        reload.
+        """
+        if not self._app.host_project_root:
+            return
+        from .app import PLACEHOLDER_SCOPE
+        if self._app._current_scope == PLACEHOLDER_SCOPE:
+            return
+        try:
+            config = load_config(self._app.host_project_root, self._app._current_scope)
+        except Exception:
+            return
+        tree = self._app._mount_data_tree
+        # Gate app-level handlers (mirrors switch_scope) AND batch tree signals,
+        # so a signal fired during load_config can't re-enter auto_save mid-reload.
+        self._app._loading = True
+        tree.begin_batch()
+        try:
+            tree.load_config(config)
+        finally:
+            tree.end_batch(emit=False)
+            self._app._loading = False
+        # The on-disk pushed_files just changed out-of-band — drop the undo
+        # history so an undo can't restore a now-stale pushed_files snapshot.
+        self.clear_undo()
+        if data_only:
+            # Cheap repaint path — preserves expansion in both trees. The
+            # stateChanged wiring drives _on_tree_changed → dataChanged (row
+            # restyle) and _update_config_viewer (JSON refresh).
+            tree.stateChanged.emit()
+        else:
+            self._app._local_host.refresh()
+            self._app._scope_view.refresh()
+            self._app._update_config_viewer()
 
     def build_config(self) -> ScopeDockerConfig:
         """Build a ScopeDockerConfig from current UI state."""
