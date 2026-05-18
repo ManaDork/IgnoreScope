@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Optional
 
 from ..core.config import ScopeDockerConfig, load_config, save_config, list_containers
+from ..core.marked_push import add_marked_push
 from ..docker import (
     resolve_file_subset,
-    preflight_push_batch,
-    execute_push_batch,
     preflight_pull_batch,
     execute_pull_batch,
     execute_create,
+    drain_marked_push,
     preflight_remove_container,
     execute_remove_container,
 )
@@ -182,76 +182,89 @@ def cmd_create(
     return result.success, result.message
 
 
+def _format_drain_result(result) -> tuple[bool, str]:
+    """Render a drain OpResult as a (success, message) pair for CLI output."""
+    msg = result.message
+    if result.details:
+        msg += "\n" + "\n".join(f"  {note}" for note in result.details)
+    return result.success, msg
+
+
 def cmd_push(
     host_project_root: Path,
     scope_name: str,
     specific_files: Optional[list[str]] = None,
     force: bool = False,
 ) -> tuple[bool, str]:
-    """Push files to container using CORE preflight/execute pattern.
+    """Mark files for push (config-first), then drain the marked-push queue.
+
+    With ``specific_files``: each relative path is validated (must exist and be
+    under ``host_container_root``) and enqueued into ``marked_push_scope.json``;
+    then the queue is drained. Without ``specific_files``: just drain whatever is
+    already queued (same as ``push-marked``). The actual ``docker cp`` happens in
+    the drain — when the container is missing or stopped, files stay queued and
+    are delivered by the next Create/Update Container.
 
     Args:
         host_project_root: Project root directory
         scope_name: Scope name
-        specific_files: Optional list of relative paths to push (push all if None)
-        force: If True, skip warnings (proceed despite confirmable issues)
+        specific_files: Optional list of relative paths to mark for push
+        force: If True, host-stale files are replaced (default: skipped, left queued)
 
     Returns:
         Tuple of (success, message)
     """
-    # Load config
-    try:
-        config = load_config(host_project_root, scope_name)
-    except Exception as e:
-        return False, f"Failed to load config: {e}"
+    if specific_files:
+        try:
+            config = load_config(host_project_root, scope_name)
+        except Exception as e:
+            return False, f"Failed to load config: {e}"
+        host_container_root = config.host_container_root or host_project_root.parent
 
-    if not config.pushed_files:
-        return True, "No pushed files configured"
+        to_enqueue: list[Path] = []
+        errors: list[str] = []
+        for rel in specific_files:
+            host_path = host_project_root / rel
+            if not host_path.exists():
+                errors.append(f"not found: {rel}")
+                continue
+            try:
+                host_path.relative_to(host_container_root)
+            except ValueError:
+                errors.append(f"not under {host_container_root}: {rel}")
+                continue
+            to_enqueue.append(host_path)
 
-    # Determine which files to push
-    files_to_push = resolve_file_subset(config.pushed_files, host_project_root, specific_files)
-    if not files_to_push:
-        return False, "No matching files to push"
+        if errors:
+            return False, "Cannot mark for push:\n" + "\n".join(f"  {e}" for e in errors)
+        add_marked_push(host_project_root, scope_name, to_enqueue)
 
-    docker_name = build_docker_name(host_project_root, config.scope_name)
-    container_root = config.container_root
-    host_container_root = config.host_container_root or host_project_root.parent
-
-    # Preflight all files
-    batch = preflight_push_batch(
-        sorted(files_to_push), docker_name,
-        container_root, host_container_root, config.pushed_files,
+    result = drain_marked_push(
+        host_project_root, scope_name,
+        on_stale=("replace" if force else "skip"),
     )
+    return _format_drain_result(result)
 
-    should_continue, err_msg, paths_to_execute = _check_batch_preflight(
-        batch, host_project_root, force, "Push",
-    )
-    if not should_continue:
-        return False, err_msg
 
-    # Execute
-    results = execute_push_batch(
-        paths_to_execute, docker_name,
-        container_root, host_container_root,
-    )
+def cmd_push_marked(
+    host_project_root: Path,
+    scope_name: str,
+    force: bool = False,
+) -> tuple[bool, str]:
+    """Drain the marked-push queue without marking anything new.
 
-    # Update tracking for successful pushes
-    any_success = False
-    for path, result in results.items():
-        if result.success:
-            config.pushed_files.add(path)
-            any_success = True
+    Thin wrapper over ``cmd_push`` with no ``specific_files`` — kept as its own
+    command for discoverability (``push-marked``).
 
-    if any_success:
-        save_config(config)
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+        force: If True, host-stale files are replaced (default: skipped, left queued)
 
-    # Format results
-    result_lines, failed = _format_batch_results(results, host_project_root)
-    result_msg = "\n".join(result_lines)
-    if failed:
-        error_msg = "\n".join(f"  Error: {e}" for e in failed)
-        return False, f"Push completed with errors:\n{result_msg}\n\n{error_msg}"
-    return True, f"Files pushed successfully:\n{result_msg}"
+    Returns:
+        Tuple of (success, message)
+    """
+    return cmd_push(host_project_root, scope_name, specific_files=None, force=force)
 
 
 def cmd_pull(

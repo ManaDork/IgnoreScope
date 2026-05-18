@@ -5,7 +5,8 @@ Usage:
     python -m IgnoreScope create [--project PATH]
     python -m IgnoreScope list [--project PATH]
     python -m IgnoreScope status [--container NAME]
-    python -m IgnoreScope push [FILES...]
+    python -m IgnoreScope push [--force] [FILES...]
+    python -m IgnoreScope push-marked [--force]
     python -m IgnoreScope pull [FILES...]
     python -m IgnoreScope cp <source> [<dest>]
     python -m IgnoreScope remove [--yes]
@@ -20,6 +21,7 @@ from typing import Optional
 from .cli.interactive import (
     cmd_create_wrapper,
     cmd_push_wrapper,
+    cmd_push_marked_wrapper,
     cmd_pull_wrapper,
     cmd_remove_wrapper,
     cmd_install_git_wrapper,
@@ -80,6 +82,8 @@ def main() -> None:
             cmd_status_wrapper(host_project_root, sys.argv)
         elif command == 'push':
             cmd_push_wrapper(host_project_root, sys.argv)
+        elif command == 'push-marked':
+            cmd_push_marked_wrapper(host_project_root, sys.argv)
         elif command == 'pull':
             cmd_pull_wrapper(host_project_root, sys.argv)
         elif command == 'cp':

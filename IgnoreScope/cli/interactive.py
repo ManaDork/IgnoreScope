@@ -11,7 +11,7 @@ from typing import Set
 from ..core.config import ScopeDockerConfig, SiblingMount, list_containers
 from ..docker.names import build_docker_name
 from .commands import (
-    cmd_create, cmd_push, cmd_pull, cmd_remove,
+    cmd_create, cmd_push, cmd_push_marked, cmd_pull, cmd_remove,
     cmd_install_git, cmd_install_p4_mcp,
     cmd_list, cmd_status, cmd_cp,
     cmd_add_mount, cmd_convert,
@@ -297,13 +297,28 @@ def cmd_create_wrapper(host_project_root: Path) -> None:
 
 
 def cmd_push_wrapper(host_project_root: Path, args: list[str]) -> None:
-    """Wrapper for push command."""
+    """Wrapper for push command — marks files for push, then drains the queue."""
     scope_name = _parse_container_arg(args)
-    # Filter out --container args from files list
-    specific_files = [a for a in args[2:] if not a.startswith('--container') and a != scope_name]
-    specific_files = specific_files if specific_files else None
+    force = '--force' in args
+    positional = _collect_positional(args, bool_flags={'--force'})
+    specific_files = positional if positional else None
 
-    success, msg = cmd_push(host_project_root, scope_name, specific_files)
+    success, msg = cmd_push(host_project_root, scope_name, specific_files, force=force)
+
+    if success:
+        print(f"[OK] {msg}")
+        sys.exit(0)
+    else:
+        print(f"[ERROR] {msg}")
+        sys.exit(1)
+
+
+def cmd_push_marked_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for push-marked command — drains the marked-push queue."""
+    scope_name = _parse_container_arg(args)
+    force = '--force' in args
+
+    success, msg = cmd_push_marked(host_project_root, scope_name, force=force)
 
     if success:
         print(f"[OK] {msg}")
@@ -653,7 +668,8 @@ Usage:
     python -m IgnoreScope create [--project PATH]
     python -m IgnoreScope list [--project PATH]
     python -m IgnoreScope status [--project PATH] [--container NAME]
-    python -m IgnoreScope push [--project PATH] [--container NAME] [FILES...]
+    python -m IgnoreScope push [--project PATH] [--container NAME] [--force] [FILES...]
+    python -m IgnoreScope push-marked [--project PATH] [--container NAME] [--force]
     python -m IgnoreScope pull [--project PATH] [--container NAME] [FILES...]
     python -m IgnoreScope cp [--project PATH] [--container NAME] <source> [<dest>]
     python -m IgnoreScope remove [--project PATH] [--container NAME] [--yes]
@@ -676,7 +692,8 @@ Commands:
     create           Interactive CLI setup: mounts, masks, reveals
     list             List all containers for a project with status
     status           Show detailed status of a single container
-    push             Push tracked files to container (workflow — tracks files)
+    push             Mark files for push (config-first), then drain the queue (docker cp)
+    push-marked      Drain the marked-push queue without marking anything new
     pull             Pull tracked files from container (./Pulled/ or overwrite)
     cp               Copy file or directory to container (raw docker cp — no tracking)
     remove           Remove container and volumes
@@ -691,6 +708,7 @@ Commands:
 Options:
     --project PATH     Project root directory (default: current directory)
     --container NAME   Container name (default: 'default')
+    --force           push / push-marked: replace host-stale files (default: skip, leave queued)
     --yes             Skip confirmation prompts
     -y                Short form of --yes
     --distro TYPE     Distro type for install-git (auto, debian, alpine)
