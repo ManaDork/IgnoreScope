@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import stat
-import tempfile
 from pathlib import Path, PurePosixPath
 
 from ..core.config import (
@@ -27,6 +25,14 @@ from ..core.config import (
     load_config,
     save_config,
     get_container_dir,
+)
+from ..core.marked_push import add_marked_push
+from ..core.marked_staged import (
+    StagedEntry,
+    add_marked_staged,
+    cleanup_consumed_snapshots,
+    load_marked_staged,
+    snapshot_path_for,
 )
 from ..core.mount_spec_path import MountSpecPath
 # NOTE: core.hierarchy imported lazily inside functions to avoid circular import.
@@ -41,7 +47,6 @@ from .container_ops import (
     ensure_container_directories,
     exec_in_container,
     push_file_to_container,
-    push_directory_contents_to_container,
     pull_file_from_container,
     container_exists,
     volume_exists,
@@ -50,7 +55,7 @@ from .container_ops import (
 
 logger = logging.getLogger(__name__)
 from .compose import generate_compose_with_masks, generate_dockerfile
-from .file_ops import execute_push_batch
+from .marked_push_drain import drain_marked_push
 from .names import DockerNames, build_docker_name
 from ..utils.strings import sanitize_volume_name
 
@@ -227,9 +232,6 @@ def _detached_init(
     )
 
 
-_PRESERVE_STAGING_PREFIX = "ignorescope_preserve_"
-
-
 def _resolve_spec_container_path(
     ms: MountSpecPath, config: ScopeDockerConfig,
 ) -> str:
@@ -251,37 +253,56 @@ def _resolve_spec_container_path(
 def _preserve_detached_folders(
     docker_name: str,
     config: ScopeDockerConfig,
-    staging_root: Path,
-) -> tuple[OpResult, dict[int, tuple[str, Path]]]:
-    """Snapshot container contents of every ``preserve_on_update=True`` spec to host.
+    *,
+    host_project_root: Path,
+    scope_name: str,
+) -> OpResult:
+    """Snapshot container contents of every ``preserve_on_update=True`` spec into
+    the persistent staged queue.
 
     Runs BEFORE ``docker compose down`` so the running container's writable
     layer is still readable. For each spec with ``preserve_on_update=True``:
-      - If its container path exists, ``docker cp`` it to ``staging_root/spec_{idx}``.
-      - If missing (first-ever update, or content removed), skip with a note —
-        the corresponding restore is a no-op.
+
+      - Resolve the container path via ``_resolve_spec_container_path``.
+      - Pick a deterministic host snapshot dir via
+        ``snapshot_path_for(host_project_root, scope_name, cpath)`` —
+        ``.ignore_scope/<scope>/_snapshots/<sanitize(cpath)>/``.
+      - Wipe any stale snapshot at that path (``pull_file_from_container``'s
+        destination must not pre-exist).
+      - If the container path is missing (``test -e``), enqueue **nothing** for
+        this spec — the corresponding restore would be a no-op.
+      - Otherwise ``pull_file_from_container`` into the snapshot dir and
+        enqueue a ``StagedEntry(source=snap, target=cpath, is_dir=True)``
+        via ``add_marked_staged``.
+
+    Restore is no longer this function's responsibility — Phase 10a's existing
+    ``drain_marked_push`` call processes the staged queue and self-``mkdir``'s
+    each target.
 
     Fail-safe: any cp-out failure aborts the update, leaving the old container
     untouched. The caller must NOT proceed to compose-down on ``success=False``.
+    Already-enqueued staged entries from this attempt survive on disk (and in
+    ``marked_staged_scope.json``) so a manual ``push-marked`` can finish the
+    job after the operator resolves the underlying issue.
 
     Args:
         docker_name: Running Docker container name.
         config: ScopeDockerConfig (new target config; preserve_on_update flags
             determine which specs to snapshot).
-        staging_root: Pre-created host tmp directory. Per-spec snapshots land at
-            ``staging_root / f"spec_{idx}"`` (which must NOT pre-exist — docker
-            cp creates the destination).
+        host_project_root: Project root (for resolving the persistent
+            ``_snapshots/`` dir and queue file).
+        scope_name: Scope name.
 
     Returns:
-        Tuple of (OpResult, snapshots_map). ``snapshots_map`` is keyed by
-        mount_specs index and maps to ``(container_path, host_snapshot_dir)``.
-        On abort, snapshots_map is empty.
+        OpResult (``details`` carries per-spec notes).
     """
+    import shutil as _shutil  # local — only this helper needs it
+
     preserve_specs = [
         (i, ms) for i, ms in enumerate(config.mount_specs) if ms.preserve_on_update
     ]
     if not preserve_specs:
-        return OpResult(success=True, message="No preserve specs"), {}
+        return OpResult(success=True, message="No preserve specs")
 
     running_ok, running_msg = ensure_container_running(docker_name)
     if not running_ok:
@@ -289,22 +310,27 @@ def _preserve_detached_folders(
             success=False,
             message=f"Preserve aborted — container not running: {running_msg}",
             error=OpError.CONTAINER_NOT_RUNNING,
-        ), {}
+        )
 
-    snapshots: dict[int, tuple[str, Path]] = {}
     details: list[str] = []
+    n_preserved = 0
 
     for idx, ms in preserve_specs:
         cpath = _resolve_spec_container_path(ms, config)
-        snap_dir = staging_root / f"spec_{idx}"
+        snap_dir = snapshot_path_for(host_project_root, scope_name, cpath)
 
         # test -e: any filesystem entry (file, dir, symlink). Missing path is
-        # a normal first-time-preserve case; don't conflate with cp failure.
+        # a normal first-time-preserve case; nothing to enqueue.
         exists_ok, _, _ = exec_in_container(docker_name, ["test", "-e", cpath])
         if not exists_ok:
-            details.append(f"preserve: {cpath} not present in container (empty snapshot)")
-            snapshots[idx] = (cpath, snap_dir)
+            details.append(f"preserve: {cpath} not present in container (skipped)")
             continue
+
+        # pull_file_from_container's destination must not pre-exist — wipe any
+        # stale snapshot from a previous aborted preserve.
+        if snap_dir.exists():
+            _shutil.rmtree(snap_dir, ignore_errors=True)
+        snap_dir.parent.mkdir(parents=True, exist_ok=True)
 
         ok, msg = pull_file_from_container(docker_name, cpath, snap_dir)
         if not ok:
@@ -316,86 +342,20 @@ def _preserve_detached_folders(
                 ),
                 error=OpError.VALIDATION_FAILED,
                 details=details,
-            ), {}
-        snapshots[idx] = (cpath, snap_dir)
+            )
+
+        add_marked_staged(
+            host_project_root, scope_name,
+            [StagedEntry(source=snap_dir, target=cpath, is_dir=True)],
+        )
+        n_preserved += 1
         details.append(f"preserved: {cpath} -> {snap_dir}")
 
     return OpResult(
         success=True,
-        message=f"Preserved {len(snapshots)} folder(s)",
+        message=f"Preserved {n_preserved} folder(s)",
         details=details,
-    ), snapshots
-
-
-def _restore_detached_folders(
-    docker_name: str,
-    snapshots: dict[int, tuple[str, Path]],
-) -> list[str]:
-    """Push preserved snapshots back into the recreated container.
-
-    Runs AFTER ``_detached_init`` has mkdir'd each folder-seed path, so the
-    destination directories exist and ``docker cp src/. cname:dst`` merges the
-    snapshot contents in without nesting.
-
-    Non-fatal: each cp-back failure is logged as a warning detail, but the
-    outer update continues. Folders that fail to restore are left empty
-    (mkdir'd by ``_detached_init``); the user can re-push manually.
-
-    Args:
-        docker_name: Recreated container name (running).
-        snapshots: Output of ``_preserve_detached_folders`` — spec_idx →
-            (container_path, host_snapshot_dir). Empty snapshot dirs (for
-            specs whose source didn't exist on preserve) are skipped with a note.
-
-    Returns:
-        List of per-spec outcome notes for aggregation into the caller's
-        OpResult.details.
-    """
-    if not snapshots:
-        return []
-
-    running_ok, running_msg = ensure_container_running(docker_name)
-    if not running_ok:
-        return [
-            f"restore skipped — container not running: {running_msg} "
-            f"({len(snapshots)} snapshot(s) left on disk for inspection)"
-        ]
-
-    notes: list[str] = []
-    for idx, (cpath, snap_dir) in snapshots.items():
-        if not snap_dir.exists():
-            notes.append(
-                f"restore: mount_specs[{idx}] had empty snapshot for {cpath} (no-op)"
-            )
-            continue
-
-        ok, msg = push_directory_contents_to_container(
-            docker_name, snap_dir, cpath,
-        )
-        if ok:
-            notes.append(f"restored: {snap_dir} -> {cpath}")
-        else:
-            # Non-fatal: warn loudly but don't halt. The folder exists (mkdir'd
-            # by _detached_init), just empty. User can re-push.
-            msg_line = (
-                f"restore FAILED (non-fatal) for mount_specs[{idx}] "
-                f"at {cpath}: {msg}"
-            )
-            logger.warning(msg_line)
-            notes.append(msg_line)
-    return notes
-
-
-def _cleanup_staging(staging_root: Path | None) -> None:
-    """Remove the preserve staging directory. Swallow errors — cleanup must
-    never mask a real operation failure.
-    """
-    if staging_root is None:
-        return
-    try:
-        shutil.rmtree(staging_root, ignore_errors=True)
-    except Exception:
-        logger.debug("Failed to clean staging dir %s", staging_root, exc_info=True)
+    )
 
 
 def reconcile_extensions(
@@ -692,24 +652,25 @@ def execute_create(
             )
             # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
-    # Replay pushed_files into the fresh container FS. Mode-agnostic — runs on
-    # every create when pushed_files is non-empty. Uses the canonical
-    # single-file push path. Per-file failures surface in details; not fatal.
-    replay_details: list[str] = []
-    if config.pushed_files:
-        running_ok, _ = ensure_container_running(docker_name)
-        if running_ok:
-            replay_results = execute_push_batch(
-                list(config.pushed_files),
-                docker_name,
-                config.container_root,
-                config.host_container_root,
-            )
-            for host_path, res in replay_results.items():
-                if not res.success:
-                    replay_details.append(
-                        f"pushed_files replay failed: {host_path} — {res.message}"
-                    )
+    # The fresh container's writable layer is empty — nothing is confirmed in it
+    # yet, so clear pushed_files. The drain then re-adds only what it actually
+    # docker-cp's in (pre-container Pushes still queued). Create does NOT dump
+    # config.pushed_files into the queue: a true first create has none, and a
+    # recreate (remove + create) deliberately does not auto-re-push tracked files
+    # — the user exports the list first (Container → Export List of Pushed Files;
+    # see the Recreate warning) and re-pushes them through the full docker cp
+    # flow. Per-file cp failures stay queued; not fatal.
+    config.pushed_files.clear()
+    drain_result = drain_marked_push(
+        host_project_root, scope_name, config=config, on_stale="replace",
+    )
+    drain_details = list(drain_result.details or [])
+    if not drain_result.success:
+        drain_details.insert(0, f"marked-push drain incomplete: {drain_result.message}")
+
+    # Sweep on-disk snapshot dirs whose staged entries have been drained. No-op
+    # when there were none (the common Create path).
+    cleanup_consumed_snapshots(host_project_root, scope_name)
 
     # Reconcile extensions (non-fatal — deploy/verify after container is up)
     reconcile_result = None
@@ -718,7 +679,7 @@ def execute_create(
         if running_ok:
             reconcile_result = reconcile_extensions(docker_name, config)
 
-    # Save config
+    # Save config (now reflects whatever the drain promoted into pushed_files)
     config.host_project_root = host_project_root
     try:
         save_config(config)
@@ -728,15 +689,15 @@ def execute_create(
     result_msg = f"Container created: {docker_name}\nConfig saved to {output_dir / CONFIG_FILENAME}"
     if detached_details:
         result_msg += f"\n{len(detached_details)} detached init note(s)"
-    if replay_details:
-        result_msg += f"\n{len(replay_details)} pushed_files replay note(s)"
+    if drain_details:
+        result_msg += f"\n{len(drain_details)} marked-push drain note(s)"
     if reconcile_result and reconcile_result.details:
         result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
 
     return OpResult(
         success=True,
         message=result_msg,
-        details=detached_details + replay_details,
+        details=detached_details + drain_details,
     )
 
 
@@ -854,183 +815,194 @@ def execute_update(
 
     # ── Phase 4b: Preserve detached folders (before compose down) ──
     # For every spec with preserve_on_update=True, snapshot its current
-    # container contents to a host tmp staging dir so we can restore them
-    # into the freshly-mkdir'd folder after recreate. cp-out failure aborts
+    # container contents into the persistent staged queue
+    # (.ignore_scope/<scope>/_snapshots/<sanitize(target)>/ + an entry in
+    # marked_staged_scope.json). Restore is no longer a sibling helper here —
+    # Phase 10a's drain processes the staged queue. cp-out failure aborts
     # BEFORE compose down — we never take the container down without a safe
-    # snapshot (fail-safe).
-    has_preserve = any(ms.preserve_on_update for ms in config.mount_specs)
-    staging_root: Path | None = None
-    preserve_snapshots: dict[int, tuple[str, Path]] = {}
+    # snapshot (fail-safe). Already-enqueued staged entries persist on disk
+    # across an aborted preserve, so a manual `push-marked` can finish later.
     preserve_details: list[str] = []
+    has_preserve = any(ms.preserve_on_update for ms in config.mount_specs)
     if has_preserve:
-        try:
-            staging_root = Path(tempfile.mkdtemp(prefix=_PRESERVE_STAGING_PREFIX))
-        except OSError as e:
-            return OpResult(
-                success=False,
-                message=f"Preserve aborted — cannot create staging dir: {e}",
-                error=OpError.VALIDATION_FAILED,
-            )
-        preserve_result, preserve_snapshots = _preserve_detached_folders(
-            docker_name, config, staging_root,
+        preserve_result = _preserve_detached_folders(
+            docker_name, config,
+            host_project_root=host_project_root, scope_name=scope_name,
         )
         if not preserve_result.success:
-            _cleanup_staging(staging_root)
             return preserve_result
         preserve_details = preserve_result.details or []
+    n_preserved = len(load_marked_staged(host_project_root, scope_name))
+
+    # ── Phase 4c: Dump pushed_files into the marked-push queue ──
+    # The recreate wipes the writable layer, so every tracked file must be
+    # re-pushed via the drain (Phase 10a) — the single replay path. Only
+    # files that still exist on disk are re-queued: a tracked file whose host
+    # source is gone can't be re-pushed, so it drops out of tracking here
+    # (reported in details). Clearing pushed_files lets the drain rebuild it
+    # from confirmed cp's (a per-file cp failure then correctly leaves that
+    # path out of pushed_files and queued for the next drain).
+    dump_details: list[str] = []
+    if config.pushed_files:
+        existing = sorted(p for p in config.pushed_files if p.exists())
+        for gone in sorted(p for p in config.pushed_files if not p.exists()):
+            dump_details.append(f"dropped (host source gone, not re-queued): {gone}")
+        add_marked_push(host_project_root, scope_name, existing)
+        config.pushed_files.clear()
+
+    # ── Phase 5: docker compose down (retain volumes) ──
+    try:
+        success, msg, _ = remove_container_compose(
+            output_dir, remove_volumes=False, remove_images=False,
+        )
+        if not success:
+            return OpResult(success=False, message=f"Failed to stop container: {msg}")
+    except Exception as e:
+        return OpResult(success=False, message=f"Compose down error: {e}")
+
+    # ── Phase 6: Generate new compose + Dockerfile → write to disk ──
+    try:
+        compose_content = generate_compose_with_masks(
+            ordered_volumes=new_hierarchy.ordered_volumes,
+            mask_volume_names=new_hierarchy.mask_volume_names,
+            host_project_root=host_project_root,
+            docker_container_name=docker_name,
+            docker_image_name=image_name,
+            container_root=config.container_root,
+            project_name=host_project_root.name,
+            volume_entries=new_hierarchy.volume_entries,
+            volume_names=new_hierarchy.volume_names,
+            ports=config.ports if config.ports else None,
+        )
+    except Exception as e:
+        return OpResult(success=False, message=f"Failed to generate docker-compose.yml: {e}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    dockerfile_content = generate_dockerfile(
+        project_name=host_project_root.name,
+        container_root=config.container_root,
+    )
+    try:
+        (output_dir / "Dockerfile").write_text(dockerfile_content, encoding='utf-8')
+    except OSError as e:
+        return OpResult(success=False, message=f"Failed to write Dockerfile: {e}")
 
     try:
-        # ── Phase 5: docker compose down (retain volumes) ──
-        try:
-            success, msg, _ = remove_container_compose(
-                output_dir, remove_volumes=False, remove_images=False,
-            )
-            if not success:
-                return OpResult(success=False, message=f"Failed to stop container: {msg}")
-        except Exception as e:
-            return OpResult(success=False, message=f"Compose down error: {e}")
+        (output_dir / "docker-compose.yml").write_text(compose_content, encoding='utf-8')
+    except OSError as e:
+        return OpResult(success=False, message=f"Failed to write docker-compose.yml: {e}")
 
-        # ── Phase 6: Generate new compose + Dockerfile → write to disk ──
-        try:
-            compose_content = generate_compose_with_masks(
-                ordered_volumes=new_hierarchy.ordered_volumes,
-                mask_volume_names=new_hierarchy.mask_volume_names,
-                host_project_root=host_project_root,
-                docker_container_name=docker_name,
-                docker_image_name=image_name,
-                container_root=config.container_root,
-                project_name=host_project_root.name,
-                volume_entries=new_hierarchy.volume_entries,
-                volume_names=new_hierarchy.volume_names,
-                ports=config.ports if config.ports else None,
-            )
-        except Exception as e:
-            return OpResult(success=False, message=f"Failed to generate docker-compose.yml: {e}")
+    # ── Phase 7: Build image ──
+    try:
+        success, msg = build_image(output_dir, image_name)
+        if not success:
+            return OpResult(success=False, message=f"Failed to build image: {msg}")
+    except Exception as e:
+        return OpResult(success=False, message=f"Build error: {e}")
 
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        dockerfile_content = generate_dockerfile(
-            project_name=host_project_root.name,
-            container_root=config.container_root,
+    # ── Phase 8: docker compose up --no-start (reuses existing named volumes) ──
+    try:
+        success, msg, created_container = create_container_compose(
+            output_dir, expected_container_name=docker_name,
         )
-        try:
-            (output_dir / "Dockerfile").write_text(dockerfile_content, encoding='utf-8')
-        except OSError as e:
-            return OpResult(success=False, message=f"Failed to write Dockerfile: {e}")
+        if not success:
+            return OpResult(success=False, message=f"Failed to create container: {msg}")
+    except Exception as e:
+        return OpResult(success=False, message=f"Container creation error: {e}")
 
-        try:
-            (output_dir / "docker-compose.yml").write_text(compose_content, encoding='utf-8')
-        except OSError as e:
-            return OpResult(success=False, message=f"Failed to write docker-compose.yml: {e}")
+    # ── Phase 8a: Detached init (docker cp + mask rm) for any detached specs ──
+    # Preserve-on-update folder-seed specs are processed here too (their target
+    # gets mkdir'd); the staged-queue restore happens in Phase 10a's drain.
+    detached_details: list[str] = []
+    if any(ms.delivery == "detached" for ms in config.mount_specs):
+        init_result = _detached_init(docker_name, config)
+        if not init_result.success:
+            return init_result
+        detached_details = init_result.details or []
 
-        # ── Phase 7: Build image ──
-        try:
-            success, msg = build_image(output_dir, image_name)
-            if not success:
-                return OpResult(success=False, message=f"Failed to build image: {msg}")
-        except Exception as e:
-            return OpResult(success=False, message=f"Build error: {e}")
+    # ── Phase 9: Prune orphan volumes (non-fatal) ──
+    prune_details = []
+    for orphan in sorted(orphan_volumes):
+        if volume_exists(orphan):
+            ok, prune_msg = remove_volume(orphan)
+            if ok:
+                prune_details.append(f"Pruned orphan volume: {orphan}")
+            else:
+                prune_details.append(f"Failed to prune volume '{orphan}': {prune_msg}")
 
-        # ── Phase 8: docker compose up --no-start (reuses existing named volumes) ──
-        try:
-            success, msg, created_container = create_container_compose(
-                output_dir, expected_container_name=docker_name,
+    # ── Phase 10: Pre-create dirs in mask volumes ──
+    if new_hierarchy.revealed_parents:
+        running_ok, running_msg = ensure_container_running(docker_name)
+        if running_ok:
+            ensure_container_directories(
+                docker_name, list(new_hierarchy.revealed_parents),
             )
-            if not success:
-                return OpResult(success=False, message=f"Failed to create container: {msg}")
-        except Exception as e:
-            return OpResult(success=False, message=f"Container creation error: {e}")
+            # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
-        # ── Phase 8a: Detached init (docker cp + mask rm) for any detached specs ──
-        detached_details: list[str] = []
-        if any(ms.delivery == "detached" for ms in config.mount_specs):
-            init_result = _detached_init(docker_name, config)
-            if not init_result.success:
-                return init_result
-            detached_details = init_result.details or []
+    # ── Phase 10a: Drain marked-push + marked-staged into the recreated container ──
+    # Re-pushes the files dumped in Phase 4c (host queue) plus any pre-container
+    # Pushes still queued; restores any Phase-4b preserved snapshots (staged
+    # queue). Per-entry cp failures stay queued; surfaced in details, not fatal.
+    drain_result = drain_marked_push(
+        host_project_root, scope_name, config=config, on_stale="replace",
+    )
+    drain_details = list(drain_result.details or [])
+    if not drain_result.success:
+        drain_details.insert(0, f"marked-push drain incomplete: {drain_result.message}")
 
-        # ── Phase 8b: Restore preserved folders (non-fatal per-spec) ──
-        # Runs after _detached_init has mkdir'd the destination folders.
-        restore_details: list[str] = []
-        if preserve_snapshots:
-            restore_details = _restore_detached_folders(docker_name, preserve_snapshots)
+    # Sweep on-disk snapshot dirs whose staged entries have been drained.
+    # A leftover staged entry (drain didn't finish) keeps both its snapshot dir
+    # and its queue entry so a manual `push-marked` can retry.
+    cleanup_consumed_snapshots(host_project_root, scope_name)
+    leftover_staged = load_marked_staged(host_project_root, scope_name)
 
-        # ── Phase 9: Prune orphan volumes (non-fatal) ──
-        prune_details = []
-        for orphan in sorted(orphan_volumes):
-            if volume_exists(orphan):
-                ok, prune_msg = remove_volume(orphan)
-                if ok:
-                    prune_details.append(f"Pruned orphan volume: {orphan}")
-                else:
-                    prune_details.append(f"Failed to prune volume '{orphan}': {prune_msg}")
+    # ── Phase 11: Reconcile extensions (non-fatal) ──
+    reconcile_result = None
+    if config.extensions:
+        running_ok, _ = ensure_container_running(docker_name)
+        if running_ok:
+            reconcile_result = reconcile_extensions(docker_name, config)
 
-        # ── Phase 10: Pre-create dirs in mask volumes ──
-        if new_hierarchy.revealed_parents:
-            running_ok, running_msg = ensure_container_running(docker_name)
-            if running_ok:
-                ensure_container_directories(
-                    docker_name, list(new_hierarchy.revealed_parents),
-                )
-                # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
+    # ── Phase 12: Save config ──
+    config.host_project_root = host_project_root
+    try:
+        save_config(config)
+    except Exception as e:
+        return OpResult(success=False, message=f"Failed to save config: {e}")
 
-        # ── Phase 10a: Replay pushed_files into recreated container ──
-        # Mode-agnostic — runs on every update when pushed_files is non-empty.
-        replay_details: list[str] = []
-        if config.pushed_files:
-            running_ok, _ = ensure_container_running(docker_name)
-            if running_ok:
-                replay_results = execute_push_batch(
-                    list(config.pushed_files),
-                    docker_name,
-                    config.container_root,
-                    config.host_container_root,
-                )
-                for host_path, res in replay_results.items():
-                    if not res.success:
-                        replay_details.append(
-                            f"pushed_files replay failed: {host_path} — {res.message}"
-                        )
-
-        # ── Phase 11: Reconcile extensions (non-fatal) ──
-        reconcile_result = None
-        if config.extensions:
-            running_ok, _ = ensure_container_running(docker_name)
-            if running_ok:
-                reconcile_result = reconcile_extensions(docker_name, config)
-
-        # ── Phase 12: Save config ──
-        config.host_project_root = host_project_root
-        try:
-            save_config(config)
-        except Exception as e:
-            return OpResult(success=False, message=f"Failed to save config: {e}")
-
+    update_success = not leftover_staged
+    if update_success:
         result_msg = f"Container updated: {docker_name}"
-        if orphan_volumes:
-            result_msg += f"\nPruned {len(orphan_volumes)} orphan volume(s)"
-        if detached_details:
-            result_msg += f"\n{len(detached_details)} detached init note(s)"
-        if preserve_snapshots:
-            result_msg += f"\nPreserved {len(preserve_snapshots)} folder(s)"
-        if replay_details:
-            result_msg += f"\n{len(replay_details)} pushed_files replay note(s)"
-        if reconcile_result and reconcile_result.details:
-            result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
-        return OpResult(
-            success=True,
-            message=result_msg,
-            details=(
-                prune_details
-                + preserve_details
-                + detached_details
-                + restore_details
-                + replay_details
-                + (reconcile_result.details if reconcile_result else [])
-            ),
+    else:
+        result_msg = (
+            f"Container updated but {len(leftover_staged)} preserved folder(s) "
+            f"failed to restore — queued; retry with `push-marked`"
         )
-    finally:
-        _cleanup_staging(staging_root)
+    if orphan_volumes:
+        result_msg += f"\nPruned {len(orphan_volumes)} orphan volume(s)"
+    if dump_details:
+        result_msg += f"\n{len(dump_details)} tracked file(s) dropped (host source gone)"
+    if detached_details:
+        result_msg += f"\n{len(detached_details)} detached init note(s)"
+    if n_preserved:
+        result_msg += f"\nPreserved {n_preserved} folder(s)"
+    if drain_details:
+        result_msg += f"\n{len(drain_details)} marked-push drain note(s)"
+    if reconcile_result and reconcile_result.details:
+        result_msg += f"\nReconciled {len(reconcile_result.details)} extension(s)"
+    return OpResult(
+        success=update_success,
+        message=result_msg,
+        details=(
+            dump_details
+            + prune_details
+            + preserve_details
+            + detached_details
+            + drain_details
+            + (reconcile_result.details if reconcile_result else [])
+        ),
+    )
 
 
 def preflight_remove_container(

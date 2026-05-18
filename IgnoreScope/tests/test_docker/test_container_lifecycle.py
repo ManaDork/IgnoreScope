@@ -273,6 +273,46 @@ class TestExecuteUpdate:
         assert result.success is True
         assert any("Failed to prune" in d for d in result.details)
 
+    def test_leftover_staged_flips_success_to_false(self, tmp_path):
+        """A staged entry that the Phase-10a drain doesn't clear → success=False.
+
+        Models an interrupted Update: the preserve flow enqueued a snapshot but
+        the drain (mocked here) failed to restore it. The Update completes
+        structurally, but the user must run `push-marked` to finish.
+        """
+        from IgnoreScope.core.marked_staged import (
+            StagedEntry,
+            add_marked_staged,
+            snapshot_path_for,
+        )
+        from IgnoreScope.core.op_result import OpResult
+
+        patches = self._patch_all(old_masks=["A"], new_masks=["A"])
+        # Drain reports success but doesn't dequeue the staged entry — the
+        # leftover is what flips Update's verdict.
+        patches["drain_marked_push"] = patch(
+            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            return_value=OpResult(success=True, message="drain noop", details=[]),
+        )
+
+        # Pre-seed a staged entry (and its on-disk snapshot) so the post-drain
+        # `load_marked_staged` call returns it. Scope name must match the
+        # config built by `_make_config` (default: "test-container").
+        scope = "test-container"
+        snap = snapshot_path_for(tmp_path, scope, "/workspace/keep")
+        snap.mkdir(parents=True, exist_ok=True)
+        (snap / "data.txt").write_text("preserved", encoding="utf-8")
+        add_marked_staged(
+            tmp_path, scope,
+            [StagedEntry(source=snap, target="/workspace/keep", is_dir=True)],
+        )
+
+        result, _ = self._run_update(patches, tmp_path)
+
+        assert result.success is False
+        assert "preserved folder(s) failed to restore" in result.message
+        assert "push-marked" in result.message
+
 
 # =============================================================================
 # Compose: L_volume tier declaration
@@ -522,18 +562,19 @@ class TestReconcileExtensions:
 
 
 # =============================================================================
-# pushed_files replay — mode-agnostic
+# Marked-push drain on create — drains the queue; does NOT dump pushed_files
 # =============================================================================
 
 
-class TestPushedFilesReplay:
-    """pushed_files replay runs on every create/update when non-empty.
-
-    Delivery-agnostic: bind-only, detached-only, and mixed scopes all replay.
+class TestMarkedPushDrainOnCreate:
+    """execute_create runs drain_marked_push (the single replay path) to deliver
+    any pre-container Pushes. It does NOT dump config.pushed_files into the queue
+    — a clean first create has none; a recreate uses the manual export escape
+    hatch. Per-file cp failures land in details, not fatal. Delivery-agnostic.
     """
 
     def _patches_for_create(self, tmp_path: Path):
-        """Patches sufficient for execute_create to reach the replay block."""
+        """Patches sufficient for execute_create to reach the dump+drain block."""
         from IgnoreScope.core.hierarchy import ContainerHierarchy
 
         h = ContainerHierarchy()
@@ -593,28 +634,35 @@ class TestPushedFilesReplay:
                 p.stop()
         return result, mocks
 
-    def test_empty_pushed_files_no_batch_call(self, tmp_path: Path):
-        """No pushed_files → execute_push_batch not called."""
+    def test_empty_pushed_files_drain_runs(self, tmp_path: Path):
+        """No pushed_files → the drain is still invoked (it'll find an empty queue)."""
         config = _make_config(tmp_path=tmp_path)
         config.pushed_files = set()
 
         patches = self._patches_for_create(tmp_path)
         with patch(
-            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
-        ) as mock_batch:
+            "IgnoreScope.docker.container_lifecycle.add_marked_push",
+        ) as mock_add, patch(
+            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            return_value=OpResult(success=True, message="No files queued for push"),
+        ) as mock_drain:
             result, _ = self._run_create(patches, tmp_path, config)
 
         assert result.success is True
-        mock_batch.assert_not_called()
+        mock_add.assert_not_called()  # create never dumps
+        mock_drain.assert_called_once()
+        assert mock_drain.call_args.kwargs["config"] is config
+        assert mock_drain.call_args.kwargs["on_stale"] == "replace"
 
-    def test_bind_delivery_replay_runs(self, tmp_path: Path):
-        """All-bind scope with pushed_files → replay runs (mode-agnostic)."""
+    def test_bind_delivery_clears_pushed_files_and_drains(self, tmp_path: Path):
+        """Create CLEARS config.pushed_files (fresh container, nothing confirmed)
+        and does NOT dump them into the queue — the drain re-adds only what it
+        actually cp's in (here: nothing, since the queue is empty)."""
         from IgnoreScope.core.mount_spec_path import MountSpecPath
 
         src = tmp_path / "src"
         src.mkdir()
         pushed = tmp_path / "src" / "config.json"
-        pushed.parent.mkdir(parents=True, exist_ok=True)
         pushed.write_text("{}")
 
         config = _make_config(tmp_path=tmp_path)
@@ -623,22 +671,27 @@ class TestPushedFilesReplay:
 
         patches = self._patches_for_create(tmp_path)
         with patch(
-            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
-            return_value={pushed: OpResult(success=True, message="pushed")},
-        ) as mock_batch:
+            "IgnoreScope.docker.container_lifecycle.add_marked_push",
+        ) as mock_add, patch(
+            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            return_value=OpResult(success=True, message="No files queued for push"),
+        ) as mock_drain:
             result, _ = self._run_create(patches, tmp_path, config)
 
         assert result.success is True
-        mock_batch.assert_called_once()
+        mock_add.assert_not_called()           # create never dumps
+        assert config.pushed_files == set()    # cleared; mocked drain re-adds nothing
+        mock_drain.assert_called_once()
+        assert mock_drain.call_args.kwargs["config"] is config
+        assert mock_drain.call_args.kwargs["on_stale"] == "replace"
 
-    def test_detached_delivery_replay_runs(self, tmp_path: Path):
-        """Detached scope with pushed_files → replay runs after detached_init."""
+    def test_detached_delivery_drains_after_detached_init(self, tmp_path: Path):
+        """Detached scope → the drain runs after _detached_init; still no dump."""
         from IgnoreScope.core.mount_spec_path import MountSpecPath
 
         src = tmp_path / "src"
         src.mkdir()
         pushed = tmp_path / "src" / "secret.env"
-        pushed.parent.mkdir(parents=True, exist_ok=True)
         pushed.write_text("X=1")
 
         config = _make_config(tmp_path=tmp_path)
@@ -654,29 +707,33 @@ class TestPushedFilesReplay:
             "IgnoreScope.docker.container_lifecycle._detached_init",
             return_value=OpResult(success=True, message="ok", details=[]),
         ), patch(
-            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
-            return_value={pushed: OpResult(success=True, message="pushed")},
-        ) as mock_batch:
+            "IgnoreScope.docker.container_lifecycle.add_marked_push",
+        ) as mock_add, patch(
+            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            return_value=OpResult(success=True, message="No files queued for push"),
+        ) as mock_drain:
             result, _ = self._run_create(patches, tmp_path, config)
 
         assert result.success is True
-        mock_batch.assert_called_once()
+        mock_add.assert_not_called()
+        mock_drain.assert_called_once()
 
-    def test_replay_failure_in_details(self, tmp_path: Path):
-        """Per-file replay failure → aggregated into details, not fatal."""
-        src = tmp_path / "src"
-        src.mkdir()
-        pushed = tmp_path / "src" / "missing.txt"
-
+    def test_drain_incomplete_in_details(self, tmp_path: Path):
+        """A non-fatal drain failure → its message + notes land in result.details."""
         config = _make_config(tmp_path=tmp_path)
-        config.pushed_files = {pushed}
+        config.pushed_files = set()
 
         patches = self._patches_for_create(tmp_path)
         with patch(
-            "IgnoreScope.docker.container_lifecycle.execute_push_batch",
-            return_value={pushed: OpResult(success=False, message="not found")},
+            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            return_value=OpResult(
+                success=False,
+                message="Container could not be started: boom",
+                details=["cp failed, left queued: missing.txt — denied"],
+            ),
         ):
             result, _ = self._run_create(patches, tmp_path, config)
 
         assert result.success is True
-        assert any("pushed_files replay failed" in d for d in result.details)
+        assert any("marked-push drain incomplete" in d for d in result.details)
+        assert any("cp failed" in d for d in result.details)

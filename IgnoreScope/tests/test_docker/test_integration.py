@@ -362,12 +362,16 @@ class TestFileOperations:
         docker_name = build_docker_name(temp_project, test_container_name)
 
         try:
-            # Create container
+            # Create container. NOTE: create no longer auto-pushes pushed_files —
+            # it clears them (the fresh writable layer holds nothing). The file
+            # must be re-pushed explicitly through the marked-push drain.
             success, msg = cmd_create(temp_project, config)
             assert success, f"Create failed: {msg}"
 
-            # Push file (force=True because file is already in pushed_files config)
-            success, msg = cmd_push(temp_project, test_container_name, force=True)
+            # Push the file (enqueue + drain → docker cp → re-tracked in pushed_files)
+            success, msg = cmd_push(
+                temp_project, test_container_name, ["config/settings.json"], force=True,
+            )
             assert success, f"Push failed: {msg}"
 
             # Modify file in container
