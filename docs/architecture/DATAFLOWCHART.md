@@ -222,7 +222,7 @@ File operations use a **preflight/execute** two-phase pattern:
 Types defined in `core/op_result.py`: `OpError` (blocking), `OpWarning` (confirmable), `OpResult` (standardized return).
 
 ```
-SINGLE FILE FLOW:
+SINGLE FILE FLOW (Push — the marked-push inversion):
 
 User RMB clicks file in ScopeView
     │
@@ -230,67 +230,92 @@ User RMB clicks file in ScopeView
 Context menu: Push / Update / Pull / Remove
     │
     ▼
-ScopeView emits signal (pushRequested, pullRequested, etc.)
+ScopeView emits pushToggleRequested → app._on_push_toggle
     │
     ▼
 FileOperationsHandler.on_push(path)
     │
-    ├── GUI: _get_container_context()         ← resolve names from app state
+    ├── CORE: add_marked_push(host_project_root, scope, [path])   ← config-first: enqueue NOW, any container state
     │
-    ├── CORE: preflight_push(path, ...)       ← validates ALL preconditions
-    │     │
-    │     ├── Errors? → GUI shows error dialog, STOP
-    │     └── Warnings? → GUI shows confirm dialog per warning
-    │           └── User declines? → STOP
+    ├── GUI: get_container_info(docker_name)
+    │     ├── missing / stopped? → statusBar "Marked {name} for push — will be pushed on next
+    │     │                          Create/Update Container (or run push-marked)" — STOP (no docker cp)
+    │     └── running? → drain now ↓
     │
-    ├── CORE: execute_push(path, ..., force=True)
-    │     │
-    │     ├── Resolves: container_path via resolve_container_path()
-    │     ├── Ensures: parent dirs via ensure_container_directories()
-    │     ├── Executes: docker cp host_path container:container_path
-    │     └── Returns: OpResult (success/failure + message)
+    ├── GUI: drain_marked_push_now()
+    │     ├── QProgressDialog (progress wired to the drain's progress(i, total) callback)
+    │     ├── CORE: drain_marked_push(host_project_root, scope, on_stale=_confirm_stale, progress=…)
+    │     │         (config=None here → the drain loads + saves scope_docker_desktop.json itself)
+    │     │     ├── per queued file: mkdir -p parent + docker cp → add to pushed_files, dequeue (on success)
+    │     │     │                     cp failure → noted, left queued
+    │     │     └── host file ≥ container copy (stale)? → _confirm_stale dialog:
+    │     │           [Replace] cp anyway · [Skip] leave queued · [Skip and Unmark] drop from queue AND pushed_files
+    │     └── GUI: ConfigManager.reload_current_scope()   ← resync the tree (drain saved config out-of-band)
     │
-    ├── GUI: MountDataTree.add_pushed(path)   ← state refresh (GUI owns tree instances)
-    ├── GUI: ConfigManager.save_config()      ← persist
-    └── GUI: statusBar message                ← UX feedback
+    └── GUI: statusBar "Pushed {name}" | "Unmarked {name} — host older" | QMessageBox.warning("Push Not Completed", …)
+
+(on_update / on_pull / on_remove unchanged — direct execute_push / execute_pull / execute_remove on a tracked file.)
 
 
-BATCH FILE FLOW (multi-select or folder):
+BATCH FILE FLOW (multi-select or folder) — unchanged wiring:
 
-User RMB clicks selection/folder in ScopeView
+scope_view._batch_toggle ─(begin_batch)→ pushToggleRequested (one per path)
+                          → app._on_push_toggle → FileOperationsHandler.on_push(path)  ─(end_batch)→
+
+    Each path runs the single-file flow above — N enqueue+drain cycles; the running-case drain
+    processes whatever is queued, so the net result equals one big batch. begin_batch/end_batch
+    still wraps the toggles (matters only once a pending visual state lands).
+
+
+SCOPE-LOAD PROMPT (non-empty queue on project open / scope switch):
+
+ConfigManager.switch_scope / open_project   (after refresh; busy dialog closed)
     │
     ▼
-FileOperationsHandler.on_push_batch(paths)
-    │
-    ├── CORE: preflight_push_batch(paths, ...)   ← validate ALL files upfront
-    │     │
-    │     └── Returns: BatchFileResult
-    │           ├── errors: {path: OpResult}      ← blocked files (show summary)
-    │           ├── warnings: {path: OpResult}    ← confirmable files
-    │           └── clean: [path]                 ← ready to execute
-    │
-    ├── GUI: show error summary (if any)
-    ├── GUI: show warning summary + confirm (if any)
-    │
-    ├── CORE: execute_push_batch(confirmed_paths, ..., force=True)
-    │     └── Returns: {path: OpResult}           ← per-file results
-    │
-    ├── GUI: batch tree update + single save_config()
-    └── GUI: status summary
+ConfigManager._post_scope_load()
+    ├── load_marked_push(host_project_root, scope) empty? → STOP
+    └── QMessageBox "N file(s) marked for push — push now?"   [Now] / [Delay]
+          ├── [Now]   → file_ops_handler.drain_marked_push_now()
+          └── [Delay] → statusBar "N file(s) still queued — reload to be re-prompted, or use Push / push-marked"
 
 
 CLI EQUIVALENT:
 
 cmd_push(host_project_root, scope_name, files, force=False)
     │
-    ├── CORE: preflight_push_batch(paths, ...)
-    │     ├── Errors → print + exit
-    │     └── Warnings + no --force → print + "Use --force to override"
-    │
-    ├── CORE: execute_push_batch(paths, ..., force=True)
-    ├── Update config: pushed_files.add() + save_config()
-    └── Print results
+    ├── with files: validate each (exists + under host_container_root) → add_marked_push(...)
+    │               (any invalid path → print errors + exit, nothing enqueued)
+    ├── CORE: drain_marked_push(host_project_root, scope, on_stale=("replace" if force else "skip"))
+    └── Print the drain summary + per-file notes
+
+cmd_push_marked(host_project_root, scope_name, force=False)   ← cmd_push with no files: drain the queue only
 ```
+
+### Marked-push dialogs (push / dump / drain phases)
+
+Canonical catalog of every prompt/notification the marked-push feature surfaces, by phase.
+"—" = no dialog (status-bar message only). CLI has **no** dialogs — `push` / `push-marked` print
+the drain summary + per-file notes to stdout; `cmd_create` prints `OpResult.details` only on failure.
+
+| Phase / trigger | Dialog (code site) | Buttons → action |
+|---|---|---|
+| **Scope opened / switched** — marked-push or marked-staged queue non-empty | `QMessageBox` (Question), title "Files Marked for Push", text "{N} file(s) marked for push — push now?" (N = host + staged) — `ConfigManager._post_scope_load` | **[Now]** → `drain_marked_push_now()` (progress dialog + per-file stale prompts; drains both queues) · **[Delay]** → leave queued; status "{N} still queued — reload the project to be re-prompted, or use Push / push-marked" |
+| **Create Container** | — (no pre-confirm; a fresh create risks nothing) — `ContainerOperations.create_container` | n/a |
+| **Recreate Container** | `QMessageBox.question`, title "Recreate Container": "…All data in the container will be lost. Files marked as pushed will be re-pushed from the host after recreate (a snapshot of the list is saved to `.ignore_scope/<scope>/pushed_files_<timestamp>.txt`); in-container edits to those files will be lost. Continue?" — `ContainerOperations.recreate_container` | **[Yes]** → auto-dumps `pushed_files` to `.ignore_scope/<scope>/pushed_files_<ts>.txt`, `add_marked_push(config.pushed_files)`, then `execute_remove_container -v` + `execute_create` (clears `pushed_files`; drains the re-queued host entries so successes re-promote) · **[No]** → cancel |
+| **Update Container** | — (no pre-confirm; `execute_update` keeps named volumes and re-pushes the still-on-disk `pushed_files`; a tracked file whose host source is gone is dropped and listed in the success box) — `ContainerOperations.update_container` | n/a |
+| **During a drain** — host file mtime ≥ container copy (host stale); fires per file on the manual-Push / scope-load `[Now]` drains only (`drain_marked_push(on_stale=…)`; lifecycle uses `on_stale="replace"` and a fresh container never trips it) | `QMessageBox` (Question), title "Stale Host File", text "{name} is older than the container's copy.", informative "Replace it, skip this push, or skip and unmark the file?" — `FileOperationsHandler._confirm_stale` | **[Replace]** → `docker cp` anyway → drained, tracked · **[Skip]** (default) → leave queued (re-prompts next drain) · **[Skip and Unmark]** → remove from queue AND from `pushed_files` (stops being asked) |
+| **During a drain** — progress | `QProgressDialog` "Pushing marked files…", application-modal, no Cancel, 400 ms before it shows — `FileOperationsHandler.drain_marked_push_now` | n/a (auto-closes; quick pushes never flash) |
+| **After a manual GUI Push** — file still queued (cp failed, or `[Skip]` on a stale file) | `QMessageBox.warning`, title "Push Not Completed": "{name} is still queued for push.\n\n{drain details/message}" — `FileOperationsHandler.on_push` | **[OK]** |
+| **After a manual GUI Push** — drained OK / unmarked / no container | — status bar: "Pushed {name}" · "Unmarked {name} — host file is older than the container's copy" · "Marked {name} for push — will be pushed on next Create/Update Container (or run push-marked)" | n/a |
+| **After Create / Update / Recreate** | success: `QMessageBox.information`, title "Container Created/Updated/Recreated", body = orchestrator message (incl. "{N} marked-push drain note(s)" / "{N} tracked file(s) dropped (host source gone)"). failure: `QMessageBox` (Critical) "Operation Failed" — first line as text, rest as `setDetailedText`. — `ContainerOperations._on_operation_finished` | **[OK]** — `ContainerWorker` forwards only `(success, message)`, so the per-file drain `details` list is summarized as a count, not shown line-by-line |
+| **Container → Save Pushed-Files List** | `QFileDialog.getSaveFileName` "Save Pushed-Files List" (default `{scope}_pushed_files.txt`); `QMessageBox.information` "No Pushed Files" if the scope has none; `QMessageBox.critical` "Config Error" / "Save Failed" on errors; status bar on success — `ContainerOperations.save_pushed_files_list(auto=False)`. Recreate uses `save_pushed_files_list(auto=True)` (no dialog) and writes a timestamped snapshot under `.ignore_scope/<scope>/`. | save-dialog OK/Cancel; info/error boxes [OK] |
+
+**Open / proposed enhancements** (not yet implemented):
+- Recreate dialog: now auto-dumps + re-queues automatically (Phase 3 of the marked-push consolidation). The historic **[Export & Continue]** proposal is obsolete.
+- Stale-host prompt: add **[Replace All]** / **[Skip All]** so a batch of stale files isn't prompted N times (drain caches the answer).
+- "Push Not Completed" warning: add **[Retry]** → re-run `drain_marked_push_now()`.
+- Lifecycle success box: surface the drain `details` list (have `ContainerWorker` forward it; show via `setDetailedText`) instead of only the count.
+- Scope-open prompt: optional **"Don't ask again this session"** checkbox.
 
 ### Scope Config Tree RMB — Stencil Gesture Flow
 

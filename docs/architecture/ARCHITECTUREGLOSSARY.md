@@ -63,15 +63,15 @@ Revealed is for **folders**. Pushed is for **files**. Both make content visible 
 
 A **workflow operation** where host files are temporarily made available inside the container via `docker cp`. Pushed files may target any path under `host_container_root`. Files within masked areas reside in the mask volume. Files outside masked areas receive `NOT_IN_MASKED_AREA` warning but are supported — the file-level counterpart to folder-level revealed.
 
-Files may be **modified** during push via `FileFilter` (e.g., secret redaction, token substitution). Pushed files are explicitly tracked in `config.pushed_files` because the push operation is intentional and repeatable (push/pull/update cycle).
+Files may be **modified** during push via `FileFilter` (e.g., secret redaction, token substitution). `config.pushed_files` means **"confirmed present in the container"** — an entry is added only after a successful `docker cp`. The *intent* to push (before that cp lands) lives in the transient **marked_push** queue (see below); a path moves marked_push → pushed_files when the drain confirms it.
 
 **JSON Field:** `pushed_files[]`
 **NodeState Flag:** `pushed: bool`
 **UI Column:** "Pushed" — defined by TreeDisplayConfig subclass
   - LocalHostDisplayConfig: files only, symbol_type="pushed_status"
   - ScopeDisplayConfig: files and folders, symbol_type="pushed_status"
-**UI Actions:** Push toggle via pushToggleRequested signal (async docker cp). Actions defined by DisplayConfig `file_actions` sets, not view-hardcoded.
-**Operations:** Push, Pull, Update (re-push), Remove
+**UI Actions:** Push toggle via pushToggleRequested signal → `on_push` enqueues into marked_push (config-first), then drains (`docker cp`) when the container is running. Actions defined by DisplayConfig `file_actions` sets, not view-hardcoded.
+**Operations:** Push (enqueue + drain), Pull, Update (re-push), Remove
 
 Parent directories inside mask volumes are created via `mkdir -p` before push (from revealed_parents). Parent directories outside masks appear in Container Scope via `has_pushed_descendant` ancestry — `_collect_all_paths()` walks ancestors up to `host_project_root`, Stage 3 sets `has_pushed_descendant=True`, and the display filter proxy passes hidden nodes with pushed descendants.
 
@@ -82,6 +82,35 @@ Pushed is for **files**. Revealed is for **folders**.
 **Legacy name:** v1.x configs used `exception_files[]`. Migrated to `pushed_files` on load.
 
 **Domains:** Config, Computation (revealed_parents), Container Ops (docker cp, mkdir -p, rm), Orchestration (push/pull commands), Presentation (ScopeView status)
+
+---
+
+### marked_push
+
+The **transient pending-push queue** — host paths the user has asked to push but which are not yet confirmed in the container. "Push" enqueues here immediately and unconditionally (config-first, like every other gesture), regardless of container state. A separate **drain** routine performs the actual `docker cp` and, on success, promotes the path into `pushed_files` and removes it from the queue. An emptied queue file is deleted.
+
+**Two queue files, one drain engine.** The marked-push queue split into two sibling files behind a single `drain_marked_push` engine (the lone `docker cp ... → cname:...` code path):
+
+- **Host queue** — `{host_project_root}/.ignore_scope/{scope_name}/marked_push_scope.json` — live host files awaiting first delivery. Schema: `{"marked_push": ["rel/posix/path", ...]}` (relative-POSIX, same convention as `pushed_files` serialization). Drained successes are **promoted** into `config.pushed_files`. Staleness-checked. Module: `core/marked_push.py` (`marked_push_path`, `load_marked_push`, `add_marked_push`, `remove_marked_push`, `clear_marked_push`).
+- **Staged queue** — `{host_project_root}/.ignore_scope/{scope_name}/marked_staged_scope.json` — host snapshots of container paths produced by the preserve flow (see `_preserve_detached_folders`, below). Schema: `{"staged": [{"source":"rel/posix","target":"/container/abs","is_dir":bool}, ...]}`. `source` is anchored at `host_project_root` and points under `.ignore_scope/<scope>/_snapshots/<sanitize_volume_name(target)>/`; `target` is the container-absolute path the entry restores into; `is_dir` picks the cp shape (`docker cp src/. cname:target` for dirs, `docker cp src cname:target` for files). Drained successes do **not** touch `pushed_files`. No staleness check. Module: `core/marked_staged.py` (`StagedEntry`, `marked_staged_path`, `load_marked_staged`, `add_marked_staged`, `remove_marked_staged`, `clear_marked_staged`, `snapshots_dir`, `snapshot_path_for`, `cleanup_consumed_snapshots`).
+
+Both files are deleted when emptied (same invariant). Neither is part of `scope_docker_desktop.json`.
+
+**Persistent staged snapshots.** The `_snapshots/<sanitize(target)>/` dirs live alongside the queue file under the scope dir, *not* in a host temporary directory. A snapshot dir is removed only when its staged entry has been drained — a clean Update/Create leaves no `_snapshots/`; a failed one keeps the dirs *and* the staged entries so the next drain reattempts from the same snapshots. `cleanup_consumed_snapshots` runs after each drain (in `execute_create` and `execute_update`) to sweep dirs whose entries are gone.
+
+**Drain:** `docker/marked_push_drain.py` — `drain_marked_push(host_project_root, scope_name, *, config=None, on_stale=None, progress=None)`. Reads **both** queues. Container state: missing → no-op success, both queues intact (N = host + staged count reported); stopped → start it; running → proceed. **Host queue first** (today's behavior — host file missing on disk → noted, left queued; container copy newer-or-equal to host → `on_stale` resolves `"replace"` / `"skip"` / `"skip_and_unmark"`; otherwise `mkdir -p` parent + `docker cp` → success promotes into `pushed_files` + dequeue; failure noted, left queued). **Staged queue second** (`source` missing on disk → drop entry, noted; `is_dir=True` → `ensure_container_directories([target])` + `push_directory_contents_to_container` (`docker cp src/. cname:target`); `is_dir=False` → `ensure_container_directories([parent(target)])` + `push_file_to_container`; success → dequeue, `pushed_files` UNTOUCHED; failure noted, left queued). The single replay path — manual Push (GUI), the `push-marked` CLI command, the GUI scope-load prompt, and Create/Update/Recreate lifecycle all funnel through it.
+
+**Lifecycle replay:** every (re)build clears `config.pushed_files` first — a fresh/destroyed writable layer holds nothing, so every entry must re-earn tracking by going back through the `docker cp` drain. `execute_update` *dumps* the still-existing-on-disk subset of `config.pushed_files` into the **host** queue (a tracked file whose host source is gone can't be re-pushed, so it is **not** re-queued — it drops out of tracking, reported in details), *clears* `pushed_files`, recreates the container (`compose down` keeps named volumes but destroys the writable layer), then `drain_marked_push(config=config, on_stale="replace")` runs Phase 10a — the drain rebuilds `pushed_files` from confirmed cp's of host entries and restores any preserve snapshots from staged entries. After the drain, `cleanup_consumed_snapshots` sweeps `_snapshots/`; if `load_marked_staged` is still non-empty, `OpResult.success` flips to `False` with a "queued; retry with `push-marked`" message. `execute_create` *clears* `pushed_files` then drains + sweeps. The **Recreate** GUI gesture auto-dumps `pushed_files` (writes a timestamped `pushed_files_<ts>.txt` under the scope dir for the user's records, then `add_marked_push(config.pushed_files)`) *before* `execute_remove_container -v` + `execute_create`, so the post-create drain re-pushes them from host. In-container edits to those files are lost — the warning text says so. This replaces the old inline `execute_push_batch` replay and the old in-memory preserve-snapshot dict + Phase-8b restore hop (now subsumed by the drain). *(Note to revisit: "drain" / "marked_push" naming — backlog.)*
+
+**Relationship to pushed_files:** `marked_push` (host queue) = *intended* (not yet in container); `pushed_files` = *confirmed* (in container). A path is in at most one of the two at rest. `skip_and_unmark` removes a stale path from **both**. `marked_staged` (staged queue) is orthogonal — staged entries are not host-source projects' files, they're container snapshots awaiting re-import; they never promote into `pushed_files`.
+
+**CLI:** `push [FILES...]` enqueues the given files (validated: exists + under `host_container_root`) into the host queue then drains both queues. `push [--force]` ⇒ stale host files replaced rather than skipped. `push-marked [--force]` drains both queues without enqueuing anything new.
+
+**GUI:** `on_push` enqueues then drains synchronously (main thread, application-modal `QProgressDialog`, stale-file confirm dialog) when the container is running; otherwise just a status note. On scope load with either queue non-empty, `ConfigManager._post_scope_load` prompts `[Now]` / `[Delay]` with the combined host+staged count. **Container → Save Pushed-Files List** (`ContainerOperations.save_pushed_files_list`, below "Remove Container") saves the scope's `pushed_files` list to a text file at the user's chosen path — useful for archival; the **Recreate** flow auto-dumps the same list under `.ignore_scope/<scope>/pushed_files_<timestamp>.txt` without prompting.
+
+**Pending visual state:** deferred — queued-but-not-yet-drained files currently render in the normal unpushed style (they're functionally invisible until drained). Tracked as a follow-up.
+
+**Domains:** Config (separate file), Container Ops (drain → docker cp, stat -c %Y), Orchestration (CLI `push` / `push-marked`, lifecycle dump→drain), Presentation (GUI Push + scope-load prompt)
 
 ---
 
@@ -774,11 +803,11 @@ Detached delivery uses a conservative policy for host symlinks and Windows junct
 
 Container update flow recreates the container while preserving content for `preserve_on_update` specs and the named-volume L_volume tier. Numbered phases from `docker/container_lifecycle.py` (canonical numbering — narrative descriptions in `COREFLOWCHART.md` may use prose names alongside these numbers):
 
-- **Phase 4b — `_preserve_detached_folders`** — fail-safe stage. Iterates `mount_specs` for `delivery="detached" + content_seed="folder" + preserve_on_update=True` entries; cp's contents from old container to a host tmp staging area. **Aborts the entire update on cp-out failure** — the old container is left running so no data is destroyed.
-- **Phase 8b — `_restore_detached_folders`** — restore stage. Re-cp's the staged contents into the freshly recreated container via `push_directory_contents_to_container`. Failure here is **non-fatal**: warns the user, leaves the new container running with empty content for that spec. Tmp staging is cleaned up in a `finally` block whether restore succeeds or not.
+- **Phase 4b — `_preserve_detached_folders`** — fail-safe stage. Iterates `mount_specs` for `delivery="detached" + content_seed="folder" + preserve_on_update=True` entries; cp's contents from old container into the **persistent** `.ignore_scope/<scope>/_snapshots/<sanitize(target)>/` dir and enqueues a `StagedEntry` in `marked_staged_scope.json`. **Aborts the entire update on cp-out failure** — the old container is left running so no data is destroyed; already-enqueued staged entries from this attempt survive on disk so a manual `push-marked` can finish the job later.
+- **Phase 10a — `drain_marked_push`** — restore stage. The single cp engine processes the staged queue alongside the host queue; per-entry restore via `push_directory_contents_to_container` (`docker cp src/. cname:target`); failure here is **non-fatal** for the per-entry cp but the post-drain `cleanup_consumed_snapshots` + leftover-staged check flips `OpResult.success=False` when any staged entry didn't drain (the user is told to retry with `push-marked`). The old Phase-8b restore helper and the in-memory snapshots map are gone.
 
 **Soft-permanent vs hard-permanent tier:**
-- *Soft-permanent* — `delivery="detached" + content_seed="folder" + preserve_on_update=True`. Survives `execute_update` recreate via the Phase 4b/8b cp staging hop. Destroyed by `docker compose down`. UX label: "Make Permanent Folder → No Recreate" / "Mark Permanent".
+- *Soft-permanent* — `delivery="detached" + content_seed="folder" + preserve_on_update=True`. Survives `execute_update` recreate via the Phase 4b preserve → staged queue → Phase 10a drain hop. Destroyed by `docker compose down`. UX label: "Make Permanent Folder → No Recreate" / "Mark Permanent".
 - *Hard-permanent* — `delivery="volume" + content_seed="folder"`. Survives recreate natively (Docker named volume). Destroyed only by `docker compose down -v`. UX label: "Make Permanent Folder → Volume Mount".
 
 **Domains:** Lifecycle (`docker/container_lifecycle.py`), Config (`MountSpecPath.preserve_on_update` validator)
@@ -787,7 +816,7 @@ Container update flow recreates the container while preserving content for `pres
 
 ### `push_directory_contents_to_container` (`/.` merge idiom)
 
-`docker/container_ops.py` primitive used by Phase 8b restore (and any other "merge contents into existing container directory" path). Wraps `docker cp <src>/. <container>:<dst>` — the trailing `/.` tells Docker to copy directory **contents** rather than the directory itself, so the destination merges with existing children instead of nesting under a same-named subdirectory. Distinct from `push_file_to_container` (single file) and `_detached_init`'s tree cp (whole-subtree initial seeding).
+`docker/container_ops.py` primitive used by the drain's staged-queue branch (and any other "merge contents into existing container directory" path). Wraps `docker cp <src>/. <container>:<dst>` — the trailing `/.` tells Docker to copy directory **contents** rather than the directory itself, so the destination merges with existing children instead of nesting under a same-named subdirectory. Distinct from `push_file_to_container` (single file) and `_detached_init`'s tree cp (whole-subtree initial seeding, deliberately kept separate from the drain — it does mask `rm` / reveal walks / symlink stubs / folder-seed `mkdir` with no marked-push analogue).
 
 **Domains:** Lifecycle (`docker/container_ops.py`)
 

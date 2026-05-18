@@ -265,7 +265,7 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                                • Validator gate: patterns must be empty
                                  on folder-seed specs (folder-seed has
                                  no walk to mask/reveal over).
-                               • `pushed_files` replay still applies.
+                               • marked_push drain still applies (Phase 6b).
 
                              content_seed == "folder" (host_path is None,
                              container-only):
@@ -336,50 +336,64 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
     — extensions still always emit, but via the unified pipeline,
     not a side-channel.
 
-    All deliveries share the `pushed_files` replay and extension
+    All deliveries share the marked_push drain (Phase 6b) and extension
     reconciliation steps that follow. On container recreate, detached
     tree-seed content is ephemeral (writable layer) and must replay
-    every time; folder-seed content is empty until pushed_files or
-    in-container writes fill it; bind content re-attaches host state
+    every time; folder-seed content is empty until the marked_push drain
+    or in-container writes fill it; bind content re-attaches host state
     automatically; volume content survives recreate natively.
 
     UPDATE PATH — preserve_on_update hook
     ──────────────────────────────────────
 
-    The update path (`execute_update`) adds two hooks around recreate
+    The update path (`execute_update`) adds one hook BEFORE recreate
     for `delivery="detached" + content_seed="folder" + preserve_on_update=True`
     specs. These are the "soft permanent" tier — lighter than a named
-    volume but persistent across ordinary updates.
+    volume but persistent across ordinary updates. There is no separate
+    "restore" helper anymore: the existing Phase-10a `drain_marked_push`
+    is the single cp-into-container engine and consumes the staged queue
+    that Phase 4b emits.
 
     Phase 4b  `_preserve_detached_folders` — runs BEFORE `docker compose
                 down`. For each spec with `preserve_on_update=True`:
                   • `docker exec test -e <cpath>`: missing path is
-                    treated as first-ever update (empty snapshot placeholder).
-                  • `docker cp cname:<cpath> <tmp_stage>/spec_{idx}` pulls
-                    the live container contents to a host tmp staging dir
-                    (tempfile.mkdtemp with prefix "ignorescope_preserve_").
+                    skipped (nothing enqueued — restore would be a no-op).
+                  • Wipe any stale `.ignore_scope/<scope>/_snapshots/
+                    <sanitize(cpath)>/` (pull's dst must not pre-exist).
+                  • `docker cp cname:<cpath> <_snapshots/.../>` pulls
+                    the live container contents into the **persistent**
+                    snapshot dir under the scope's `.ignore_scope` dir.
+                  • `add_marked_staged(StagedEntry(source=snap,
+                    target=cpath, is_dir=True))` records the deferred
+                    restore in `marked_staged_scope.json`.
                   • FAIL-SAFE: any cp-out failure aborts the update
                     BEFORE compose-down. The old container stays intact
                     and the caller receives an OpResult(success=False).
-                    No mid-state is possible — either every preserve
-                    snapshot is on disk or the update never started.
+                    Already-enqueued staged entries from earlier specs
+                    in the same attempt persist on disk so a manual
+                    `push-marked` can finish the job after the operator
+                    resolves the underlying issue.
 
-    Phase 8b  `_restore_detached_folders` — runs AFTER `_detached_init`
-                has mkdir'd each folder-seed path. For each snapshot:
-                  • `docker cp <stage>/spec_{idx}/. cname:<cpath>` merges
-                    the preserved contents into the fresh (empty) folder
-                    using the canonical `/.` "copy contents" pattern.
-                  • NON-FATAL: cp-back failure is logged as a warning
-                    note in OpResult.details and the outer update
-                    continues. A failed restore leaves the folder empty
-                    (mkdir stub intact) — user can re-push manually.
-                    Rationale: at this point the container is already
-                    recreated; aborting would waste work and leave the
-                    user in an even worse state.
+    Phase 10a  `drain_marked_push` — single cp engine, runs AFTER
+                Phase 8a's `_detached_init`. Processes the host queue
+                first (today's behavior), then walks the staged queue:
+                for each `StagedEntry` (sorted by target),
+                `ensure_container_directories([target])` self-mkdir's
+                the destination, then `push_directory_contents_to_container`
+                merges the snapshot via `docker cp <snap>/. cname:<target>`.
+                Success dequeues the entry; failure leaves it queued
+                so the next drain reattempts from the same on-disk
+                snapshot. Staged restores do NOT promote into
+                `config.pushed_files` (orthogonal to the host queue).
 
-    Staging cleanup runs in a `finally` block wrapping Phase 5-12, so
-    the temp dir is removed whether the update succeeds, aborts mid-way,
-    or raises. Cleanup errors are swallowed — never mask a real op failure.
+    Snapshot cleanup is content-conditional, not a blanket `finally`:
+    `cleanup_consumed_snapshots(host_project_root, scope_name)` runs
+    after the drain in both `execute_create` and `execute_update` and
+    only rm-trees subdirs of `_snapshots/` whose entries are gone. A
+    clean Update/Create leaves no `_snapshots/`; a failed one keeps the
+    dirs *and* the queue entries. `execute_update` flips
+    `OpResult.success=False` when `load_marked_staged` is still non-empty
+    after the drain ("queued; retry with `push-marked`").
 
     Why only `detached + folder + preserve=True`? Tree-seed specs re-read
     from host on update (no need to preserve writable-layer deltas);
@@ -387,7 +401,51 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
     volume retention. Validator rejects `preserve_on_update=True` on
     any other combination.
 
-    See glossary → "Mount Delivery Terms" for vocabulary.
+    See glossary → "Mount Delivery Terms" and "marked_push" for vocabulary.
+
+
+PHASE 6b: MARKED-PUSH DRAIN (create / update)
+──────────────────────────────────────────────────────────────
+
+    After the container is up, lifecycle drains the marked_push queue —
+    the single replay path (also used by manual GUI Push, the `push-marked`
+    CLI command, and the GUI scope-load prompt). Replaces the old inline
+    `execute_push_batch`.
+
+    execute_update — dump → recreate → drain. `docker compose down` keeps
+      named volumes but destroys the writable layer, so everything tracked
+      must re-push:
+        Phase 4c  Dump  → `add_marked_push(host_project_root, scope, [p for p in
+                          config.pushed_files if p.exists()])` then
+                          `config.pushed_files.clear()`. A tracked file whose
+                          host source is gone can't be re-pushed, so it is NOT
+                          re-queued — it drops out of tracking here (reported in
+                          details). Clearing lets the drain rebuild pushed_files
+                          from confirmed cp's (a per-file cp failure correctly
+                          leaves that path out of pushed_files and queued).
+        Phase 10a Drain → `drain_marked_push(config=config, on_stale="replace")`.
+
+    execute_create — clear, then drain; NO dump. The fresh writable layer
+      holds nothing, so `config.pushed_files.clear()` first; the drain
+      re-adds only what it actually cp's in (pre-container Pushes queued
+      while no container existed). A recreate (= `execute_remove_container
+      -v` + `execute_create`) therefore does NOT auto-re-push tracked
+      files — the user exports the list first (Container → Export List of
+      Pushed Files; the Recreate warning says so) and re-pushes them
+      through the full docker cp flow. So:
+        `config.pushed_files.clear()` then
+        `drain_marked_push(config=config, on_stale="replace")`.
+
+    Drain, per queued file: `mkdir -p` parent + `docker cp` → success: add
+    to `config.pushed_files`, dequeue; cp failure → noted in details
+    (non-fatal), left queued. `on_stale="replace"` because a freshly
+    (re)created container is empty — the staleness check never fires here;
+    the interactive `[Replace]` / `[Skip]` / `[Skip and Unmark]` prompt
+    only applies to manual Push / `push-marked` / scope-load drains.
+
+    Phase 12 `save_config(config)` then persists the result. On a
+    non-lifecycle drain (`config=None`) the drain loads + saves config
+    itself. See glossary → "marked_push".
 
 
 PHASE 7: USER ACTION (GUI → CORE)
@@ -411,12 +469,13 @@ PHASE 7: USER ACTION (GUI → CORE)
         │       Reveal removed → remove exception pattern only
         │
         ├── OR execute file operation:
-        │       Push  → docker cp host→container, pushed=True
+        │       Push  → enqueue into marked_push (config-first); drain
+        │               (docker cp, Phase 6b) if container running → pushed=True on success
         │       Pull  → docker cp container→host
         │       Remove → docker exec rm, pushed=False
         │
         ▼
-    CORE: Write(scope_docker.json)
+    CORE: Write(scope_docker.json) [+ marked_push_scope.json on Push/drain]
 
 
 PHASE 8: REFRESH
@@ -478,6 +537,11 @@ core/
                             OpWarning (confirmable), OpError (blocking), OpResult, BatchFileResult
                             Used by docker/file_ops.py orchestrators, consumed by GUI/CLI
 
+  marked_push.py         → Transient pending-push queue (marked_push_scope.json, sibling of scope_docker_desktop.json)
+                            marked_push_path / load_marked_push / add_marked_push / remove_marked_push / clear_marked_push
+                            Schema: {"marked_push": ["rel/posix/path", ...]} — emptied file is deleted
+                            "Intended push" vs config.pushed_files = "confirmed in container"
+
   mount_spec_path.py     → MountSpecPath dataclass: mount_root + patterns (gitignore)
                             Pattern CRUD, pathspec matching, validation
 
@@ -505,12 +569,18 @@ docker/
                             FileFilter type alias, passthrough() no-op
                             execute_push accepts optional file_filter parameter
 
+  marked_push_drain.py   → PHASE 6b / 7: marked_push drain — the single replay path
+                            container_file_mtime (stat -c %Y), drain_marked_push(config=None, on_stale=None, progress=None)
+                            Container state: missing → queue intact; stopped → start; running → cp each queued file
+                            config=None → loads+saves config; config passed → mutates pushed_files, caller saves
+                            Used by GUI Push, CLI push / push-marked, scope-load prompt, and create/update lifecycle
+
   container_lifecycle.py → Container lifecycle orchestrators
-                            preflight_create / execute_create (6-phase: preflight→hierarchy→compose→build→deploy→reconcile→save)
-                            preflight_update / execute_update (14-phase: load old→preflight→hierarchy→orphan detect→preserve→down→compose→build→up→detached init→restore→prune→dirs→reconcile→save)
+                            preflight_create / execute_create (preflight→hierarchy→compose→build→create→detached init→marked_push drain (6b)→cleanup_consumed_snapshots→reconcile→save)
+                            preflight_update / execute_update (load old→preflight→hierarchy→orphan detect→preserve (→staged queue)→dump pushed_files→down→compose→build→up→detached init→prune→dirs→marked_push drain (6b: host queue + staged queue)→cleanup_consumed_snapshots→reconcile→save; success=False if any staged entry left over)
                             preflight_remove_container / execute_remove_container
                             reconcile_extensions — post-start verify/re-deploy loop (state × presence matrix)
-                            _preserve_detached_folders / _restore_detached_folders — preserve_on_update hook pair
+                            _preserve_detached_folders — preserve_on_update hook (snapshots → marked_staged_scope.json; restore is the Phase-10a drain)
                             Shared by GUI and CLI — neither owns orchestration
 
   container_ops.py       → PHASE 7, 8: Container_Ops (subprocess layer)
