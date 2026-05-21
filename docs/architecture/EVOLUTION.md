@@ -64,7 +64,7 @@ One mechanism (per-spec `delivery`), three modes (`bind` / `detached` / `volume`
 - `docs/architecture/COREFLOWCHART.md` Phase 6a (Per-Spec Delivery Emit)
 - `docs/architecture/DATAFLOWCHART.md` § Cross-Tree Coordination, § Scope Config Tree RMB — Stencil Gesture Flow
 - `docs/architecture/GUI_LAYOUT_SPECS.md` § 11-A Cross-Tree Coordination
-- Branch lifecycle convention: `.claude/commands/publish-to-git.md`
+- Branch lifecycle convention: `.claude/commands/zev-close.md` (feature/bug → `staging-vN.N`) and `.claude/commands/zev-publish.md` (`staging-vN.N` → `main` → `live` → release tag)
 - Git history: `archive/isolation-phase-1-pre-revert` branch preserves the abandoned design's three foundational commits
 
 ---
