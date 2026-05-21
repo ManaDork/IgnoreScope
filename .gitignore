@@ -38,6 +38,7 @@ CLAUDE.md
 
 # IgnoreScope local config
 IgnoreScope/.recent_projects.json
+.ignore_scope/
 
 # IDE
 .idea/*
