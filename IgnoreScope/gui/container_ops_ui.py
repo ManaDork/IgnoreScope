@@ -296,8 +296,9 @@ class ContainerOperations:
         # Pre-dump: write a timestamped pushed-files snapshot, then re-queue
         # config.pushed_files into the host marked-push queue. execute_create
         # clears pushed_files and the drain re-adds only files it actually cp's
-        # in. TODO: drain_marked_push does not apply FileFilter — content is
-        # cp'd through verbatim. Revisit if filtered replay becomes a need.
+        # in. TODO: drain bypasses the FileFilter hook available on direct
+        # execute_push (file_filter_ops.py:18). Filtered replay is not
+        # supported today; tracked as backlog if filter-on-replay becomes a need.
         if config.pushed_files:
             self.save_pushed_files_list(auto=True)
             from ..core.marked_push import add_marked_push

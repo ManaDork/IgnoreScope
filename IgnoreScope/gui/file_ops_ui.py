@@ -162,7 +162,7 @@ class FileOperationsHandler:
         if info is None or not info.get("running", False):
             self._app.statusBar().showMessage(
                 f"Marked {path.name} for push — will be pushed on next "
-                f"Create/Update Container (or run push-marked)", 6000,
+                f"Create/Update Container, scope reload, or run push-marked", 6000,
             )
             return
 

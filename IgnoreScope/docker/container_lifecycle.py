@@ -652,14 +652,18 @@ def execute_create(
             )
             # Non-fatal: dirs are eagerly created here; push ops mkdir on demand as fallback
 
-    # The fresh container's writable layer is empty — nothing is confirmed in it
-    # yet, so clear pushed_files. The drain then re-adds only what it actually
-    # docker-cp's in (pre-container Pushes still queued). Create does NOT dump
-    # config.pushed_files into the queue: a true first create has none, and a
-    # recreate (remove + create) deliberately does not auto-re-push tracked files
-    # — the user exports the list first (Container → Export List of Pushed Files;
-    # see the Recreate warning) and re-pushes them through the full docker cp
-    # flow. Per-file cp failures stay queued; not fatal.
+    # The fresh container's writable layer is empty — clear pushed_files so
+    # the drain can rebuild it from confirmed cp's. The drain re-adds only
+    # what it actually docker-cp's in (pre-container Pushes still queued).
+    #
+    # First create: pushed_files is empty, queue is empty (or holds whatever
+    # the user enqueued via Push gestures before the container existed), so
+    # the drain processes only those queued entries.
+    #
+    # Recreate (remove + create): the GUI re-queues `config.pushed_files`
+    # into marked_push BEFORE this code runs (container_ops_ui.py:301-304).
+    # We clear here so the drain rebuilds from confirmed cp's; per-file cp
+    # failures leave that path queued (not fatal).
     config.pushed_files.clear()
     drain_result = drain_marked_push(
         host_project_root, scope_name, config=config, on_stale="replace",
@@ -739,17 +743,21 @@ def execute_update(
 ) -> OpResult:
     """Update existing container, retaining configured volumes and pruning orphans.
 
-    12-phase orchestration:
+    15-phase orchestration:
       1. Load old config → compute old hierarchy → old volume names
       2. Preflight new config
       3. Compute new hierarchy → new volume names
       4. orphan_volumes = old_masks - new_masks
+      4b. Preserve detached folders (snapshot into marked_staged before compose down)
+      4c. Dump on-disk pushed_files into marked_push queue → clear pushed_files
       5. docker compose down (remove_volumes=False, remove_images=False)
       6. Generate new compose + Dockerfile → write to disk
       7. Build image
       8. docker compose up --no-start (reuses existing named volumes)
+      8a. Detached init (docker cp + mask rm) for any detached specs
       9. Prune orphan volumes (non-fatal)
      10. Pre-create dirs in mask volumes
+     10a. Marked-push drain (host queue + staged queue) → cleanup_consumed_snapshots
      11. Reconcile extensions (non-fatal)
      12. Save config
 

@@ -117,6 +117,10 @@ def _write_marked_staged(
             source_rel = e.source.relative_to(host_project_root).as_posix()
         except ValueError:
             # Source escapes the project root — keep the absolute form (POSIX).
+            logger.warning(
+                "marked_staged: source %s escapes project root %s; storing absolute path",
+                e.source, host_project_root,
+            )
             source_rel = e.source.as_posix()
         serialized.append({"source": source_rel, "target": e.target, "is_dir": e.is_dir})
     path.write_text(json.dumps({"staged": serialized}, indent=2), encoding="utf-8")

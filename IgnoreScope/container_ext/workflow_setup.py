@@ -517,6 +517,13 @@ class WorkflowSetup:
 
         Adds the workspace file paths to pushed_files so the system can
         track them for re-push on container recreate.
+
+        CARVE-OUT from the "drain is sole writer to pushed_files" contract:
+        these files reach the container via ``exec_in_container`` in the
+        preceding extension steps, NOT via ``docker cp``. The drain remains
+        the canonical writer for docker-cp-confirmed paths; this direct
+        write registers files confirmed via the extension exec mechanism.
+        See ``ARCHITECTUREGLOSSARY § marked_push`` for the contract carve-out.
         """
         from ..core.config import load_config, save_config
 

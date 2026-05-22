@@ -25,6 +25,12 @@ IS:  drain orchestration (read queues → resolve container state → per-entry 
      promote host successes / dequeue) and host-vs-container staleness compare.
 IS NOT: subprocess calls (→ ``container_ops.py``), queue persistence
      (→ ``core/marked_push.py``, ``core/marked_staged.py``).
+
+Contract carve-out: the drain is the canonical writer to ``config.pushed_files``
+for paths confirmed by ``docker cp``. Extension-deployed paths confirmed via
+``exec_in_container`` (see ``container_ext/workflow_setup.py``) may write to
+``pushed_files`` directly — both writers preserve the invariant that
+``pushed_files`` reflects what's actually in the container.
 """
 
 from __future__ import annotations

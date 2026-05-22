@@ -411,6 +411,12 @@ PHASE 6b: MARKED-PUSH DRAIN (create / update)
     the single replay path (also used by manual GUI Push, the `push-marked`
     CLI command, and the GUI scope-load prompt).
 
+    Contract carve-out: the drain is the canonical writer to
+    `config.pushed_files` for paths confirmed by `docker cp`. Extension-
+    deployed paths confirmed via `exec_in_container`
+    (`container_ext/workflow_setup.py`) may write `pushed_files` directly.
+    See glossary → "marked_push" for the carve-out scope.
+
     execute_update — dump → recreate → drain. `docker compose down` keeps
       named volumes but destroys the writable layer, so everything tracked
       must re-push:
@@ -428,10 +434,11 @@ PHASE 6b: MARKED-PUSH DRAIN (create / update)
       holds nothing, so `config.pushed_files.clear()` first; the drain
       re-adds only what it actually cp's in (pre-container Pushes queued
       while no container existed). A recreate (= `execute_remove_container
-      -v` + `execute_create`) therefore does NOT auto-re-push tracked
-      files — the user exports the list first (Container → Export List of
-      Pushed Files; the Recreate warning says so) and re-pushes them
-      through the full docker cp flow. So:
+      -v` + `execute_create`) re-pushes tracked files automatically: the
+      GUI re-queues `config.pushed_files` via `add_marked_push` before
+      `_recreate` runs (container_ops_ui.py:301-304), and the post-create
+      drain processes them — the user is warned in-dialog that in-container
+      edits are lost. So:
         `config.pushed_files.clear()` then
         `drain_marked_push(config=config, on_stale="replace")`.
 
