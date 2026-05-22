@@ -296,8 +296,8 @@ class ContainerOperations:
         # Pre-dump: write a timestamped pushed-files snapshot, then re-queue
         # config.pushed_files into the host marked-push queue. execute_create
         # clears pushed_files and the drain re-adds only files it actually cp's
-        # in. TODO: the lifecycle replay does not apply FileFilter (carries
-        # over the pre-existing execute_push_batch passthrough gap).
+        # in. TODO: drain_marked_push does not apply FileFilter — content is
+        # cp'd through verbatim. Revisit if filtered replay becomes a need.
         if config.pushed_files:
             self.save_pushed_files_list(auto=True)
             from ..core.marked_push import add_marked_push

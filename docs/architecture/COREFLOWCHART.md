@@ -409,8 +409,7 @@ PHASE 6b: MARKED-PUSH DRAIN (create / update)
 
     After the container is up, lifecycle drains the marked_push queue —
     the single replay path (also used by manual GUI Push, the `push-marked`
-    CLI command, and the GUI scope-load prompt). Replaces the old inline
-    `execute_push_batch`.
+    CLI command, and the GUI scope-load prompt).
 
     execute_update — dump → recreate → drain. `docker compose down` keeps
       named volumes but destroys the writable layer, so everything tracked
