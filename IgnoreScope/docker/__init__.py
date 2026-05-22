@@ -28,7 +28,6 @@ from .file_ops import (
     resolve_container_path,
     resolve_file_subset,
     resolve_pull_output,
-    preflight_push,
     execute_push,
     preflight_pull,
     execute_pull,
@@ -36,8 +35,6 @@ from .file_ops import (
     execute_remove,
     preflight_pull_batch,
     execute_pull_batch,
-    preflight_remove_batch,
-    execute_remove_batch,
 )
 from .marked_push_drain import (
     container_file_mtime,
@@ -80,7 +77,6 @@ __all__ = [
     "resolve_container_path",
     "resolve_file_subset",
     "resolve_pull_output",
-    "preflight_push",
     "execute_push",
     "preflight_pull",
     "execute_pull",
@@ -88,8 +84,6 @@ __all__ = [
     "execute_remove",
     "preflight_pull_batch",
     "execute_pull_batch",
-    "preflight_remove_batch",
-    "execute_remove_batch",
     "container_file_mtime",
     "drain_marked_push",
     "preflight_create",

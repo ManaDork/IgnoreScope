@@ -566,9 +566,9 @@ docker/
 
   file_ops.py            → PHASE 7: File_Ops (orchestrator + host-side)
                             Path resolution: resolve_container_path (Rule 5 consumer)
-                            Preflight validation: preflight_push/pull/remove
+                            Preflight validation: preflight_pull/remove (push goes through drain)
                             Execution: execute_push/pull/remove
-                            Batch wrappers: preflight_*_batch, execute_*_batch
+                            Batch wrappers: preflight_pull_batch, execute_pull_batch
                             Host-side helpers: resolve_file_subset, resolve_pull_output
 
   file_filter_ops.py     → PHASE 7: File content filter hooks (placeholder)

@@ -1,12 +1,14 @@
-"""File operation orchestrators — push/pull/remove flows.
+"""File operation orchestrators — pull/remove flows.
 
 IS:  Path resolution (resolve_container_path, resolve_file_subset, resolve_pull_output)
-     Preflight validation (preflight_push, preflight_pull, preflight_remove)
+     Preflight validation (preflight_pull, preflight_remove)
      Execution orchestration (execute_push, execute_pull, execute_remove)
-     Batch wrappers (preflight_*_batch, execute_*_batch)
+     Batch wrappers (preflight_pull_batch, execute_pull_batch)
 
 IS NOT: Subprocess calls (→ container_ops.py)
         Container lifecycle (→ container_lifecycle.py)
+        Push pipeline — config-first queue + drain owns docker cp
+          (→ core/marked_push.py, docker/marked_push_drain.py)
 """
 
 from __future__ import annotations
@@ -135,57 +137,8 @@ def _validate_container_running(container_name: str) -> OpResult | None:
 
 
 # =============================================================================
-# Push: Preflight + Execute
+# Push: Execute
 # =============================================================================
-
-def preflight_push(
-    host_path: Path,
-    container_name: str,
-    container_root: str,
-    host_container_root: Path,
-    pushed_files: set[Path],
-) -> OpResult:
-    """Validate preconditions before push. Returns warnings/errors without executing.
-
-    Error checks (blocking):
-      1. host_path.exists()                    -> HOST_FILE_NOT_FOUND
-      2. host_path.relative_to(hcr)            -> INVALID_LOCATION
-      3. ensure_container_running(name)         -> CONTAINER_NOT_RUNNING
-
-    Warning checks (confirmable):
-      4. path in pushed_files?                  -> FILE_ALREADY_TRACKED
-
-    Args:
-        host_path: Host file to push
-        container_name: Docker container name
-        container_root: Container root path
-        host_container_root: Host ancestor directory
-        pushed_files: Current set of tracked pushed file paths
-
-    Returns:
-        OpResult with error or warnings (success=True if no blocking errors)
-    """
-    # Error checks
-    if not host_path.exists():
-        return OpResult(
-            success=False,
-            message=f"File not found: {host_path.name}",
-            error=OpError.HOST_FILE_NOT_FOUND,
-        )
-
-    if err := _validate_path_under_root(host_path, host_container_root):
-        return err
-
-    if err := _validate_container_running(container_name):
-        return err
-
-    # Warning checks
-    warnings: list[OpWarning] = []
-    if host_path in pushed_files:
-        warnings.append(OpWarning.FILE_ALREADY_TRACKED)
-
-    return OpResult(success=True, message="Ready to push", warnings=warnings)
-
 
 def execute_push(
     host_path: Path,
@@ -461,57 +414,3 @@ def execute_pull_batch(
     return results
 
 
-def preflight_remove_batch(
-    host_paths: list[Path],
-    container_name: str,
-    container_root: str,
-    host_container_root: Path,
-) -> BatchFileResult:
-    """Validate ALL files before removing any.
-
-    Args:
-        host_paths: List of host file paths to check
-        container_name: Docker container name
-        container_root: Container root path
-        host_container_root: Host ancestor directory
-
-    Returns:
-        BatchFileResult with errors, warnings, clean categorization
-    """
-    result = BatchFileResult()
-
-    for path in host_paths:
-        r = preflight_remove(path, container_name, container_root, host_container_root)
-        if r.error:
-            result.errors[path] = r
-        elif r.warnings:
-            result.warnings[path] = r
-        else:
-            result.clean.append(path)
-
-    return result
-
-
-def execute_remove_batch(
-    host_paths: list[Path],
-    container_name: str,
-    container_root: str,
-    host_container_root: Path,
-) -> dict[Path, OpResult]:
-    """Execute remove for multiple files. Returns per-file results.
-
-    Args:
-        host_paths: List of host file paths to remove
-        container_name: Docker container name
-        container_root: Container root path
-        host_container_root: Host ancestor directory
-
-    Returns:
-        Dict mapping each path to its OpResult
-    """
-    results: dict[Path, OpResult] = {}
-    for path in host_paths:
-        results[path] = execute_remove(
-            path, container_name, container_root, host_container_root,
-        )
-    return results
