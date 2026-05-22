@@ -24,7 +24,7 @@ from ..docker import (
     execute_pull,
     preflight_remove,
     execute_remove,
-    drain_marked_push,
+    drain_with_user_feedback,
 )
 
 if TYPE_CHECKING:
@@ -293,9 +293,9 @@ class FileOperationsHandler:
             QApplication.processEvents()
 
         try:
-            result = drain_marked_push(
+            result = drain_with_user_feedback(
                 host_project_root, scope,
-                on_stale=self._confirm_stale, progress=_progress,
+                on_stale_cb=self._confirm_stale, progress_cb=_progress,
             )
         finally:
             dialog.close()

@@ -33,23 +33,23 @@ def _ok_drain(*a, **kw):
 
 
 def test_push_file_enqueues_then_drains(project):
-    with patch("IgnoreScope.cli.commands.drain_marked_push", side_effect=_ok_drain) as drain:
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback", side_effect=_ok_drain) as drain:
         ok, msg = cmd_push(project, SCOPE, ["src/a.txt"])
     assert ok
     assert load_marked_push(project, SCOPE) == {project / "src" / "a.txt"}
     drain.assert_called_once()
-    assert drain.call_args.kwargs["on_stale"] == "skip"
+    assert drain.call_args.kwargs["on_stale_cb"] == "skip"
     assert "Drained 1 file(s)" in msg and "pushed: a.txt" in msg
 
 
 def test_push_force_uses_replace(project):
-    with patch("IgnoreScope.cli.commands.drain_marked_push", side_effect=_ok_drain) as drain:
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback", side_effect=_ok_drain) as drain:
         cmd_push(project, SCOPE, ["src/a.txt"], force=True)
-    assert drain.call_args.kwargs["on_stale"] == "replace"
+    assert drain.call_args.kwargs["on_stale_cb"] == "replace"
 
 
 def test_push_no_args_drains_existing_queue(project):
-    with patch("IgnoreScope.cli.commands.drain_marked_push", side_effect=_ok_drain) as drain, \
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback", side_effect=_ok_drain) as drain, \
          patch("IgnoreScope.cli.commands.load_config") as load_cfg, \
          patch("IgnoreScope.cli.commands.add_marked_push") as add:
         ok, msg = cmd_push(project, SCOPE)
@@ -60,7 +60,7 @@ def test_push_no_args_drains_existing_queue(project):
 
 
 def test_push_nonexistent_file_errors_without_draining(project):
-    with patch("IgnoreScope.cli.commands.drain_marked_push") as drain:
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback") as drain:
         ok, msg = cmd_push(project, SCOPE, ["src/nope.txt"])
     assert not ok
     assert "not found" in msg
@@ -76,7 +76,7 @@ def test_push_absolute_path_outside_container_root_errors(tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("x", encoding="utf-8")
 
-    with patch("IgnoreScope.cli.commands.drain_marked_push") as drain:
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback") as drain:
         ok, msg = cmd_push(hpr, SCOPE, [str(outside)])
     assert not ok
     assert "not under" in msg
@@ -84,21 +84,21 @@ def test_push_absolute_path_outside_container_root_errors(tmp_path):
 
 
 def test_push_marked_drains_with_skip(project):
-    with patch("IgnoreScope.cli.commands.drain_marked_push", side_effect=_ok_drain) as drain:
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback", side_effect=_ok_drain) as drain:
         ok, _ = cmd_push_marked(project, SCOPE)
     assert ok
-    assert drain.call_args.kwargs["on_stale"] == "skip"
+    assert drain.call_args.kwargs["on_stale_cb"] == "skip"
 
 
 def test_push_marked_force_uses_replace(project):
-    with patch("IgnoreScope.cli.commands.drain_marked_push", side_effect=_ok_drain) as drain:
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback", side_effect=_ok_drain) as drain:
         cmd_push_marked(project, SCOPE, force=True)
-    assert drain.call_args.kwargs["on_stale"] == "replace"
+    assert drain.call_args.kwargs["on_stale_cb"] == "replace"
 
 
 def test_push_propagates_drain_failure(project):
     fail = OpResult(success=False, message="Drained 0 file(s), 1 still queued", details=["cp failed: a.txt — denied"])
-    with patch("IgnoreScope.cli.commands.drain_marked_push", return_value=fail):
+    with patch("IgnoreScope.cli.commands.drain_with_user_feedback", return_value=fail):
         ok, msg = cmd_push(project, SCOPE, ["src/a.txt"])
     assert not ok
     assert "still queued" in msg and "cp failed" in msg

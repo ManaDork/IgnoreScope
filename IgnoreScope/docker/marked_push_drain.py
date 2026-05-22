@@ -43,6 +43,7 @@ from ..core.config import ScopeDockerConfig, load_config, save_config
 from ..core.marked_push import load_marked_push, remove_marked_push
 from ..core.marked_staged import (
     StagedEntry,
+    cleanup_consumed_snapshots,
     load_marked_staged,
     remove_marked_staged,
 )
@@ -131,8 +132,11 @@ def drain_marked_push(
       - failure → noted, left queued (so the next drain — manual ``push-marked``
         or scope-load prompt — reattempts from the persistent snapshot).
 
-    Staged-snapshot cleanup is *not* this function's job; callers use
-    ``core.marked_staged.cleanup_consumed_snapshots`` after a successful drain.
+    Staged-snapshot cleanup runs inline at the end of every drain through the
+    ``drain_with_user_feedback`` wrapper (the canonical entry point). Direct
+    callers of ``drain_marked_push`` are responsible for invoking
+    ``core.marked_staged.cleanup_consumed_snapshots`` themselves — but in the
+    standard pipeline the wrapper owns this.
 
     Args:
         host_project_root: Project root directory.
@@ -296,3 +300,51 @@ def drain_marked_push(
     if remaining:
         summary += f", {remaining} still queued"
     return OpResult(success=True, message=summary, details=notes)
+
+
+def drain_with_user_feedback(
+    host_project_root: Path,
+    scope_name: str,
+    *,
+    config: Optional[ScopeDockerConfig] = None,
+    progress_cb: "Callable[[int, int], None] | None" = None,
+    on_stale_cb: "Callable[[Path], str] | str | None" = None,
+) -> OpResult:
+    """Single drain entry-point shared by lifecycle, GUI, and CLI.
+
+    Wraps ``drain_marked_push`` and runs ``cleanup_consumed_snapshots`` at the
+    end of every drain (success or no-op). All callers route through this
+    function so feedback (progress, stale resolution) flows uniformly and
+    snapshot cleanup happens in exactly one place.
+
+    Caller ``on_stale_cb`` contract:
+      - Lifecycle (``execute_create``, ``execute_update``): ``"replace"`` —
+        orchestrator owns the canonical state; the freshly (re)created
+        container has nothing to be stale against.
+      - GUI drain (``drain_marked_push_now``): callable prompt
+        (``_confirm_stale``) — user decides per file.
+      - CLI ``cmd_push`` with ``--force``: ``"replace"``; without flag:
+        ``"skip"``.
+      - None (default): treated as ``"skip"`` by ``drain_marked_push``.
+
+    Args:
+        host_project_root: Project root directory.
+        scope_name: Scope name.
+        config: Optional in-flight config to mutate (lifecycle path); caller
+            owns ``save_config``. When ``None``, the drain loads + saves.
+        progress_cb: Optional ``(current, total)`` callback invoked before
+            each entry (host and staged combined, host first). ``None`` =
+            silent.
+        on_stale_cb: Resolution for host-stale files — callable, fixed action
+            string, or ``None``. See contract above.
+
+    Returns:
+        OpResult from the underlying drain. Cleanup is best-effort and never
+        raises; cleanup failures do not affect the returned result.
+    """
+    result = drain_marked_push(
+        host_project_root, scope_name,
+        config=config, on_stale=on_stale_cb, progress=progress_cb,
+    )
+    cleanup_consumed_snapshots(host_project_root, scope_name)
+    return result

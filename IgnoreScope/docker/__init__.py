@@ -39,6 +39,7 @@ from .file_ops import (
 from .marked_push_drain import (
     container_file_mtime,
     drain_marked_push,
+    drain_with_user_feedback,
 )
 from .container_lifecycle import (
     preflight_create,
@@ -86,6 +87,7 @@ __all__ = [
     "execute_pull_batch",
     "container_file_mtime",
     "drain_marked_push",
+    "drain_with_user_feedback",
     "preflight_create",
     "execute_create",
     "preflight_update",

@@ -30,7 +30,6 @@ from ..core.marked_push import add_marked_push
 from ..core.marked_staged import (
     StagedEntry,
     add_marked_staged,
-    cleanup_consumed_snapshots,
     load_marked_staged,
     snapshot_path_for,
 )
@@ -55,7 +54,7 @@ from .container_ops import (
 
 logger = logging.getLogger(__name__)
 from .compose import generate_compose_with_masks, generate_dockerfile
-from .marked_push_drain import drain_marked_push
+from .marked_push_drain import drain_with_user_feedback
 from .names import DockerNames, build_docker_name
 from ..utils.strings import sanitize_volume_name
 
@@ -275,9 +274,9 @@ def _preserve_detached_folders(
         enqueue a ``StagedEntry(source=snap, target=cpath, is_dir=True)``
         via ``add_marked_staged``.
 
-    Restore is no longer this function's responsibility — Phase 10a's existing
-    ``drain_marked_push`` call processes the staged queue and self-``mkdir``'s
-    each target.
+    Restore is no longer this function's responsibility — Phase 10a's
+    ``drain_with_user_feedback`` call processes the staged queue and
+    self-``mkdir``'s each target.
 
     Fail-safe: any cp-out failure aborts the update, leaving the old container
     untouched. The caller must NOT proceed to compose-down on ``success=False``.
@@ -539,6 +538,9 @@ def preflight_create(
 def execute_create(
     host_project_root: Path,
     config: ScopeDockerConfig,
+    *,
+    progress_cb: "Callable[[int, int], None] | None" = None,
+    on_stale_cb: "Callable[[Path], str] | str | None" = None,
 ) -> OpResult:
     """Create Docker container from configuration.
 
@@ -548,6 +550,13 @@ def execute_create(
     Args:
         host_project_root: Project root directory
         config: ScopeDockerConfig with mount_specs and pushed_files
+        progress_cb: Optional (current, total) callback piped to the marked-push
+            drain so the lifecycle can surface per-file progress to the user
+            (e.g., GUI ContainerWorker emits Qt signal; CLI prints).
+        on_stale_cb: Optional stale-file resolution piped to the drain. Defaults
+            to ``"replace"`` for the lifecycle path — a freshly (re)created
+            container has nothing to be stale against, so the silent force-replace
+            is correct.
 
     Returns:
         OpResult with success/failure
@@ -665,16 +674,17 @@ def execute_create(
     # We clear here so the drain rebuilds from confirmed cp's; per-file cp
     # failures leave that path queued (not fatal).
     config.pushed_files.clear()
-    drain_result = drain_marked_push(
-        host_project_root, scope_name, config=config, on_stale="replace",
+    drain_result = drain_with_user_feedback(
+        host_project_root, scope_name,
+        config=config,
+        progress_cb=progress_cb,
+        on_stale_cb=on_stale_cb if on_stale_cb is not None else "replace",
     )
     drain_details = list(drain_result.details or [])
     if not drain_result.success:
         drain_details.insert(0, f"marked-push drain incomplete: {drain_result.message}")
-
-    # Sweep on-disk snapshot dirs whose staged entries have been drained. No-op
-    # when there were none (the common Create path).
-    cleanup_consumed_snapshots(host_project_root, scope_name)
+    # cleanup_consumed_snapshots is invoked inside drain_with_user_feedback —
+    # single cleanup site for all drain callers (lifecycle, GUI, CLI).
 
     # Reconcile extensions (non-fatal — deploy/verify after container is up)
     reconcile_result = None
@@ -740,8 +750,19 @@ def preflight_update(
 def execute_update(
     host_project_root: Path,
     config: ScopeDockerConfig,
+    *,
+    progress_cb: "Callable[[int, int], None] | None" = None,
+    on_stale_cb: "Callable[[Path], str] | str | None" = None,
 ) -> OpResult:
     """Update existing container, retaining configured volumes and pruning orphans.
+
+    Args:
+        host_project_root: Project root directory
+        config: New ScopeDockerConfig to apply
+        progress_cb: Optional (current, total) callback piped to the marked-push
+            drain (Phase 10a). See ``execute_create`` for usage.
+        on_stale_cb: Optional stale-file resolution piped to the drain. Defaults
+            to ``"replace"`` for the lifecycle path.
 
     15-phase orchestration:
       1. Load old config → compute old hierarchy → old volume names
@@ -952,17 +973,20 @@ def execute_update(
     # Re-pushes the files dumped in Phase 4c (host queue) plus any pre-container
     # Pushes still queued; restores any Phase-4b preserved snapshots (staged
     # queue). Per-entry cp failures stay queued; surfaced in details, not fatal.
-    drain_result = drain_marked_push(
-        host_project_root, scope_name, config=config, on_stale="replace",
+    # The wrapper sweeps consumed snapshot dirs after the drain — single
+    # cleanup site for lifecycle / GUI / CLI paths. A leftover staged entry
+    # (drain didn't finish) keeps both its snapshot dir and queue entry so
+    # a manual `push-marked` can retry.
+    drain_result = drain_with_user_feedback(
+        host_project_root, scope_name,
+        config=config,
+        progress_cb=progress_cb,
+        on_stale_cb=on_stale_cb if on_stale_cb is not None else "replace",
     )
     drain_details = list(drain_result.details or [])
     if not drain_result.success:
         drain_details.insert(0, f"marked-push drain incomplete: {drain_result.message}")
 
-    # Sweep on-disk snapshot dirs whose staged entries have been drained.
-    # A leftover staged entry (drain didn't finish) keeps both its snapshot dir
-    # and its queue entry so a manual `push-marked` can retry.
-    cleanup_consumed_snapshots(host_project_root, scope_name)
     leftover_staged = load_marked_staged(host_project_root, scope_name)
 
     # ── Phase 11: Reconcile extensions (non-fatal) ──

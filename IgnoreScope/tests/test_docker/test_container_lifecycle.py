@@ -291,7 +291,7 @@ class TestExecuteUpdate:
         # Drain reports success but doesn't dequeue the staged entry — the
         # leftover is what flips Update's verdict.
         patches["drain_marked_push"] = patch(
-            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            "IgnoreScope.docker.container_lifecycle.drain_with_user_feedback",
             return_value=OpResult(success=True, message="drain noop", details=[]),
         )
 
@@ -643,7 +643,7 @@ class TestMarkedPushDrainOnCreate:
         with patch(
             "IgnoreScope.docker.container_lifecycle.add_marked_push",
         ) as mock_add, patch(
-            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            "IgnoreScope.docker.container_lifecycle.drain_with_user_feedback",
             return_value=OpResult(success=True, message="No files queued for push"),
         ) as mock_drain:
             result, _ = self._run_create(patches, tmp_path, config)
@@ -652,7 +652,7 @@ class TestMarkedPushDrainOnCreate:
         mock_add.assert_not_called()  # create never dumps
         mock_drain.assert_called_once()
         assert mock_drain.call_args.kwargs["config"] is config
-        assert mock_drain.call_args.kwargs["on_stale"] == "replace"
+        assert mock_drain.call_args.kwargs["on_stale_cb"] == "replace"
 
     def test_bind_delivery_clears_pushed_files_and_drains(self, tmp_path: Path):
         """Create CLEARS config.pushed_files (fresh container, nothing confirmed)
@@ -673,7 +673,7 @@ class TestMarkedPushDrainOnCreate:
         with patch(
             "IgnoreScope.docker.container_lifecycle.add_marked_push",
         ) as mock_add, patch(
-            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            "IgnoreScope.docker.container_lifecycle.drain_with_user_feedback",
             return_value=OpResult(success=True, message="No files queued for push"),
         ) as mock_drain:
             result, _ = self._run_create(patches, tmp_path, config)
@@ -683,7 +683,7 @@ class TestMarkedPushDrainOnCreate:
         assert config.pushed_files == set()    # cleared; mocked drain re-adds nothing
         mock_drain.assert_called_once()
         assert mock_drain.call_args.kwargs["config"] is config
-        assert mock_drain.call_args.kwargs["on_stale"] == "replace"
+        assert mock_drain.call_args.kwargs["on_stale_cb"] == "replace"
 
     def test_detached_delivery_drains_after_detached_init(self, tmp_path: Path):
         """Detached scope → the drain runs after _detached_init; still no dump."""
@@ -709,7 +709,7 @@ class TestMarkedPushDrainOnCreate:
         ), patch(
             "IgnoreScope.docker.container_lifecycle.add_marked_push",
         ) as mock_add, patch(
-            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            "IgnoreScope.docker.container_lifecycle.drain_with_user_feedback",
             return_value=OpResult(success=True, message="No files queued for push"),
         ) as mock_drain:
             result, _ = self._run_create(patches, tmp_path, config)
@@ -725,7 +725,7 @@ class TestMarkedPushDrainOnCreate:
 
         patches = self._patches_for_create(tmp_path)
         with patch(
-            "IgnoreScope.docker.container_lifecycle.drain_marked_push",
+            "IgnoreScope.docker.container_lifecycle.drain_with_user_feedback",
             return_value=OpResult(
                 success=False,
                 message="Container could not be started: boom",

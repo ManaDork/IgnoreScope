@@ -37,19 +37,32 @@ if TYPE_CHECKING:
 
 
 class ContainerWorker(QThread):
-    """Worker thread for container operations."""
+    """Worker thread for container operations.
+
+    Operations receive a ``progress_cb(current, total)`` callable that emits
+    ``pushProgress`` so the main-thread QProgressDialog can switch from
+    indeterminate to determinate during the lifecycle's marked-push drain
+    (Phase 10a). Operations that don't drain ignore the callback.
+    """
 
     progress = pyqtSignal(str)  # Emits status text
+    pushProgress = pyqtSignal(int, int)  # Emits (current, total) per drained file
     finished = pyqtSignal(bool, str)  # Emits (success, message)
 
-    def __init__(self, operation: Callable[[], OpResult], parent=None):
+    def __init__(
+        self,
+        operation: Callable[[Callable[[int, int], None]], OpResult],
+        parent=None,
+    ):
         super().__init__(parent)
         self._operation = operation
 
     def run(self):
         """Run container operation in background via CORE orchestrator."""
+        def progress_cb(current: int, total: int) -> None:
+            self.pushProgress.emit(current, total)
         try:
-            result = self._operation()
+            result = self._operation(progress_cb)
             self.finished.emit(result.success, result.message)
         except Exception as e:
             self.finished.emit(False, f"Error: {e}")
@@ -160,10 +173,23 @@ class ContainerOperations:
         progress = self._create_progress_dialog(title, message)
 
         self._container_worker = ContainerWorker(operation, self._app)
+        self._container_worker.pushProgress.connect(
+            lambda current, total: self._on_push_progress(current, total, progress)
+        )
         self._container_worker.finished.connect(
             lambda ok, msg: self._on_operation_finished(ok, msg, progress, success_title)
         )
         self._container_worker.start()
+
+    def _on_push_progress(
+        self, current: int, total: int, progress: QProgressDialog,
+    ) -> None:
+        """Switch the indeterminate container-op dialog into determinate mode
+        once the lifecycle's marked-push drain reports progress (Phase 10a).
+        """
+        if total > 0:
+            progress.setMaximum(total)
+            progress.setValue(current)
 
     def _on_operation_finished(
         self, success: bool, msg: str, progress: QProgressDialog,
@@ -240,7 +266,9 @@ class ContainerOperations:
 
         host_project_root = self._app.host_project_root
         self._run_container_operation(
-            operation=lambda: execute_create(host_project_root, config),
+            operation=lambda progress_cb: execute_create(
+                host_project_root, config, progress_cb=progress_cb,
+            ),
             title="Creating Container",
             message="Building Docker container...\n\nThis may take a minute on first build.",
             success_title="Container Created",
@@ -254,7 +282,9 @@ class ContainerOperations:
 
         host_project_root = self._app.host_project_root
         self._run_container_operation(
-            operation=lambda: execute_update(host_project_root, config),
+            operation=lambda progress_cb: execute_update(
+                host_project_root, config, progress_cb=progress_cb,
+            ),
             title="Updating Container",
             message="Updating Docker container...\nRetaining existing volume data.",
             success_title="Container Updated",
@@ -304,14 +334,14 @@ class ContainerOperations:
             from ..core.marked_push import add_marked_push
             add_marked_push(host_project_root, scope, list(config.pushed_files))
 
-        def _recreate() -> OpResult:
+        def _recreate(progress_cb: Callable[[int, int], None]) -> OpResult:
             remove_result = execute_remove_container(
                 host_project_root, scope,
                 remove_images=True, remove_volumes=True,
             )
             if not remove_result.success and "not found" not in remove_result.message.lower():
                 return remove_result
-            return execute_create(host_project_root, config)
+            return execute_create(host_project_root, config, progress_cb=progress_cb)
 
         self._run_container_operation(
             operation=_recreate,

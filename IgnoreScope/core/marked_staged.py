@@ -163,10 +163,12 @@ def cleanup_consumed_snapshots(host_project_root: Path, scope_name: str) -> None
     For each subdirectory under ``_snapshots/``, rmtree it iff no remaining
     ``StagedEntry.source`` is under it. Remove an empty ``_snapshots/`` itself.
 
-    Best-effort: never raises. Called after a successful drain so the next
-    clean Update/Create leaves no ``_snapshots/`` on disk; a failed drain
-    leaves the dirs alongside the still-queued staged entries (so the next
-    drain reattempts from the same snapshots).
+    Best-effort: never raises. Canonical caller is
+    ``docker.marked_push_drain.drain_with_user_feedback``, which invokes this
+    after every drain — so lifecycle, GUI, and CLI drain paths all clean
+    uniformly. A failed drain leaves the dirs alongside the still-queued
+    staged entries (so the next drain reattempts from the same snapshots);
+    only consumed-entry dirs are removed.
     """
     snaps_root = snapshots_dir(host_project_root, scope_name)
     if not snaps_root.exists():

@@ -388,12 +388,13 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
 
     Snapshot cleanup is content-conditional, not a blanket `finally`:
     `cleanup_consumed_snapshots(host_project_root, scope_name)` runs
-    after the drain in both `execute_create` and `execute_update` and
-    only rm-trees subdirs of `_snapshots/` whose entries are gone. A
-    clean Update/Create leaves no `_snapshots/`; a failed one keeps the
-    dirs *and* the queue entries. `execute_update` flips
-    `OpResult.success=False` when `load_marked_staged` is still non-empty
-    after the drain ("queued; retry with `push-marked`").
+    inside `drain_with_user_feedback` (the canonical drain entry-point)
+    after every drain — lifecycle, GUI, and CLI paths all sweep
+    uniformly. Cleanup only rm-trees subdirs of `_snapshots/` whose
+    entries are gone. A clean Update/Create leaves no `_snapshots/`; a
+    failed one keeps the dirs *and* the queue entries. `execute_update`
+    flips `OpResult.success=False` when `load_marked_staged` is still
+    non-empty after the drain ("queued; retry with `push-marked`").
 
     Why only `detached + folder + preserve=True`? Tree-seed specs re-read
     from host on update (no need to preserve writable-layer deltas);
@@ -428,7 +429,7 @@ PHASE 6b: MARKED-PUSH DRAIN (create / update)
                           details). Clearing lets the drain rebuild pushed_files
                           from confirmed cp's (a per-file cp failure correctly
                           leaves that path out of pushed_files and queued).
-        Phase 10a Drain → `drain_marked_push(config=config, on_stale="replace")`.
+        Phase 10a Drain → `drain_with_user_feedback(config=config, on_stale_cb="replace")`.
 
     execute_create — clear, then drain; NO dump. The fresh writable layer
       holds nothing, so `config.pushed_files.clear()` first; the drain
@@ -440,11 +441,11 @@ PHASE 6b: MARKED-PUSH DRAIN (create / update)
       drain processes them — the user is warned in-dialog that in-container
       edits are lost. So:
         `config.pushed_files.clear()` then
-        `drain_marked_push(config=config, on_stale="replace")`.
+        `drain_with_user_feedback(config=config, on_stale_cb="replace")`.
 
     Drain, per queued file: `mkdir -p` parent + `docker cp` → success: add
     to `config.pushed_files`, dequeue; cp failure → noted in details
-    (non-fatal), left queued. `on_stale="replace"` because a freshly
+    (non-fatal), left queued. `on_stale_cb="replace"` because a freshly
     (re)created container is empty — the staleness check never fires here;
     the interactive `[Replace]` / `[Skip]` / `[Skip and Unmark]` prompt
     only applies to manual Push / `push-marked` / scope-load drains.
@@ -576,14 +577,17 @@ docker/
                             execute_push accepts optional file_filter parameter
 
   marked_push_drain.py   → PHASE 6b / 7: marked_push drain — the single replay path
-                            container_file_mtime (stat -c %Y), drain_marked_push(config=None, on_stale=None, progress=None)
+                            container_file_mtime (stat -c %Y); drain_marked_push (engine);
+                            drain_with_user_feedback (canonical entry-point wrapper — runs cleanup_consumed_snapshots
+                              after every drain, single cleanup site for all callers)
                             Container state: missing → queue intact; stopped → start; running → cp each queued file
                             config=None → loads+saves config; config passed → mutates pushed_files, caller saves
+                            Caller on_stale_cb contract: lifecycle = "replace"; GUI = interactive callback; CLI = flag-driven
                             Used by GUI Push, CLI push / push-marked, scope-load prompt, and create/update lifecycle
 
   container_lifecycle.py → Container lifecycle orchestrators
-                            preflight_create / execute_create (preflight→hierarchy→compose→build→create→detached init→marked_push drain (6b)→cleanup_consumed_snapshots→reconcile→save)
-                            preflight_update / execute_update (load old→preflight→hierarchy→orphan detect→preserve (→staged queue)→dump pushed_files→down→compose→build→up→detached init→prune→dirs→marked_push drain (6b: host queue + staged queue)→cleanup_consumed_snapshots→reconcile→save; success=False if any staged entry left over)
+                            preflight_create / execute_create (preflight→hierarchy→compose→build→create→detached init→drain_with_user_feedback (6b — includes cleanup_consumed_snapshots)→reconcile→save)
+                            preflight_update / execute_update (load old→preflight→hierarchy→orphan detect→preserve (→staged queue)→dump pushed_files→down→compose→build→up→detached init→prune→dirs→drain_with_user_feedback (6b — host queue + staged queue + cleanup)→reconcile→save; success=False if any staged entry left over)
                             preflight_remove_container / execute_remove_container
                             reconcile_extensions — post-start verify/re-deploy loop (state × presence matrix)
                             _preserve_detached_folders — preserve_on_update hook (snapshots → marked_staged_scope.json; restore is the Phase-10a drain)

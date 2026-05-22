@@ -243,8 +243,8 @@ FileOperationsHandler.on_push(path)
     │     └── running? → drain now ↓
     │
     ├── GUI: drain_marked_push_now()
-    │     ├── QProgressDialog (progress wired to the drain's progress(i, total) callback)
-    │     ├── CORE: drain_marked_push(host_project_root, scope, on_stale=_confirm_stale, progress=…)
+    │     ├── QProgressDialog (progress wired to the drain's progress_cb(i, total) callback)
+    │     ├── CORE: drain_with_user_feedback(host_project_root, scope, on_stale_cb=_confirm_stale, progress_cb=…)
     │     │         (config=None here → the drain loads + saves scope_docker_desktop.json itself)
     │     │     ├── per queued file: mkdir -p parent + docker cp → add to pushed_files, dequeue (on success)
     │     │     │                     cp failure → noted, left queued
@@ -285,7 +285,7 @@ cmd_push(host_project_root, scope_name, files, force=False)
     │
     ├── with files: validate each (exists + under host_container_root) → add_marked_push(...)
     │               (any invalid path → print errors + exit, nothing enqueued)
-    ├── CORE: drain_marked_push(host_project_root, scope, on_stale=("replace" if force else "skip"))
+    ├── CORE: drain_with_user_feedback(host_project_root, scope, on_stale_cb=("replace" if force else "skip"))
     └── Print the drain summary + per-file notes
 
 cmd_push_marked(host_project_root, scope_name, force=False)   ← cmd_push with no files: drain the queue only

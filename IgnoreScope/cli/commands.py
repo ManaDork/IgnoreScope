@@ -17,7 +17,7 @@ from ..docker import (
     preflight_pull_batch,
     execute_pull_batch,
     execute_create,
-    drain_marked_push,
+    drain_with_user_feedback,
     preflight_remove_container,
     execute_remove_container,
 )
@@ -239,9 +239,9 @@ def cmd_push(
             return False, "Cannot mark for push:\n" + "\n".join(f"  {e}" for e in errors)
         add_marked_push(host_project_root, scope_name, to_enqueue)
 
-    result = drain_marked_push(
+    result = drain_with_user_feedback(
         host_project_root, scope_name,
-        on_stale=("replace" if force else "skip"),
+        on_stale_cb=("replace" if force else "skip"),
     )
     return _format_drain_result(result)
 

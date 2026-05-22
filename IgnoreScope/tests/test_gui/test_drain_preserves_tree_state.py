@@ -135,7 +135,7 @@ def test_drain_marked_push_does_not_reset_models(app, host_file, tmp_path):
 
     with patch("IgnoreScope.gui.file_ops_ui.QProgressDialog"), \
          patch(
-             "IgnoreScope.gui.file_ops_ui.drain_marked_push",
+             "IgnoreScope.gui.file_ops_ui.drain_with_user_feedback",
              side_effect=fake_drain,
          ), \
          patch(

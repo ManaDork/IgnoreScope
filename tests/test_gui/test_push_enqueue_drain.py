@@ -47,7 +47,7 @@ def _running():
 def test_on_push_always_enqueues_even_when_no_container(app, host_file, tmp_path):
     h = FileOperationsHandler(app)
     with patch("IgnoreScope.docker.container_ops.get_container_info", return_value=None), \
-         patch("IgnoreScope.gui.file_ops_ui.drain_marked_push") as drain:
+         patch("IgnoreScope.gui.file_ops_ui.drain_with_user_feedback") as drain:
         h.on_push(host_file)
     assert load_marked_push(tmp_path, SCOPE) == {host_file}
     drain.assert_not_called()
@@ -58,7 +58,7 @@ def test_on_push_stopped_container_does_not_drain(app, host_file, tmp_path):
     h = FileOperationsHandler(app)
     with patch("IgnoreScope.docker.container_ops.get_container_info",
                return_value={"running": False, "status": "exited"}), \
-         patch("IgnoreScope.gui.file_ops_ui.drain_marked_push") as drain:
+         patch("IgnoreScope.gui.file_ops_ui.drain_with_user_feedback") as drain:
         h.on_push(host_file)
     assert load_marked_push(tmp_path, SCOPE) == {host_file}
     drain.assert_not_called()
@@ -73,12 +73,12 @@ def test_on_push_running_container_drains_and_resyncs(app, host_file, tmp_path):
 
     with patch("IgnoreScope.docker.container_ops.get_container_info", return_value=_running()), \
          patch("IgnoreScope.gui.file_ops_ui.QProgressDialog"), \
-         patch("IgnoreScope.gui.file_ops_ui.drain_marked_push", side_effect=fake_drain) as drain:
+         patch("IgnoreScope.gui.file_ops_ui.drain_with_user_feedback", side_effect=fake_drain) as drain:
         h.on_push(host_file)
 
     drain.assert_called_once()
     # on_stale + progress wired
-    assert "on_stale" in drain.call_args.kwargs and "progress" in drain.call_args.kwargs
+    assert "on_stale_cb" in drain.call_args.kwargs and "progress_cb" in drain.call_args.kwargs
     app.config_manager.reload_current_scope.assert_called_once()
     msgs = [c.args[0] for c in app.statusBar().showMessage.call_args_list]
     assert any("Pushed a.txt" in m for m in msgs)
@@ -92,7 +92,7 @@ def test_on_push_still_queued_after_drain_warns(app, host_file, tmp_path):
     with patch("IgnoreScope.docker.container_ops.get_container_info", return_value=_running()), \
          patch("IgnoreScope.gui.file_ops_ui.QProgressDialog"), \
          patch("IgnoreScope.gui.file_ops_ui.QMessageBox") as msgbox, \
-         patch("IgnoreScope.gui.file_ops_ui.drain_marked_push", return_value=fail):
+         patch("IgnoreScope.gui.file_ops_ui.drain_with_user_feedback", return_value=fail):
         h.on_push(host_file)
     msgbox.warning.assert_called_once()
 
@@ -107,7 +107,7 @@ def test_on_push_skipped_and_unmarked_reports_unmark(app, host_file, tmp_path):
 
     with patch("IgnoreScope.docker.container_ops.get_container_info", return_value=_running()), \
          patch("IgnoreScope.gui.file_ops_ui.QProgressDialog"), \
-         patch("IgnoreScope.gui.file_ops_ui.drain_marked_push", side_effect=fake_drain):
+         patch("IgnoreScope.gui.file_ops_ui.drain_with_user_feedback", side_effect=fake_drain):
         h.on_push(host_file)
     msgs = [c.args[0] for c in app.statusBar().showMessage.call_args_list]
     assert any("Unmarked a.txt" in m for m in msgs)
