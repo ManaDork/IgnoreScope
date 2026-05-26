@@ -531,9 +531,19 @@ class ContainerOperations:
                 else:
                     from .app import PLACEHOLDER_SCOPE
                     self._app._current_scope = PLACEHOLDER_SCOPE
-                    self._app._mount_data_tree.clear()
-                    self._app._mount_data_tree.set_host_project_root(
-                        self._app.host_project_root
+                    # Bracket the tree mutations (clear + set_host_project_root)
+                    # in both models' beginResetModel/endResetModel so the
+                    # proxy can't dereference freed MountDataNode pointers
+                    # between the mutations and the followup refresh.
+                    from .mount_data_model import MountDataTreeModel
+                    def _reset_tree():
+                        self._app._mount_data_tree.clear()
+                        self._app._mount_data_tree.set_host_project_root(
+                            self._app.host_project_root
+                        )
+                    MountDataTreeModel.reset_models_around(
+                        [self._app._local_host._model, self._app._scope_view._model],
+                        _reset_tree,
                     )
                     self._app.container_root_panel.clear()
                     self._app._mount_data_tree.container_root = ""

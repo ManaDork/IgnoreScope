@@ -185,3 +185,139 @@ def test_reload_current_scope_default_path_still_resets(app, tmp_path):
     app._local_host.refresh.assert_called_once()
     app._scope_view.refresh.assert_called_once()
     app._update_config_viewer.assert_called_once()
+
+
+# ── Regression: structural delta on data_only reload (files-marked-for-push-
+#    fatal-crash.md). The original test above used siblings=[]/extensions=[]
+#    — exactly the trivial case that doesn't trigger the bug. These variants
+#    cover the non-trivial config that crashed the user's GUI.
+# ───────────────────────────────────────────────────────────────────────────
+
+def _make_config_with_siblings_and_extensions(
+    host_project_root: Path,
+    pushed: set[Path],
+    sibling_host: Path,
+    extension_name: str,
+) -> ScopeDockerConfig:
+    """ScopeDockerConfig matching the user's E:\\GITM\\_OJAAF\\OJAAF repro
+    shape: one sibling subtree + one extension stencil. These are the
+    structural mutations ``tree.load_config`` rebuilds unconditionally.
+    """
+    from IgnoreScope.core.local_mount_config import ExtensionConfig
+    from IgnoreScope.core.config import SiblingMount
+    return ScopeDockerConfig(
+        mount_specs=[],
+        pushed_files=set(pushed),
+        container_files=set(),
+        scope_name=SCOPE,
+        host_project_root=host_project_root,
+        mirrored=True,
+        siblings=[
+            SiblingMount(
+                host_path=sibling_host,
+                container_path=f"/{sibling_host.name}",
+                mount_specs=[],
+            ),
+        ],
+        extensions=[
+            ExtensionConfig(
+                name=extension_name,
+                installer_class="ClaudeInstaller",
+                mount_specs=[],
+            ),
+        ],
+        show_hidden=False,
+    )
+
+
+def test_drain_with_no_structural_change_stays_on_data_only_path(
+    app, host_file, tmp_path,
+):
+    """When the sibling/extension shape is identical before and after
+    ``load_config``, the data_only branch is correct: stateChanged emits,
+    no view-level refresh. This is the "queue empty, structure unchanged"
+    happy path of the marked-push drain.
+    """
+    sibling = tmp_path / "_sibling"
+    sibling.mkdir()
+
+    # Pre-load the config into the tree so old_shape matches new_shape.
+    seed_config = _make_config_with_siblings_and_extensions(
+        tmp_path, pushed=set(), sibling_host=sibling, extension_name="Claude Code",
+    )
+    app._mount_data_tree.load_config(seed_config)
+
+    # Now drain — same config, no structural change.
+    same_config = _make_config_with_siblings_and_extensions(
+        tmp_path, pushed={host_file}, sibling_host=sibling, extension_name="Claude Code",
+    )
+
+    def fake_drain(hpr, scope, **kw):
+        return OpResult(success=True, message="Drained 1 file(s)")
+
+    with patch("IgnoreScope.gui.file_ops_ui.QProgressDialog"), \
+         patch(
+             "IgnoreScope.gui.file_ops_ui.drain_with_user_feedback",
+             side_effect=fake_drain,
+         ), \
+         patch(
+             "IgnoreScope.gui.config_manager.load_config",
+             return_value=same_config,
+         ):
+        result = app.file_ops_handler.drain_marked_push_now()
+
+    assert result.success
+    # No structural delta → cheap path: no view-level refresh.
+    app._local_host.refresh.assert_not_called()
+    app._scope_view.refresh.assert_not_called()
+
+
+def test_drain_with_structural_change_promotes_to_refresh(
+    app, host_file, tmp_path,
+):
+    """When the sibling list or extension list differs between the pre-reload
+    tree and the incoming config, the data_only path is unsafe (the proxy
+    would re-filter against rebuilt subtrees). The detector must promote to
+    the structural refresh path. This is the user's E:\\GITM\\_OJAAF\\OJAAF
+    repro: queue non-empty, sibling+extension present, container absent —
+    historically crashed inside MountDataTreeModel.rowCount.
+    """
+    old_sibling = tmp_path / "_old_sibling"
+    old_sibling.mkdir()
+    new_sibling = tmp_path / "_new_sibling"
+    new_sibling.mkdir()
+
+    # Pre-load: tree has old_sibling + "Claude Code"
+    seed_config = _make_config_with_siblings_and_extensions(
+        tmp_path, pushed=set(),
+        sibling_host=old_sibling, extension_name="Claude Code",
+    )
+    app._mount_data_tree.load_config(seed_config)
+
+    # Drain reloads with a DIFFERENT sibling + DIFFERENT extension name.
+    new_config = _make_config_with_siblings_and_extensions(
+        tmp_path, pushed={host_file},
+        sibling_host=new_sibling, extension_name="Git",
+    )
+
+    def fake_drain(hpr, scope, **kw):
+        return OpResult(success=True, message="Drained 1 file(s)")
+
+    with patch("IgnoreScope.gui.file_ops_ui.QProgressDialog"), \
+         patch(
+             "IgnoreScope.gui.file_ops_ui.drain_with_user_feedback",
+             side_effect=fake_drain,
+         ), \
+         patch(
+             "IgnoreScope.gui.config_manager.load_config",
+             return_value=new_config,
+         ):
+        result = app.file_ops_handler.drain_marked_push_now()
+
+    assert result.success
+    # Structural delta detected → promoted to refresh path. Without this
+    # promotion the bug repros: proxy holds stale source indices into the
+    # freed sibling/extension subtree → access violation in rowCount.
+    app._local_host.refresh.assert_called_once()
+    app._scope_view.refresh.assert_called_once()
+    app._update_config_viewer.assert_called_once()

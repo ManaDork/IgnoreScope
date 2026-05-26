@@ -58,6 +58,17 @@ class MountDataTreeModel(QAbstractItemModel):
         self._tree = tree
         self._config = config
 
+        # Strong-reference guard. PyQt6's createIndex(row, col, ptr) stores
+        # only a void pointer — Python alone holds the MountDataNode reference.
+        # If tree mutation (load_config rebuilding sibling/extension subtrees,
+        # set_host_project_root replacing the root) drops references while the
+        # proxy still holds source indices into those nodes, the next
+        # rowCount(parent.internalPointer()) dereferences freed memory and
+        # Windows fires an access violation. _handed_out keeps every node
+        # the model has indexed alive until the next explicit reset.
+        # Cleared on refresh()/reset()/set_host_project_root_and_reset().
+        self._handed_out: dict[int, MountDataNode] = {}
+
         # Connect tree signals to trigger model refresh
         self._tree.stateChanged.connect(self._on_tree_changed)
 
@@ -92,7 +103,75 @@ class MountDataTreeModel(QAbstractItemModel):
     def refresh(self) -> None:
         """Notify views that the root node has changed."""
         self.beginResetModel()
+        self._handed_out.clear()
         self.endResetModel()
+
+    def reset(self) -> None:
+        """Explicit model reset for callers outside the model (e.g., the
+        structural-delta branch of ``ConfigManager.reload_current_scope``).
+        Clears the strong-reference guard so dropped nodes can be GC'd.
+        """
+        self.beginResetModel()
+        self._handed_out.clear()
+        self.endResetModel()
+
+    def set_host_project_root_and_reset(self, host_project_root: Path) -> None:
+        """Bracket ``MountDataTree.set_host_project_root`` in a model reset.
+
+        ``tree.set_host_project_root`` replaces ``_root_node`` outright, freeing
+        every previously-indexed node. Without this bracket the proxy's stale
+        source indices dereference freed memory on the next re-filter — the
+        ``gui-startup-access-violation`` crash family. Routing the project-root
+        replacement through this method guarantees the bracket is always set.
+
+        Single-model variant — when both ``LocalHostView`` and ``ScopeView``
+        share the underlying tree, use :meth:`reset_models_around` instead so
+        both views' models bracket the mutation atomically.
+        """
+        self.beginResetModel()
+        self._tree.set_host_project_root(host_project_root)
+        self._handed_out.clear()
+        self.endResetModel()
+
+    @staticmethod
+    def reset_models_around(
+        models: list["MountDataTreeModel"],
+        mutator,
+    ) -> None:
+        """Bracket multiple models around a shared tree mutation.
+
+        Both ``LocalHostView`` and ``ScopeView`` instantiate their own
+        ``MountDataTreeModel`` over the same ``MountDataTree``. A raw tree
+        mutation (e.g., ``set_host_project_root``, manual ``load_config``)
+        replaces or rebuilds subtrees without giving either model a chance
+        to call ``beginResetModel``. The proxy then dereferences freed
+        ``MountDataNode`` pointers and the GUI access-violates.
+
+        This helper calls ``beginResetModel`` on every model BEFORE the
+        mutator runs, then clears each model's strong-reference guard and
+        calls ``endResetModel`` after. Both views see the reset atomically
+        — no event-loop tick in which one model is reset and the other is
+        mid-mutation.
+        """
+        for m in models:
+            m.beginResetModel()
+        try:
+            mutator()
+        finally:
+            for m in models:
+                m._handed_out.clear()
+                m.endResetModel()
+
+    def _index_for(
+        self, row: int, column: int, node: MountDataNode,
+    ) -> QModelIndex:
+        """createIndex with strong-reference bookkeeping.
+
+        Every node handed out as an ``internalPointer()`` enters ``_handed_out``
+        so Python cannot GC it while the proxy may still dereference the index.
+        """
+        self._handed_out[id(node)] = node
+        return self.createIndex(row, column, node)
 
     # ── QAbstractItemModel: Tree Structure ────────────────────────
 
@@ -109,7 +188,7 @@ class MountDataTreeModel(QAbstractItemModel):
 
         if parent_node and row < len(parent_node.children):
             child_node = parent_node.children[row]
-            return self.createIndex(row, column, child_node)
+            return self._index_for(row, column, child_node)
 
         return QModelIndex()
 
@@ -125,7 +204,7 @@ class MountDataTreeModel(QAbstractItemModel):
         if parent_node is None or parent_node == self._tree.root_node:
             return QModelIndex()
 
-        return self.createIndex(parent_node.row, 0, parent_node)
+        return self._index_for(parent_node.row, 0, parent_node)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.column() > 0:

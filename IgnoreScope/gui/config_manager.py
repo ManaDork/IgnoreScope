@@ -164,13 +164,24 @@ class ConfigManager(QObject):
                     f"IgnoreScope - {self._app.host_project_root.name}"
                 )
 
-                # Set project root on the shared data tree
-                self._app._mount_data_tree.set_host_project_root(
-                    self._app.host_project_root
+                # Set project root on the shared data tree. Both view-side
+                # models (LocalHost, ScopeView) bracket the mutation in
+                # beginResetModel/endResetModel via reset_models_around — the
+                # raw set_host_project_root replaces _root_node and frees every
+                # previously-indexed MountDataNode; without the bracket the
+                # proxy's stale source indices dereference freed memory on the
+                # next re-filter (gui-startup-access-violation bug family).
+                from .mount_data_model import MountDataTreeModel
+                MountDataTreeModel.reset_models_around(
+                    [self._app._local_host._model, self._app._scope_view._model],
+                    lambda: self._app._mount_data_tree.set_host_project_root(
+                        self._app.host_project_root
+                    ),
                 )
 
-                # Reset models to new root — invalidates stale C++ QModelIndex
-                # pointers that would crash if accessed before switch_scope().
+                # Followup refresh — view-level (re-applies expansion / scroll
+                # state). The model reset above already invalidated proxy
+                # mappings; this call is idempotent on the model side.
                 self._app._local_host.refresh()
                 self._app._scope_view.refresh()
             finally:
@@ -318,6 +329,17 @@ class ConfigManager(QObject):
         wiring fires without resetting the models. Used by
         ``drain_marked_push_now``; all other callers use the default structural
         reload.
+
+        Structural-delta guard: even on the ``data_only=True`` path,
+        ``tree.load_config`` unconditionally rebuilds sibling and extension
+        stencil subtrees (mount_data_tree.py:878-882, :925-962). If the
+        sibling-paths or extension-names sets differ from the pre-reload
+        state, the cheap path is unsafe: the proxy would re-filter against
+        the new structure with proxy mappings keyed on freed nodes. Detect
+        the delta and promote to the structural reload path
+        (`_local_host.refresh()` + `_scope_view.refresh()`). The strong-ref
+        guard in MountDataTreeModel prevents the access violation; this
+        promotion bounds memory and keeps the proxy mappings honest.
         """
         if not self._app.host_project_root:
             return
@@ -329,6 +351,28 @@ class ConfigManager(QObject):
         except Exception:
             return
         tree = self._app._mount_data_tree
+
+        # Snapshot the structural shape from the live tree BEFORE load_config —
+        # compare against the incoming config's shape to decide whether the
+        # data_only path is still safe. Sibling key: host_path. Extension key:
+        # name. tree._extensions is the canonical source mirrored from the
+        # prior load_config; tree.get_sibling_configs() walks _sibling_nodes.
+        def _shape(siblings_iter, extensions_iter) -> tuple[frozenset, frozenset]:
+            return (
+                frozenset(s.host_path for s in siblings_iter),
+                frozenset(getattr(e, "name", "") for e in extensions_iter),
+            )
+
+        old_shape = _shape(
+            tree.get_sibling_configs(),
+            getattr(tree, "_extensions", []),
+        )
+        new_shape = _shape(
+            config.siblings or [],
+            config.extensions or [],
+        )
+        structural_change = old_shape != new_shape
+
         # Gate app-level handlers (mirrors switch_scope) AND batch tree signals,
         # so a signal fired during load_config can't re-enter auto_save mid-reload.
         self._app._loading = True
@@ -341,12 +385,16 @@ class ConfigManager(QObject):
         # The on-disk pushed_files just changed out-of-band — drop the undo
         # history so an undo can't restore a now-stale pushed_files snapshot.
         self.clear_undo()
-        if data_only:
+        if data_only and not structural_change:
             # Cheap repaint path — preserves expansion in both trees. The
             # stateChanged wiring drives _on_tree_changed → dataChanged (row
             # restyle) and _update_config_viewer (JSON refresh).
             tree.stateChanged.emit()
         else:
+            # Either an explicit structural reload (data_only=False) OR the
+            # data-only path detected a sibling/extension shape change.
+            # Promote to a full model reset so the proxy rebuilds its
+            # mappings against the live tree.
             self._app._local_host.refresh()
             self._app._scope_view.refresh()
             self._app._update_config_viewer()
