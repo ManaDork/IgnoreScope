@@ -285,7 +285,23 @@ class MountDataTree(QObject):
         # computes a state for each (they never appear in the host tree walk).
         for spec in synthesized_specs:
             all_paths.add(spec.mount_root)
-        self._states = apply_node_states_from_scope(config, all_paths)
+
+        # Read the marked-push queue so CORE can stamp ``pre_pushed`` on
+        # queued-but-not-yet-pushed nodes. Cheap file I/O; the queue is
+        # tiny and load is best-effort (missing file → empty set).
+        marked_push: set[Path] | None = None
+        if self._host_project_root and self._current_scope:
+            try:
+                from ..core.marked_push import load_marked_push
+                marked_push = load_marked_push(
+                    self._host_project_root, self._current_scope,
+                )
+            except Exception:
+                marked_push = None
+
+        self._states = apply_node_states_from_scope(
+            config, all_paths, marked_push=marked_push,
+        )
 
         self._emit_state_changed()
 

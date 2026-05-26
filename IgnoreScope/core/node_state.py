@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from ..utils.paths import is_descendant
 
@@ -75,7 +75,12 @@ class NodeState:
         mounted: Node is under a bind mount
         masked: Node is hidden by a mask volume
         revealed: Node is a punch-through within a masked area
-        pushed: Node has been pushed via docker cp
+        pushed: Node has been pushed via docker cp (confirmed in container)
+        pre_pushed: Node is in the marked-push queue but NOT yet in pushed_files
+            (config-first enqueue — file is "intended" to be pushed; the actual
+            docker cp will run via the next drain). Mutually exclusive with
+            ``pushed`` at rest by the glossary invariant; the resolver branches
+            on ``pre_pushed`` before ``pushed`` so the marked-push style wins.
         container_orphaned: Pushed file under mask volume with no active mount coverage (TTFF matrix)
         container_only: Exists in container but not on host (scan diff discovered)
         is_mount_root: Node IS a mount root declaration
@@ -88,6 +93,7 @@ class NodeState:
     masked: bool = False
     revealed: bool = False
     pushed: bool = False
+    pre_pushed: bool = False
     container_orphaned: bool = False
     container_only: bool = False
     is_mount_root: bool = False
@@ -403,6 +409,8 @@ def _cross_reference_stencil_paths(
 def apply_node_states_from_scope(
     config: 'ScopeDockerConfig',
     paths: Iterable[Path],
+    *,
+    marked_push: Optional[set[Path]] = None,
 ) -> dict[Path, NodeState]:
     """Batch-compute NodeState for every path given a ScopeDockerConfig.
 
@@ -412,10 +420,17 @@ def apply_node_states_from_scope(
     Stage 2: Config-native stencil detection — upgrades structural
              intermediates to visibility="virtual" (when config.mirrored=True)
     Stage 3: Descendant folder fields (has_pushed_descendant, has_direct_visible_child)
+    Stage 4: Marked-push overlay — pre_pushed for queued-but-not-confirmed paths
 
     Args:
         config: Full container configuration (mount_specs, pushed_files)
         paths: Iterable of paths to evaluate
+        marked_push: Optional host paths currently in marked_push_scope.json.
+            For each path in this set AND NOT in ``config.pushed_files``, the
+            resulting NodeState gets ``pre_pushed=True``. Disjoint with
+            ``pushed`` at rest by the glossary invariant (the drain promotes
+            into pushed_files atomically with dequeue); the AND-NOT defends
+            against a transient overlap mid-drain.
 
     Returns:
         Mapping from each path to its computed NodeState
@@ -450,5 +465,13 @@ def apply_node_states_from_scope(
     # so virtual children propagate to their parents
     for path in find_paths_with_direct_visible_children(states):
         states[path] = replace(states[path], has_direct_visible_child=True)
+
+    # Stage 4: marked-push overlay (placeholder style — visual axis lives in
+    # GUI display_config; final design deferred to all-states style pass).
+    if marked_push:
+        pushed_files = set(config.pushed_files)
+        for path in marked_push:
+            if path in states and path not in pushed_files:
+                states[path] = replace(states[path], pre_pushed=True)
 
     return states

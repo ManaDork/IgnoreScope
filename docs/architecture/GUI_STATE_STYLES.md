@@ -115,6 +115,7 @@ Visibility is pure STATE (`accessible`, `restricted`, `virtual`). METHOD flags (
 | F12 | `FOLDER_STENCIL_AUTH` | vis=virtual, stencil_tier=auth | `(virtual, virtual, virtual, stencil.auth)` | `stencil_auth` |
 | F13 | `FOLDER_PUSHED_ANCESTOR` | vis=restricted, not masked, has_vis_desc | `(restricted, restricted, restricted, ancestor.visible)` | `default` |
 | F14 | `FOLDER_CONTAINER_ONLY` | vis=virtual, container_only=T | `(virtual, virtual, virtual, virtual)` | `italic` |
+| F15 | `FOLDER_MARKED_PUSH` | vis=restricted, pre_pushed=T (queued, not yet confirmed) | `(restricted, restricted, restricted, ancestor.visible)` *(placeholder — same as F13)* | `default` |
 
 **Folder resolution** (if/elif chain in `_resolve_folder_state()`, first match wins):
 
@@ -131,13 +132,16 @@ accessible | -      | T        | -          | -            | -            | FOLD
 accessible | -      | F        | T          | -            | T            | FOLDER_MOUNTED_REVEALED    | default
 accessible | -      | F        | T          | -            | F            | FOLDER_MOUNTED             | default
 accessible | -      | F        | F          | -            | -            | FOLDER_VISIBLE             | default
-restricted | -      | -        | -          | -            | -            | (check masked)             |
+restricted | -      | -        | -          | -            | -            | (check pre_pushed first)   |
+ ↳ pre_pushed=T | -  | -        | -          | -            | -            | FOLDER_MARKED_PUSH         | default
  ↳ masked  | T      | -        | -          | -            | -            | FOLDER_MASKED              | muted
  ↳ !masked | -      | -        | -          | -            | T            | FOLDER_PUSHED_ANCESTOR     | default
  ↳ !masked | -      | -        | -          | -            | F            | FOLDER_HIDDEN              | muted
 ```
 
 "-" = field not checked for this state (any value matches).
+
+**Note on `FOLDER_MARKED_PUSH` / `FILE_MARKED_PUSH`:** the visual is a **placeholder** matching `FOLDER_PUSHED_ANCESTOR` / `FILE_PUSHED` respectively. The dedicated "queued, intent — not yet confirmed in container" visual (e.g., desaturated push color + dashed border) is deferred to the all-states style pass tracked at `planning/backlog/all-states-style-pass.md`. The axis + resolver routing ship now so the state is observable; the all-states pass swaps in the final color/border without touching resolver logic.
 
 **Notes:**
 

@@ -1256,6 +1256,72 @@ class TestTruthTableRegression:
 
 
 # ──────────────────────────────────────────────
+# NS-6: marked_push overlay → pre_pushed axis
+# ──────────────────────────────────────────────
+
+
+class TestPrePushedOverlay:
+    """Tests for the marked_push kwarg → pre_pushed NodeState axis (Phase B.2)."""
+
+    @staticmethod
+    def _config(tmp_path: Path, pushed: set[Path] | None = None) -> ScopeDockerConfig:
+        src = tmp_path / "src"
+        ms = MountSpecPath(mount_root=src, patterns=[])
+        return ScopeDockerConfig(
+            mount_specs=[ms],
+            pushed_files=pushed or set(),
+            host_project_root=tmp_path,
+        )
+
+    def test_pre_pushed_set_for_queued_path(self, tmp_path: Path):
+        """A path in marked_push AND NOT in pushed_files → pre_pushed=True."""
+        queued = tmp_path / "src" / "queued.txt"
+        config = self._config(tmp_path)
+        result = apply_node_states_from_scope(
+            config, [queued], marked_push={queued},
+        )
+        assert result[queued].pre_pushed is True
+        assert result[queued].pushed is False
+
+    def test_pushed_wins_when_path_also_in_pushed_files(self, tmp_path: Path):
+        """The two sets are disjoint at rest; the AND-NOT in the overlay
+        defends against a transient mid-drain overlap. When a path is in
+        BOTH sets, pushed wins (matches the drain's promote-then-dequeue
+        ordering — the path has been confirmed in the container).
+        """
+        confirmed = tmp_path / "src" / "confirmed.txt"
+        config = self._config(tmp_path, pushed={confirmed})
+        result = apply_node_states_from_scope(
+            config, [confirmed], marked_push={confirmed},
+        )
+        assert result[confirmed].pushed is True
+        assert result[confirmed].pre_pushed is False
+
+    def test_pre_pushed_false_for_path_not_in_marked_push(self, tmp_path: Path):
+        """Default — pre_pushed is False for paths outside the marked_push set."""
+        other = tmp_path / "src" / "other.txt"
+        config = self._config(tmp_path)
+        result = apply_node_states_from_scope(
+            config, [other], marked_push={tmp_path / "src" / "queued.txt"},
+        )
+        assert result[other].pre_pushed is False
+
+    def test_marked_push_none_is_a_no_op(self, tmp_path: Path):
+        """No marked_push argument → no pre_pushed mutations (Stage 4 skipped)."""
+        p = tmp_path / "src" / "a.txt"
+        config = self._config(tmp_path)
+        result = apply_node_states_from_scope(config, [p])  # marked_push omitted
+        assert result[p].pre_pushed is False
+
+    def test_marked_push_empty_set_is_a_no_op(self, tmp_path: Path):
+        """Empty set → falsy → Stage 4 skipped."""
+        p = tmp_path / "src" / "a.txt"
+        config = self._config(tmp_path)
+        result = apply_node_states_from_scope(config, [p], marked_push=set())
+        assert result[p].pre_pushed is False
+
+
+# ──────────────────────────────────────────────
 # NS-0: NodeState mutual exclusivity validation
 # ──────────────────────────────────────────────
 

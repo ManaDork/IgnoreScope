@@ -182,6 +182,44 @@ class TestFileTruthTable:
         ns = NodeState(visibility="bogus", pushed=False)
         assert resolve_tree_state(ns, is_folder=False) == "FILE_HIDDEN"
 
+    # ── Phase B.2 — pre_pushed resolver routing ─────────────────────────────
+
+    def test_file_marked_push(self):
+        """A file with pre_pushed=True resolves to FILE_MARKED_PUSH."""
+        ns = NodeState(visibility="restricted", pushed=False, pre_pushed=True)
+        assert resolve_tree_state(ns, is_folder=False) == "FILE_MARKED_PUSH"
+
+    def test_file_marked_push_wins_over_masked(self):
+        """pre_pushed wins over FILE_MASKED on the restricted branch."""
+        ns = NodeState(
+            visibility="restricted", masked=True, mounted=True,
+            pushed=False, pre_pushed=True,
+        )
+        assert resolve_tree_state(ns, is_folder=False) == "FILE_MARKED_PUSH"
+
+    def test_file_pushed_still_wins_over_pre_pushed_when_both_set(self):
+        """The resolver branches on pre_pushed BEFORE pushed at the restricted
+        level, but pre_pushed only applies to restricted/virtual files —
+        accessible (visible/revealed) takes precedence on its own branch and
+        never reaches the pre_pushed check.
+        """
+        ns = NodeState(
+            visibility="accessible", revealed=True, pushed=False, pre_pushed=True,
+        )
+        # accessible+revealed never reaches the pre_pushed check
+        assert resolve_tree_state(ns, is_folder=False) == "FILE_REVEALED"
+
+    def test_folder_marked_push(self):
+        """A folder with pre_pushed=True resolves to FOLDER_MARKED_PUSH on the
+        restricted branch (folders with queued descendants).
+        """
+        ns = NodeState(
+            visibility="restricted",
+            has_pushed_descendant=True,
+            pre_pushed=True,
+        )
+        assert resolve_tree_state(ns, is_folder=True) == "FOLDER_MARKED_PUSH"
+
 
 # ===========================================================================
 # State Styles Dict
@@ -204,10 +242,12 @@ class TestStateStylesDict:
             "FOLDER_STENCIL_VOLUME", "FOLDER_STENCIL_AUTH",
             "FOLDER_REVEALED", "FOLDER_PUSHED_ANCESTOR",
             "FOLDER_CONTAINER_ONLY",
+            "FOLDER_MARKED_PUSH",
             "FILE_HIDDEN", "FILE_VISIBLE", "FILE_MASKED",
             "FILE_REVEALED", "FILE_PUSHED",
             "FILE_HOST_ORPHAN", "FILE_CONTAINER_ORPHAN",
             "FILE_CONTAINER_ONLY",
+            "FILE_MARKED_PUSH",
         }
         assert set(config.state_styles.keys()) == expected
 

@@ -155,6 +155,14 @@ class FileOperationsHandler:
         # Config-first: enqueue immediately, regardless of container state.
         add_marked_push(self._app.host_project_root, scope, [path])
 
+        # Recompute NodeState so the tree's pre_pushed axis reflects the new
+        # queue entry. The drain path (running container, below) reaches
+        # _recompute_states via reload_current_scope(data_only=True), but the
+        # enqueue-only path (missing/stopped container) returns early without
+        # ever entering that flow — request_recompute keeps the visual feedback
+        # honest for both branches.
+        self._app._mount_data_tree.request_recompute()
+
         from ..docker.names import build_docker_name
         from ..docker.container_ops import get_container_info
         container_name = build_docker_name(self._app.host_project_root, scope)

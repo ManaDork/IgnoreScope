@@ -130,6 +130,12 @@ _FOLDER_STATE_INPUTS: dict[str, dict] = {
     "FOLDER_STENCIL_AUTH":      {"visibility": "virtual", "stencil_tier": "auth"},
     "FOLDER_PUSHED_ANCESTOR":   {"visibility": "restricted", "has_visible_descendant": True},
     "FOLDER_CONTAINER_ONLY":    {"visibility": "virtual", "container_only": True},
+    # PLACEHOLDER style — visual identical to FOLDER_PUSHED_ANCESTOR for now.
+    # The dedicated "marked for push, not yet pushed" visual is deferred to the
+    # all-states style pass (planning/backlog/all-states-style-pass.md). The
+    # axis is shipped here so the resolver can wire pre_pushed properly; the
+    # all-states pass swaps in the final color/border.
+    "FOLDER_MARKED_PUSH":       {"visibility": "restricted", "has_visible_descendant": True},
 }
 
 # Generate folder state defs from formula
@@ -200,6 +206,11 @@ _FILE_STYLE_INPUTS: dict[str, dict] = {
     "FILE_HOST_ORPHAN":      {"visibility": "orphaned"},
     "FILE_CONTAINER_ORPHAN": {"visibility": "restricted", "container_orphaned": True},
     "FILE_CONTAINER_ONLY":   {"visibility": "virtual", "container_only": True},
+    # PLACEHOLDER style — visual identical to FILE_PUSHED for now. The dedicated
+    # "marked for push, not yet pushed" visual is deferred to the all-states
+    # style pass (planning/backlog/all-states-style-pass.md). Ships the axis +
+    # resolver wiring; the all-states pass swaps in the final color/border.
+    "FILE_MARKED_PUSH":      {"visibility": "restricted", "is_pushed": True},
 }
 
 # Generate file state defs from formula
@@ -253,6 +264,12 @@ def _resolve_file_state(node_state) -> str:
         return "FILE_VISIBLE"
     # restricted or virtual (files shouldn't be virtual, but fallback)
     host_orphaned = getattr(node_state, "host_orphaned", False)
+    # pre_pushed wins over pushed: by glossary invariant the two sets are
+    # disjoint at rest, but the AND-NOT in apply_node_states_from_scope
+    # defends against transient overlap mid-drain and the resolver follows
+    # the same precedence (intent before confirmation).
+    if getattr(node_state, "pre_pushed", False):
+        return "FILE_MARKED_PUSH"
     if node_state.pushed:
         if host_orphaned:
             return "FILE_HOST_ORPHAN"
@@ -301,6 +318,11 @@ def _resolve_folder_state(node_state, stencil_tier: str = "mirrored") -> str:
             return "FOLDER_MOUNTED"
         return "FOLDER_VISIBLE"
     # restricted or unknown
+    # pre_pushed wins over the generic PUSHED_ANCESTOR — gives the same
+    # has-visible-descendant cue but routes to the dedicated style entry
+    # so the all-states pass can differentiate the two.
+    if getattr(node_state, "pre_pushed", False):
+        return "FOLDER_MARKED_PUSH"
     if node_state.masked:
         return "FOLDER_MASKED"
     if has_vis_desc:
