@@ -280,6 +280,14 @@ class ConfigManager(QObject):
         Staged entries (from a previous interrupted Update) participate in the
         count and prompt: clicking "Now" drains them, restoring the preserved
         folder contents into the current container.
+
+        Container-existence gating: if no container exists for the current
+        scope, "Now" is futile — the drain would no-op return "Container not
+        created — N file(s) still queued". Worse, on the user's repro the
+        followup ``reload_current_scope(data_only=True)`` was the GUI-crash
+        trigger. When ``container_exists`` is False, replace the modal with a
+        non-modal status-bar message instead. The pre-container Push flow
+        (enqueue now, deliver on next Create Container) is preserved.
         """
         if not self._app.host_project_root:
             return
@@ -294,6 +302,18 @@ class ConfigManager(QObject):
         queued_staged = load_marked_staged(self._app.host_project_root, scope)
         n = len(queued_host) + len(queued_staged)
         if not n:
+            return
+
+        # Gate on container existence — no container means no useful "push now".
+        from ..docker.container_ops import container_exists
+        from ..docker.names import build_docker_name
+        docker_name = build_docker_name(self._app.host_project_root, scope)
+        if not container_exists(docker_name):
+            self._app.statusBar().showMessage(
+                f"{n} file(s) marked for push — will be delivered on next "
+                f"Create Container",
+                8000,
+            )
             return
 
         box = QMessageBox(self._app)

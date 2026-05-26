@@ -48,7 +48,11 @@ def test_placeholder_scope_no_prompt(app, tmp_path):
 def test_now_triggers_drain(app, tmp_path):
     cm = ConfigManager(app)
     add_marked_push(tmp_path, SCOPE, [tmp_path / "a.txt"])
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox:
+    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox, \
+         patch(
+             "IgnoreScope.docker.container_ops.container_exists",
+             return_value=True,
+         ):
         box = msgbox.return_value
         # clickedButton() returns the same object addButton() returned → the "Now" button.
         box.clickedButton.return_value = box.addButton.return_value
@@ -59,11 +63,50 @@ def test_now_triggers_drain(app, tmp_path):
 def test_delay_leaves_queue_and_shows_status(app, tmp_path):
     cm = ConfigManager(app)
     add_marked_push(tmp_path, SCOPE, [tmp_path / "a.txt"])
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox:
+    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox, \
+         patch(
+             "IgnoreScope.docker.container_ops.container_exists",
+             return_value=True,
+         ):
         # clickedButton() returns a fresh mock ≠ the "Now" button → "Delay".
         msgbox.return_value.clickedButton.return_value = object()
         cm._post_scope_load()
     app.file_ops_handler.drain_marked_push_now.assert_not_called()
     app.statusBar().showMessage.assert_called()
+    from IgnoreScope.core.marked_push import load_marked_push
+    assert load_marked_push(tmp_path, SCOPE) == {tmp_path / "a.txt"}
+
+
+# ── Phase B.1 — container-existence gating ──────────────────────────────────
+
+
+def test_no_container_replaces_modal_with_status_message(app, tmp_path):
+    """If no container exists for the current scope, the prompt is replaced
+    by a non-modal status-bar message. This is the user's E:\\GITM\\_OJAAF\\OJAAF
+    repro from files-marked-for-push-fatal-crash.md — clicking "Now" with no
+    container was the GUI-crash trigger (the followup data_only reload
+    rebuilt sibling/extension subtrees while the proxy held stale indices).
+    Removing the modal removes the trigger AND removes a misleading UX
+    affordance ("push now?" when there's nowhere to push).
+    """
+    cm = ConfigManager(app)
+    add_marked_push(tmp_path, SCOPE, [tmp_path / "a.txt"])
+    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox, \
+         patch(
+             "IgnoreScope.docker.container_ops.container_exists",
+             return_value=False,
+         ):
+        cm._post_scope_load()
+
+    # Modal NOT shown.
+    msgbox.assert_not_called()
+    # Drain NOT triggered.
+    app.file_ops_handler.drain_marked_push_now.assert_not_called()
+    # Status-bar message instead.
+    app.statusBar().showMessage.assert_called_once()
+    msg_arg = app.statusBar().showMessage.call_args.args[0]
+    assert "marked for push" in msg_arg
+    assert "Create Container" in msg_arg
+    # Queue untouched.
     from IgnoreScope.core.marked_push import load_marked_push
     assert load_marked_push(tmp_path, SCOPE) == {tmp_path / "a.txt"}
