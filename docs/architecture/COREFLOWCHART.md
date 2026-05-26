@@ -350,8 +350,9 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
     for `delivery="detached" + content_seed="folder" + preserve_on_update=True`
     specs. These are the "soft permanent" tier — lighter than a named
     volume but persistent across ordinary updates. There is no separate
-    "restore" helper anymore: the existing Phase-10a `drain_marked_push`
-    is the single cp-into-container engine and consumes the staged queue
+    "restore" helper anymore: the existing Phase-10a
+    `drain_with_user_feedback` (wrapping the `drain_marked_push` engine)
+    is the single cp-into-container path and consumes the staged queue
     that Phase 4b emits.
 
     Phase 4b  `_preserve_detached_folders` — runs BEFORE `docker compose
@@ -374,9 +375,11 @@ PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
                     `push-marked` can finish the job after the operator
                     resolves the underlying issue.
 
-    Phase 10a  `drain_marked_push` — single cp engine, runs AFTER
-                Phase 8a's `_detached_init`. Processes the host queue
-                first (today's behavior), then walks the staged queue:
+    Phase 10a  `drain_with_user_feedback` — canonical drain entry-point
+                wrapping `drain_marked_push` (the single cp engine) + an
+                inline `cleanup_consumed_snapshots`. Runs AFTER Phase 8a's
+                `_detached_init`. Processes the host queue first (today's
+                behavior), then walks the staged queue:
                 for each `StagedEntry` (sorted by target),
                 `ensure_container_directories([target])` self-mkdir's
                 the destination, then `push_directory_contents_to_container`

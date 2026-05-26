@@ -21,8 +21,12 @@ from IgnoreScope.core.marked_staged import (
     load_marked_staged,
     snapshot_path_for,
 )
+from IgnoreScope.core.op_result import OpResult
 from IgnoreScope.docker import marked_push_drain as mpd
-from IgnoreScope.docker.marked_push_drain import drain_marked_push
+from IgnoreScope.docker.marked_push_drain import (
+    drain_marked_push,
+    drain_with_user_feedback,
+)
 
 SCOPE = "dev"
 DOCKER = "proj-dev"
@@ -432,3 +436,64 @@ def test_progress_covers_host_plus_staged_total(project, host_file, config):
         )
 
     assert calls == [(1, 2), (2, 2)]
+
+
+# ---------------------------------------------------------------------------
+# drain_with_user_feedback wrapper — cleanup-always-runs contract.
+# ---------------------------------------------------------------------------
+# The wrapper is the canonical drain entry-point. Its only added value over
+# the engine is (1) the on_stale_cb / progress_cb kwarg names and (2) running
+# cleanup_consumed_snapshots after the drain returns. These tests pin the
+# cleanup contract specifically — flipping it back to orchestrator-only would
+# break the CLI / GUI drain paths that rely on it.
+
+def test_wrapper_runs_cleanup_on_normal_drain(project, host_file, config):
+    """Successful drain → cleanup runs once."""
+    with patch.object(mpd, "get_container_info", return_value=_running_info()), \
+         patch.object(mpd, "ensure_container_running", return_value=(True, "running")), \
+         patch.object(mpd, "exec_in_container", return_value=_mtime_probe(None)), \
+         patch.object(mpd, "push_file_to_container", return_value=(True, "ok")), \
+         patch.object(mpd, "cleanup_consumed_snapshots") as cleanup:
+        drain_with_user_feedback(project, SCOPE, config=config, on_stale_cb="replace")
+
+    cleanup.assert_called_once_with(project, SCOPE)
+
+
+def test_wrapper_runs_cleanup_on_empty_queue_early_return(tmp_path):
+    """Empty-queue early-return path also triggers cleanup — the GUI/CLI paths
+    must clean snapshots even when both queues happen to be empty (the user
+    may have manually drained then run push-marked).
+    """
+    fresh_config = ScopeDockerConfig(host_project_root=tmp_path, scope_name=SCOPE)
+    with patch.object(mpd, "cleanup_consumed_snapshots") as cleanup:
+        result = drain_with_user_feedback(tmp_path, SCOPE, config=fresh_config)
+
+    assert result.success
+    assert "No files queued" in result.message
+    cleanup.assert_called_once_with(tmp_path, SCOPE)
+
+
+def test_wrapper_runs_cleanup_on_container_not_running_failure(project, config):
+    """Even when the underlying drain fails (container won't start), cleanup
+    still runs — it's best-effort and only deletes consumed entries, so
+    running it on a failed drain is a no-op rather than a regression.
+    """
+    with patch.object(mpd, "get_container_info", return_value={"running": False, "exists": True}), \
+         patch.object(mpd, "ensure_container_running", return_value=(False, "won't start")), \
+         patch.object(mpd, "cleanup_consumed_snapshots") as cleanup:
+        result = drain_with_user_feedback(project, SCOPE, config=config)
+
+    assert not result.success
+    cleanup.assert_called_once_with(project, SCOPE)
+
+
+def test_wrapper_returns_engine_opresult_verbatim(project, host_file, config):
+    """The wrapper does not transform the engine's OpResult — same success
+    flag, same message, same details. Cleanup runs as a side effect only.
+    """
+    expected = OpResult(success=True, message="Drained 7 file(s)", details=["note"])
+    with patch.object(mpd, "drain_marked_push", return_value=expected), \
+         patch.object(mpd, "cleanup_consumed_snapshots"):
+        result = drain_with_user_feedback(project, SCOPE, config=config)
+
+    assert result is expected
