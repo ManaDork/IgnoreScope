@@ -212,6 +212,12 @@ class MenuManager:
         self.save_pushed_files_action.setToolTip("No scope config")
         docker_menu.addAction(self.save_pushed_files_action)
 
+        self.view_marked_push_action = QAction("View Marked for Push...", self._app)
+        self.view_marked_push_action.setToolTip(
+            "Review and act on the marked-push queue"
+        )
+        docker_menu.addAction(self.view_marked_push_action)
+
         docker_menu.addSeparator()
 
         self.launch_terminal_action = QAction("Launch Container in Terminal", self._app)

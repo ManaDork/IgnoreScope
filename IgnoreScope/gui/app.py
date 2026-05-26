@@ -235,6 +235,14 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         self.status_label.setObjectName("status_label")
         status_bar.addWidget(self.status_label)
 
+        # Marked-push badge on the right side — surfaces only when the queue
+        # has entries. Click opens MarkedPushDialog. See Phase B.3 of
+        # bugfix/gui-model-lifecycle-and-marked-push-ux for the rationale.
+        from .marked_push_badge import MarkedPushBadge
+        self.marked_push_badge = MarkedPushBadge(self, parent=status_bar)
+        status_bar.addPermanentWidget(self.marked_push_badge)
+        self.marked_push_badge.clicked.connect(self._show_marked_push_dialog)
+
     def _setup_docks(self):
         """Create 3 QDockWidgets with container layouts."""
 
@@ -440,6 +448,15 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         # Tree state -> config viewer + auto-save to disk
         self._mount_data_tree.stateChanged.connect(self._update_config_viewer)
         self._mount_data_tree.stateChanged.connect(self._auto_save_config)
+        # Marked-push badge — count refreshes on every queue mutation
+        # (enqueue, drain, scope switch).
+        self._mount_data_tree.stateChanged.connect(self.marked_push_badge.update_count)
+
+        # Container menu → View Marked for Push... opens the same dialog
+        # as the badge click.
+        self.menu_manager.view_marked_push_action.triggered.connect(
+            self._show_marked_push_dialog,
+        )
 
         # Container root panel — RMB context menu
         self.container_root_panel.openConfigLocationRequested.connect(
@@ -492,6 +509,29 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
             return
         if hasattr(self, 'config_manager') and self.host_project_root:
             self.config_manager.auto_save()
+
+    def _show_marked_push_dialog(self) -> None:
+        """Open the marked-push review dialog (modeless).
+
+        Triggered by the status-bar badge click or the Container menu →
+        "View Marked for Push..." action. Hosts per-row Reveal / Skip-and-
+        Unmark / Push now actions over the combined marked_push +
+        marked_staged queue.
+        """
+        if not self.host_project_root:
+            return
+        from .marked_push_dialog import MarkedPushDialog
+        dialog = MarkedPushDialog(self, parent=self)
+
+        # Reveal: scroll the scope view to the path and select it.
+        def _reveal(path):
+            try:
+                self._scope_view.reveal_path(path)
+            except AttributeError:
+                pass
+
+        dialog.revealRequested.connect(_reveal)
+        dialog.show()
 
     def _show_busy_dialog(self, message: str) -> 'QProgressDialog':
         """Show indeterminate progress dialog. Caller must .close()."""
