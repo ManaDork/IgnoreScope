@@ -28,10 +28,10 @@ def app(tmp_path):
 
 
 def test_empty_queue_no_prompt(app, tmp_path):
+    """Empty queues → no dialog, no drain, no status message."""
     cm = ConfigManager(app)
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox:
-        cm._post_scope_load()
-    msgbox.assert_not_called()
+    cm._post_scope_load()
+    app._show_marked_push_dialog.assert_not_called()
     app.file_ops_handler.drain_marked_push_now.assert_not_called()
 
 
@@ -40,39 +40,28 @@ def test_placeholder_scope_no_prompt(app, tmp_path):
     app._current_scope = PLACEHOLDER_SCOPE
     cm = ConfigManager(app)
     add_marked_push(tmp_path, PLACEHOLDER_SCOPE, [tmp_path / "a.txt"])
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox:
-        cm._post_scope_load()
-    msgbox.assert_not_called()
+    cm._post_scope_load()
+    app._show_marked_push_dialog.assert_not_called()
 
 
-def test_now_triggers_drain(app, tmp_path):
+def test_container_exists_opens_dialog_modally(app, tmp_path):
+    """Phase B.4 — when container exists + queue non-empty, _post_scope_load
+    opens MarkedPushDialog modally (replaces the old QMessageBox).
+    """
     cm = ConfigManager(app)
     add_marked_push(tmp_path, SCOPE, [tmp_path / "a.txt"])
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox, \
-         patch(
-             "IgnoreScope.docker.container_ops.container_exists",
-             return_value=True,
-         ):
-        box = msgbox.return_value
-        # clickedButton() returns the same object addButton() returned → the "Now" button.
-        box.clickedButton.return_value = box.addButton.return_value
+    with patch(
+        "IgnoreScope.docker.container_ops.container_exists",
+        return_value=True,
+    ):
         cm._post_scope_load()
-    app.file_ops_handler.drain_marked_push_now.assert_called_once()
-
-
-def test_delay_leaves_queue_and_shows_status(app, tmp_path):
-    cm = ConfigManager(app)
-    add_marked_push(tmp_path, SCOPE, [tmp_path / "a.txt"])
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox, \
-         patch(
-             "IgnoreScope.docker.container_ops.container_exists",
-             return_value=True,
-         ):
-        # clickedButton() returns a fresh mock ≠ the "Now" button → "Delay".
-        msgbox.return_value.clickedButton.return_value = object()
-        cm._post_scope_load()
+    # Dialog opened modally — no separate Now/Delay branching here; the
+    # dialog's own Push now button drives the drain.
+    app._show_marked_push_dialog.assert_called_once_with(modal=True)
+    # The QMessageBox is gone — no clickedButton-based dispatch.
     app.file_ops_handler.drain_marked_push_now.assert_not_called()
-    app.statusBar().showMessage.assert_called()
+    # Queue still intact (drain happens only if the user clicks Push now
+    # inside the dialog — the dialog's Push button calls drain itself).
     from IgnoreScope.core.marked_push import load_marked_push
     assert load_marked_push(tmp_path, SCOPE) == {tmp_path / "a.txt"}
 
@@ -91,15 +80,14 @@ def test_no_container_replaces_modal_with_status_message(app, tmp_path):
     """
     cm = ConfigManager(app)
     add_marked_push(tmp_path, SCOPE, [tmp_path / "a.txt"])
-    with patch("IgnoreScope.gui.config_manager.QMessageBox") as msgbox, \
-         patch(
-             "IgnoreScope.docker.container_ops.container_exists",
-             return_value=False,
-         ):
+    with patch(
+        "IgnoreScope.docker.container_ops.container_exists",
+        return_value=False,
+    ):
         cm._post_scope_load()
 
-    # Modal NOT shown.
-    msgbox.assert_not_called()
+    # Dialog NOT opened.
+    app._show_marked_push_dialog.assert_not_called()
     # Drain NOT triggered.
     app.file_ops_handler.drain_marked_push_now.assert_not_called()
     # Status-bar message instead.

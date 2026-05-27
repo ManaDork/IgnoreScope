@@ -670,6 +670,73 @@ class ScopeView(QWidget):
         """DEPRECATED — use `set_tracked_path` / `set_tracked_paths`."""
         self.set_tracked_path(path)
 
+    def reveal_path(self, path: Path) -> bool:
+        """Scroll to and select the row for ``path`` in the scope tree.
+
+        Distinct from ``set_tracked_paths`` — does NOT touch the tracked-
+        paths overlay (which is owned by cross-tree LocalHost selection
+        sync). This is a one-shot navigation used by ``MarkedPushDialog``'s
+        Reveal action: expand ancestors so the row is reachable, then
+        scrollTo + setCurrentIndex on the tree view.
+
+        Triggers lazy-load of folder children along the walk path —
+        otherwise a never-expanded folder reports rowCount=0 in the
+        proxy and the target row is unreachable. Children are loaded
+        via ``MountDataNode.load_children`` on the source side, then
+        the model's ``beginInsertRows``/``endInsertRows`` propagate the
+        new rows to the proxy.
+
+        Returns True if the path was found and revealed; False if the
+        path is outside the project root, masked away by the proxy
+        filter, or otherwise not present.
+        """
+        root_node = self._tree.root_node
+        if root_node is None:
+            return False
+        try:
+            rel = path.relative_to(root_node.path)
+        except ValueError:
+            return False
+        parts = rel.parts
+        if not parts:
+            return False
+
+        model = self._proxy
+        current_parent = QModelIndex()
+        matched = QModelIndex()
+        last_idx = len(parts) - 1
+        for i, part in enumerate(parts):
+            # Make sure the current parent's children are loaded — without
+            # this a never-expanded folder reports rowCount=0 and the walk
+            # bails out before reaching deeper rows.
+            if self._proxy.canFetchMore(current_parent):
+                self._proxy.fetchMore(current_parent)
+
+            found = False
+            for row in range(model.rowCount(current_parent)):
+                child_proxy = model.index(row, 0, current_parent)
+                if not child_proxy.isValid():
+                    continue
+                source_idx = self._proxy.mapToSource(child_proxy)
+                node = source_idx.internalPointer()
+                if node is not None and node.path.name == part:
+                    # Expand ancestors so the target row is reachable.
+                    # Leave the target itself unexpanded — the user clicked
+                    # "Reveal", not "Expand subtree".
+                    if i < last_idx:
+                        self._tree_view.expand(child_proxy)
+                    current_parent = child_proxy
+                    matched = child_proxy
+                    found = True
+                    break
+            if not found:
+                return False
+        if not matched.isValid():
+            return False
+        self._tree_view.scrollTo(matched)
+        self._tree_view.setCurrentIndex(matched)
+        return True
+
     # ── Branch-Indicator Mirror Chain ─────────────────────────────
     #
     # `expand_path` / `collapse_path` mirror LocalHost's branch-indicator

@@ -69,6 +69,10 @@ class MarkedPushDialog(QDialog):
         self._list = QListWidget(self)
         self._list.setObjectName("markedPushDialogList")
         self._list.setAlternatingRowColors(True)
+        # Double-clicking a row is a shortcut for the "Reveal in tree"
+        # button — same handler, same revealRequested emit. Staged rows
+        # remain a no-op (no host-tree path to reveal).
+        self._list.itemDoubleClicked.connect(self._on_row_double_clicked)
         root.addWidget(self._list, stretch=1)
 
         button_row = QHBoxLayout()
@@ -158,6 +162,21 @@ class MarkedPushDialog(QDialog):
         if kind != "host":
             return
         self.revealRequested.emit(payload)
+
+    def _on_row_double_clicked(self, item: QListWidgetItem) -> None:
+        """Double-click shortcut for the Reveal-in-tree action.
+
+        Identical effect to selecting the row + clicking the Reveal button.
+        Staged rows have no host-tree path, so the emit is suppressed for
+        them (same as :meth:`_on_reveal`).
+        """
+        payload = item.data(Qt.ItemDataRole.UserRole)
+        if payload is None:
+            return
+        kind, value = payload
+        if kind != "host":
+            return
+        self.revealRequested.emit(value)
 
     def _on_unmark(self) -> None:
         sel = self._selected_row()

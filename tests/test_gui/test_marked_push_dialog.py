@@ -144,3 +144,37 @@ def test_push_now_calls_full_drain(app_stub, tmp_path):
     dlg._on_push_now()
 
     app_stub.file_ops_handler.drain_marked_push_now.assert_called_once()
+
+
+def test_double_click_host_row_emits_reveal(app_stub, tmp_path):
+    """Phase B.4 — double-clicking a host row is a shortcut for the Reveal
+    button; emits revealRequested(path) with the row's host path.
+    """
+    target = tmp_path / "src" / "a.txt"
+    add_marked_push(tmp_path, SCOPE, [target])
+    dlg = MarkedPushDialog(app_stub)
+
+    captured: list[Path] = []
+    dlg.revealRequested.connect(lambda p: captured.append(p))
+
+    item = dlg._list.item(0)
+    dlg._on_row_double_clicked(item)
+
+    assert captured == [target]
+
+
+def test_double_click_staged_row_does_not_emit(app_stub, tmp_path):
+    """Staged rows have no host-tree path — double-click is a no-op."""
+    add_marked_staged(
+        tmp_path, SCOPE,
+        [StagedEntry(source=tmp_path / "snap", target="/c", is_dir=True)],
+    )
+    dlg = MarkedPushDialog(app_stub)
+
+    captured: list[Path] = []
+    dlg.revealRequested.connect(lambda p: captured.append(p))
+
+    item = dlg._list.item(0)
+    dlg._on_row_double_clicked(item)
+
+    assert captured == []

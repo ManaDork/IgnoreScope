@@ -510,13 +510,18 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         if hasattr(self, 'config_manager') and self.host_project_root:
             self.config_manager.auto_save()
 
-    def _show_marked_push_dialog(self) -> None:
-        """Open the marked-push review dialog (modeless).
+    def _show_marked_push_dialog(self, *, modal: bool = False) -> None:
+        """Open the marked-push review dialog.
 
-        Triggered by the status-bar badge click or the Container menu →
-        "View Marked for Push..." action. Hosts per-row Reveal / Skip-and-
-        Unmark / Push now actions over the combined marked_push +
-        marked_staged queue.
+        Triggered by:
+          * Status-bar badge click — modeless (``modal=False``).
+          * Container menu → "View Marked for Push..." — modeless.
+          * ``ConfigManager._post_scope_load`` when the container exists +
+            queue is non-empty — **modal** (``modal=True``); replaces the
+            old binary QMessageBox prompt.
+
+        Hosts per-row Reveal / Skip-and-Unmark + bulk Push now / Close
+        actions over the combined marked_push + marked_staged queue.
         """
         if not self.host_project_root:
             return
@@ -524,14 +529,13 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         dialog = MarkedPushDialog(self, parent=self)
 
         # Reveal: scroll the scope view to the path and select it.
-        def _reveal(path):
-            try:
-                self._scope_view.reveal_path(path)
-            except AttributeError:
-                pass
+        dialog.revealRequested.connect(self._scope_view.reveal_path)
 
-        dialog.revealRequested.connect(_reveal)
-        dialog.show()
+        if modal:
+            dialog.setModal(True)
+            dialog.exec()
+        else:
+            dialog.show()
 
     def _show_busy_dialog(self, message: str) -> 'QProgressDialog':
         """Show indeterminate progress dialog. Caller must .close()."""

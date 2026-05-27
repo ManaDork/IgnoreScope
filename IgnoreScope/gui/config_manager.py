@@ -316,23 +316,13 @@ class ConfigManager(QObject):
             )
             return
 
-        box = QMessageBox(self._app)
-        box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Files Marked for Push")
-        box.setText(f"{n} file(s) marked for push — push now?")
-        now_btn = box.addButton("Now", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Delay", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(now_btn)
-        box.exec()
-
-        if box.clickedButton() is now_btn:
-            result = self._app.file_ops_handler.drain_marked_push_now()
-            self._app.statusBar().showMessage(result.message, 8000)
-        else:
-            self._app.statusBar().showMessage(
-                f"{n} file(s) still queued — reload the project to be re-prompted, "
-                f"or use Push / push-marked", 8000,
-            )
+        # Container exists + queue non-empty → open the rich MarkedPushDialog
+        # modally. Replaces the prior binary QMessageBox (Now / Delay) with
+        # the per-row review surface — same intrusive scope-load timing,
+        # richer choices (Reveal / Skip-and-Unmark / Push now / Close).
+        # Push now is the default action (Enter triggers it), matching the
+        # old modal's default-Now affordance.
+        self._app._show_marked_push_dialog(modal=True)
 
     def reload_current_scope(self, *, data_only: bool = False) -> None:
         """Re-read the current scope's config from disk into the shared tree.
