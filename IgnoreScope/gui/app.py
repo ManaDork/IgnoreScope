@@ -520,8 +520,10 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
             queue is non-empty — **modal** (``modal=True``); replaces the
             old binary QMessageBox prompt.
 
-        Hosts per-row Reveal / Skip-and-Unmark + bulk Push now / Close
-        actions over the combined marked_push + marked_staged queue.
+        Hosts per-row Reveal (UX path to unmark via tree RMB — not yet
+        implemented, see planning/backlog/tree-rmb-unmark-actions.md)
+        and bulk Push Marked Files / Close actions over the combined
+        marked_push + marked_staged queue.
         """
         if not self.host_project_root:
             return

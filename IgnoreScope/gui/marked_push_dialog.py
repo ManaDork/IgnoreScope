@@ -1,20 +1,24 @@
 """Marked-Push review dialog.
 
-Phase B.3 of bugfix/gui-model-lifecycle-and-marked-push-ux. A dedicated
-surface for reviewing/acting on the marked-push queue independent of
-the once-per-scope-load modal. Opens from ``MarkedPushBadge`` (status
-bar) or the Container → View Marked for Push menu entry.
+Phase B.3 / B.4 of bugfix/gui-model-lifecycle-and-marked-push-ux. A
+dedicated surface for reviewing/acting on the marked-push queue
+independent of the once-per-scope-load modal. Opens from
+``MarkedPushBadge`` (status bar), the Container → View Marked for Push
+menu entry, or the scope-load prompt itself (modally, when the container
+exists).
 
-Each row lists one queued path with three actions:
+Each row lists one queued path. Buttons:
   * **Reveal in tree** — scroll the scope view to the path and select it.
-  * **Skip and Unmark** — drop the path from both the marked-push queue
-    and ``config.pushed_files`` (matches the drain's ``skip_and_unmark``
-    semantic).
-  * **Push now** — runs the full drain via
+    This is also the UX path to unmark a file: reveal first, then use
+    the tree's RMB. *(Today the tree's RMB does NOT yet expose unmark
+    actions for marked_push / pushed_files — tracked in
+    planning/backlog/tree-rmb-unmark-actions.md.)*
+  * **Push Marked Files** — runs the full drain via
     ``FileOperationsHandler.drain_marked_push_now()`` then closes the
     dialog. Per-file drain is deferred (the engine currently errors on
     the file-missing-from-list path and that case lacks test coverage —
     see ``planning/backlog/per-file-drain-with-filter.md``).
+  * **Close** — dismiss; queue stays intact; the badge remains visible.
 
 Cross-references:
   - ``files-marked-for-push-fatal-crash.md`` Design UX pass #3.
@@ -80,13 +84,9 @@ class MarkedPushDialog(QDialog):
         self._reveal_btn.clicked.connect(self._on_reveal)
         button_row.addWidget(self._reveal_btn)
 
-        self._unmark_btn = QPushButton("Skip and Unmark", self)
-        self._unmark_btn.clicked.connect(self._on_unmark)
-        button_row.addWidget(self._unmark_btn)
-
         button_row.addStretch(1)
 
-        self._push_btn = QPushButton("Push now", self)
+        self._push_btn = QPushButton("Push Marked Files", self)
         self._push_btn.setDefault(True)
         self._push_btn.clicked.connect(self._on_push_now)
         button_row.addWidget(self._push_btn)
@@ -177,35 +177,6 @@ class MarkedPushDialog(QDialog):
         if kind != "host":
             return
         self.revealRequested.emit(value)
-
-    def _on_unmark(self) -> None:
-        sel = self._selected_row()
-        if sel is None:
-            return
-        kind, payload = sel
-        if self._app.host_project_root is None:
-            return
-        scope = getattr(self._app, "_current_scope", None)
-        if not scope:
-            return
-
-        if kind == "host":
-            from ..core.marked_push import remove_marked_push
-            remove_marked_push(self._app.host_project_root, scope, [payload])
-            # skip_and_unmark also drops the path from pushed_files —
-            # match the drain's semantic so a previously-confirmed file
-            # the user is abandoning is fully forgotten.
-            tree = self._app._mount_data_tree
-            if payload in tree._pushed_files:
-                tree._pushed_files.discard(payload)
-        else:
-            # Staged entry — remove from marked_staged.
-            from ..core.marked_staged import remove_marked_staged
-            remove_marked_staged(self._app.host_project_root, scope, [payload])
-
-        # Refresh the tree state so the visual (pre_pushed) clears.
-        self._app._mount_data_tree.request_recompute()
-        self._refresh()
 
     def _on_push_now(self) -> None:
         """Trigger the full drain (per Decision lock in plan §B.3).

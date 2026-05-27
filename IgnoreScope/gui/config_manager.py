@@ -319,8 +319,8 @@ class ConfigManager(QObject):
         # Container exists + queue non-empty → open the rich MarkedPushDialog
         # modally. Replaces the prior binary QMessageBox (Now / Delay) with
         # the per-row review surface — same intrusive scope-load timing,
-        # richer choices (Reveal / Skip-and-Unmark / Push now / Close).
-        # Push now is the default action (Enter triggers it), matching the
+        # richer choices (Reveal / Push Marked Files / Close). "Push Marked
+        # Files" is the default action (Enter triggers it), matching the
         # old modal's default-Now affordance.
         self._app._show_marked_push_dialog(modal=True)
 

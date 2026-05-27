@@ -103,36 +103,6 @@ def test_reveal_no_op_for_staged_row(app_stub, tmp_path):
     assert captured == []
 
 
-def test_unmark_host_removes_from_queue(app_stub, tmp_path):
-    """Skip-and-Unmark on a host row drops it from marked_push AND from
-    pushed_files (matching the drain's skip_and_unmark semantic).
-    """
-    target = tmp_path / "src" / "a.txt"
-    add_marked_push(tmp_path, SCOPE, [target])
-    # Pre-seed pushed_files so we can observe the discard.
-    app_stub._mount_data_tree._pushed_files.add(target)
-
-    dlg = MarkedPushDialog(app_stub)
-    dlg._list.setCurrentRow(0)
-    dlg._on_unmark()
-
-    assert load_marked_push(tmp_path, SCOPE) == set()
-    assert target not in app_stub._mount_data_tree._pushed_files
-
-
-def test_unmark_staged_removes_from_staged_queue(app_stub, tmp_path):
-    entry = StagedEntry(
-        source=tmp_path / "snap", target="/c", is_dir=True,
-    )
-    add_marked_staged(tmp_path, SCOPE, [entry])
-
-    dlg = MarkedPushDialog(app_stub)
-    dlg._list.setCurrentRow(0)
-    dlg._on_unmark()
-
-    assert load_marked_staged(tmp_path, SCOPE) == set()
-
-
 def test_push_now_calls_full_drain(app_stub, tmp_path):
     """Push now triggers the full drain via drain_marked_push_now (Decision
     locked in plan §B.3: per-file drain deferred — engine errors on the
