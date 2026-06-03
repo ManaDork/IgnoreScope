@@ -469,6 +469,19 @@ class LocalHostView(QWidget):
                     lambda: self._model.pushToggleRequested.emit(path, True)
                 )
                 menu.addAction(push_action)
+            # Unmark for Push — visible only when the file is in the marked-push
+            # queue (NodeState.pre_pushed axis from Phase B.2). Mirrors how
+            # Reveal-in-tree from MarkedPushDialog is the UX path to unmark:
+            # reveal in tree, RMB → Unmark for Push. Single-row instantaneous
+            # remove; no confirmation prompt (symmetric with how add_marked_push
+            # works — undo handles regret).
+            state = self._tree.get_node_state(path)
+            if getattr(state, "pre_pushed", False):
+                unmark_action = QAction("Unmark for Push", menu)
+                unmark_action.triggered.connect(
+                    lambda: self._on_unmark_for_push(path),
+                )
+                menu.addAction(unmark_action)
             menu.addSeparator()
 
         # Folder navigation actions
@@ -627,3 +640,24 @@ class LocalHostView(QWidget):
             child_index = model.index(row, 0, index)
             if child_index.isValid():
                 self._expand_recursive(child_index)
+
+    def _on_unmark_for_push(self, path: Path) -> None:
+        """Drop ``path`` from the marked-push queue + refresh visuals.
+
+        Triggered by the file-row "Unmark for Push" RMB entry. The action
+        is the UI counterpart to ``add_marked_push``: instantaneous,
+        no-confirm, single-path. Reads scope from the tree (the same
+        source ``_recompute_states`` uses to populate the ``pre_pushed``
+        axis), then mutates the queue via the canonical core API.
+
+        ``request_recompute`` re-runs Stage 4 of ``apply_node_states_from_scope``
+        with the now-shorter marked_push set, clearing ``pre_pushed`` on
+        the row and dropping the visual.
+        """
+        host_project_root = self._tree.host_project_root
+        scope = self._tree.current_scope
+        if host_project_root is None or not scope:
+            return
+        from ..core.marked_push import remove_marked_push
+        remove_marked_push(host_project_root, scope, [path])
+        self._tree.request_recompute()
