@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QModelIndex
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
     QTreeView,
@@ -144,6 +144,76 @@ class LocalHostView(QWidget):
         root_index = self._proxy.index(0, 0)
         if root_index.isValid():
             self._tree_view.expand(root_index)
+
+    def reveal_path(self, path: Path) -> bool:
+        """Scroll to and select the row for ``path`` in the local-host tree.
+
+        Mirror of ``ScopeView.reveal_path``. Used by ``MarkedPushDialog``'s
+        Reveal action so both panels light up when the user requests
+        navigation — the local-host panel is where the host file lives,
+        the scope panel shows the container's perspective; revealing in
+        both gives consistent feedback regardless of where the user is
+        looking.
+
+        Walks the proxy from root toward the target, triggering
+        ``fetchMore`` on lazy-loaded folders so the proxy mapping
+        actually contains the deeper rows. Expands ancestor folders so
+        the target row is reachable; leaves the target itself
+        unexpanded. Falls back to revealing the deepest reachable
+        ancestor when the exact path is filtered out (e.g., the file is
+        under a mask), so the user lands at the closest visible context
+        rather than nowhere.
+
+        Returns True iff the exact path was revealed; False if only a
+        partial ancestor match was reachable or the path is outside the
+        project root.
+        """
+        root_node = self._tree.root_node
+        if root_node is None:
+            return False
+        try:
+            rel = path.relative_to(root_node.path)
+        except ValueError:
+            return False
+        parts = rel.parts
+        if not parts:
+            return False
+
+        model = self._proxy
+        current_parent = QModelIndex()
+        matched = QModelIndex()
+        deepest = QModelIndex()
+        last_idx = len(parts) - 1
+        full_match = True
+        for i, part in enumerate(parts):
+            if self._proxy.canFetchMore(current_parent):
+                self._proxy.fetchMore(current_parent)
+
+            found = False
+            for row in range(model.rowCount(current_parent)):
+                child_proxy = model.index(row, 0, current_parent)
+                if not child_proxy.isValid():
+                    continue
+                source_idx = self._proxy.mapToSource(child_proxy)
+                node = source_idx.internalPointer()
+                if node is not None and node.path.name == part:
+                    if i < last_idx:
+                        self._tree_view.expand(child_proxy)
+                    current_parent = child_proxy
+                    matched = child_proxy
+                    deepest = child_proxy
+                    found = True
+                    break
+            if not found:
+                full_match = False
+                break
+
+        target = matched if full_match else deepest
+        if not target.isValid():
+            return False
+        self._tree_view.scrollTo(target)
+        self._tree_view.setCurrentIndex(target)
+        return full_match
 
     @property
     def tree_view(self) -> QTreeView:

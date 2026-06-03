@@ -98,6 +98,13 @@ class MarkedPushDialog(QDialog):
         root.addLayout(button_row)
 
         self._refresh()
+        # Gate Push Marked Files on container existence — clicking with no
+        # container would just be the drain's "Container not created" no-op
+        # path. Disable + tooltip the button instead. The pre-container Push
+        # flow (enqueue + drain on next Create Container) is still preserved
+        # by the queue itself; nothing the user can do here helps until the
+        # container exists.
+        self._apply_container_gating()
 
     # ── Population ─────────────────────────────────────────────────
 
@@ -125,6 +132,40 @@ class MarkedPushDialog(QDialog):
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, ("staged", entry))
             self._list.addItem(item)
+
+    def _apply_container_gating(self) -> None:
+        """Disable Push Marked Files when no container exists.
+
+        Symmetric with ``ConfigManager._post_scope_load``'s no-container
+        branch (which suppresses the modal entirely): clicking Push here
+        with no container would dead-end on the drain's "Container not
+        created — N still queued" early-return. Disabling the button +
+        tooltip is the same outcome with clearer feedback.
+        """
+        if self._app.host_project_root is None:
+            self._push_btn.setEnabled(False)
+            self._push_btn.setToolTip("No project loaded")
+            return
+        scope = getattr(self._app, "_current_scope", None)
+        if not scope:
+            self._push_btn.setEnabled(False)
+            self._push_btn.setToolTip("No scope selected")
+            return
+        try:
+            from ..docker.container_ops import container_exists
+            from ..docker.names import build_docker_name
+            docker_name = build_docker_name(self._app.host_project_root, scope)
+            exists = container_exists(docker_name)
+        except Exception:
+            exists = False
+        if not exists:
+            self._push_btn.setEnabled(False)
+            self._push_btn.setToolTip(
+                "No container — files will be delivered on next Create Container",
+            )
+        else:
+            self._push_btn.setEnabled(True)
+            self._push_btn.setToolTip("")
 
     def _read_queues(self) -> tuple[set[Path], set]:
         """Best-effort read of both queue files."""

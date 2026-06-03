@@ -29,11 +29,19 @@ def _qapp():
 
 
 @pytest.fixture
-def app_stub(tmp_path):
+def app_stub(tmp_path, monkeypatch):
     """Minimal app stand-in: host_project_root, _current_scope, a real
     MountDataTree (so request_recompute works), and a MagicMock for
     file_ops_handler so Push-now's drain call is observable.
+
+    Mocks ``container_exists=True`` by default so the dialog's Push button
+    is enabled — matches the most common test scenario. Tests covering
+    the no-container path override this with their own monkeypatch.
     """
+    monkeypatch.setattr(
+        "IgnoreScope.docker.container_ops.container_exists",
+        lambda _docker_name: True,
+    )
     tree = MountDataTree()
     tree.set_host_project_root(tmp_path)
     stub = SimpleNamespace(
@@ -148,3 +156,57 @@ def test_double_click_staged_row_does_not_emit(app_stub, tmp_path):
     dlg._on_row_double_clicked(item)
 
     assert captured == []
+
+
+# ── Phase B.5 — Push Marked Files gated on container existence ─────────────
+
+
+def test_push_button_disabled_when_no_container(tmp_path, monkeypatch):
+    """If no container exists for the current scope, Push Marked Files is
+    disabled with an informative tooltip. Clicking it would otherwise
+    dead-end on the drain's "Container not created" early return.
+    """
+    monkeypatch.setattr(
+        "IgnoreScope.docker.container_ops.container_exists",
+        lambda _docker_name: False,
+    )
+    tree = MountDataTree()
+    tree.set_host_project_root(tmp_path)
+    stub = SimpleNamespace(
+        host_project_root=tmp_path,
+        _current_scope=SCOPE,
+        _mount_data_tree=tree,
+        file_ops_handler=MagicMock(),
+    )
+    dlg = MarkedPushDialog(stub)
+
+    assert not dlg._push_btn.isEnabled()
+    assert "Create Container" in dlg._push_btn.toolTip()
+    # Reveal button stays enabled — the user can still navigate to files.
+    assert dlg._reveal_btn.isEnabled()
+    # Close stays enabled — always escapable.
+    assert dlg._close_btn.isEnabled()
+
+
+def test_push_button_enabled_when_container_exists(app_stub):
+    """Container exists → button enabled, no tooltip warning."""
+    dlg = MarkedPushDialog(app_stub)
+    assert dlg._push_btn.isEnabled()
+    assert dlg._push_btn.toolTip() == ""
+
+
+def test_push_button_disabled_with_no_project(tmp_path, monkeypatch):
+    """No host_project_root → disabled with "No project loaded" tooltip."""
+    monkeypatch.setattr(
+        "IgnoreScope.docker.container_ops.container_exists",
+        lambda _docker_name: True,
+    )
+    stub = SimpleNamespace(
+        host_project_root=None,
+        _current_scope=SCOPE,
+        _mount_data_tree=MountDataTree(),
+        file_ops_handler=MagicMock(),
+    )
+    dlg = MarkedPushDialog(stub)
+    assert not dlg._push_btn.isEnabled()
+    assert "No project" in dlg._push_btn.toolTip()

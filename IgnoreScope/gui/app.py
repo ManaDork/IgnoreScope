@@ -530,8 +530,12 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         from .marked_push_dialog import MarkedPushDialog
         dialog = MarkedPushDialog(self, parent=self)
 
-        # Reveal: scroll the scope view to the path and select it.
+        # Reveal hits BOTH panels — the host file lives in the local-host
+        # tree, the container's perspective lives in the scope tree. Lighting
+        # up both gives consistent feedback regardless of which panel the
+        # user was looking at when they opened the dialog.
         dialog.revealRequested.connect(self._scope_view.reveal_path)
+        dialog.revealRequested.connect(self._local_host.reveal_path)
 
         if modal:
             dialog.setModal(True)
