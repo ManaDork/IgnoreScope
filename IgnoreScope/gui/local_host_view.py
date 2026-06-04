@@ -658,6 +658,7 @@ class LocalHostView(QWidget):
         for node in nodes:
             self._model.pushToggleRequested.emit(node.path, toggle_value)
         self._tree.end_batch()
+        self._clear_selection()
 
     def _batch_unmark(self, nodes: list[MountDataNode]) -> None:
         """Batch unmark — drop multiple files from the marked-push queue.
