@@ -454,35 +454,12 @@ class LocalHostView(QWidget):
 
             menu.addSeparator()
 
-        # ── File actions ──
-        if node.is_file:
-            is_pushed = self._tree.is_pushed(path)
-            if is_pushed:
-                remove_action = QAction("Remove from Container", menu)
-                remove_action.triggered.connect(
-                    lambda: self._model.pushToggleRequested.emit(path, False)
-                )
-                menu.addAction(remove_action)
-            else:
-                push_action = QAction("Push to Container", menu)
-                push_action.triggered.connect(
-                    lambda: self._model.pushToggleRequested.emit(path, True)
-                )
-                menu.addAction(push_action)
-            # Unmark for Push — visible only when the file is in the marked-push
-            # queue (NodeState.pre_pushed axis from Phase B.2). Mirrors how
-            # Reveal-in-tree from MarkedPushDialog is the UX path to unmark:
-            # reveal in tree, RMB → Unmark for Push. Single-row instantaneous
-            # remove; no confirmation prompt (symmetric with how add_marked_push
-            # works — undo handles regret).
-            state = self._tree.get_node_state(path)
-            if getattr(state, "pre_pushed", False):
-                unmark_action = QAction("Unmark for Push", menu)
-                unmark_action.triggered.connect(
-                    lambda: self._on_unmark_for_push(path),
-                )
-                menu.addAction(unmark_action)
-            menu.addSeparator()
+        # NOTE: file-node menu items (Push / Sync / Remove / Unmark for Push)
+        # live in _build_file_menu — that's the dispatcher's destination for
+        # single-file RMB (see _show_context_menu:385-389). This method only
+        # ever receives folder nodes; the prior `if node.is_file:` block here
+        # was dead code that escaped detection because tests called this
+        # method directly with file nodes, bypassing dispatch.
 
         # Folder navigation actions
         if not node.is_file:
@@ -518,8 +495,11 @@ class LocalHostView(QWidget):
         self, menu: QMenu, nodes: list[MountDataNode],
     ) -> None:
         count = len(nodes)
+        # Dispatcher (_show_context_menu) only routes all-folder selections
+        # to this method; all-file goes to _build_multi_select_file_menu;
+        # mixed becomes a disabled info at the dispatcher. So `nodes` is
+        # folder-only here.
         folders = [n for n in nodes if not n.is_file]
-        files = [n for n in nodes if n.is_file]
 
         # Batch Remove Virtual Mount when all selected folders are detached-mounted
         if folders and all(
@@ -550,26 +530,37 @@ class LocalHostView(QWidget):
             )
             menu.addAction(reveal_action)
 
-        # File batch actions
-        if files:
-            if folders:
-                menu.addSeparator()
-            push_action = QAction(f"Push ({len(files)} files)", menu)
-            push_action.triggered.connect(
-                lambda: [self._model.pushToggleRequested.emit(n.path, True) for n in files]
-            )
-            menu.addAction(push_action)
-
-        if not folders and not files:
+        # NOTE: `files` filter above is dead — _show_context_menu only
+        # dispatches all-folder multi-select to this method (mixed
+        # selections become a disabled info label at the dispatcher).
+        # The all-file multi-select case goes to _build_multi_select_file_menu.
+        if not folders:
             info = QAction(f"{count} items selected", menu)
             info.setEnabled(False)
             menu.addAction(info)
 
     def _build_file_menu(self, menu: QMenu, node: MountDataNode) -> None:
-        """File context menu — push/sync/remove (per file_actions)."""
-        is_pushed = self._tree.is_pushed(node.path)
+        """File context menu — push/sync/remove/unmark (per file_actions).
 
-        if not is_pushed and "push" in self._config.file_actions:
+        Single-file RMB on a file node is dispatched here from
+        ``_show_context_menu``. NOT ``_build_single_select_menu`` — that
+        method only receives folders.
+
+        Action visibility:
+          * Push — when not pushed AND not pre_pushed; gated on "push".
+          * Sync / Remove — when pushed; gated on "push" / "remove".
+          * Unmark for Push — when pre_pushed (queued, not yet confirmed);
+            gated on "push" (the inverse of the Push capability).
+
+        ``pushed`` and ``pre_pushed`` are disjoint at rest per the glossary
+        invariant — promotion is atomic-with-dequeue — so the unmark and
+        the push/remove branches are mutually exclusive.
+        """
+        is_pushed = self._tree.is_pushed(node.path)
+        state = self._tree.get_node_state(node.path)
+        is_pre_pushed = getattr(state, "pre_pushed", False)
+
+        if not is_pushed and not is_pre_pushed and "push" in self._config.file_actions:
             push_action = QAction("Push", menu)
             push_action.triggered.connect(
                 lambda: self._model.pushToggleRequested.emit(node.path, True),
@@ -588,33 +579,73 @@ class LocalHostView(QWidget):
                     lambda: self._model.pushToggleRequested.emit(node.path, False),
                 )
                 menu.addAction(remove_action)
+        elif is_pre_pushed and "push" in self._config.file_actions:
+            unmark_action = QAction("Unmark for Push", menu)
+            unmark_action.triggered.connect(
+                lambda: self._on_unmark_for_push(node.path),
+            )
+            menu.addAction(unmark_action)
 
     def _build_multi_select_file_menu(
         self, menu: QMenu, file_nodes: list[MountDataNode],
     ) -> None:
-        """Multi-select file context menu — batch push/remove."""
-        all_pushed = all(
-            self._tree.is_in_raw_set("pushed", n.path) for n in file_nodes
-        )
-        none_pushed = all(
-            not self._tree.is_in_raw_set("pushed", n.path) for n in file_nodes
-        )
+        """Multi-select file context menu — batch push/remove/unmark.
 
-        if none_pushed and "push" in self._config.file_actions:
-            push_action = QAction(f"Push ({len(file_nodes)} files)", menu)
-            push_action.triggered.connect(
-                lambda: self._batch_toggle(file_nodes, True),
-            )
-            menu.addAction(push_action)
-        elif all_pushed and "remove" in self._config.file_actions:
-            remove_action = QAction(f"Remove ({len(file_nodes)} files)", menu)
+        Three rest-state buckets per file: pushed (in container),
+        pre_pushed (queued not yet confirmed), or neither. The buckets
+        are mutually exclusive at rest by the marked-push contract.
+
+        Gating:
+          * all pushed → Remove (N files); gated on "remove".
+          * all pre_pushed → Unmark for Push (N files); gated on "push".
+          * none pushed AND none pre_pushed → Push (N files); gated on
+            "push". (Push on already-queued files is an idempotent
+            no-op so partial-clean cases COULD reuse Push, but offering
+            it only on fully-clean selections keeps the UX honest.)
+          * Anything else → disabled info label.
+        """
+        total = len(file_nodes)
+        if total == 0:
+            return
+
+        pushed_count = sum(
+            1 for n in file_nodes
+            if self._tree.is_in_raw_set("pushed", n.path)
+        )
+        pre_pushed_count = sum(
+            1 for n in file_nodes
+            if self._tree.is_in_raw_set("marked_push", n.path)
+        )
+        all_pushed = pushed_count == total
+        all_pre_pushed = pre_pushed_count == total
+        none_pushed_or_queued = pushed_count == 0 and pre_pushed_count == 0
+
+        if "push" in self._config.file_actions:
+            if all_pre_pushed:
+                unmark_action = QAction(
+                    f"Unmark for Push ({total} files)", menu,
+                )
+                unmark_action.triggered.connect(
+                    lambda: self._batch_unmark(file_nodes),
+                )
+                menu.addAction(unmark_action)
+            elif none_pushed_or_queued:
+                push_action = QAction(f"Push ({total} files)", menu)
+                push_action.triggered.connect(
+                    lambda: self._batch_toggle(file_nodes, True),
+                )
+                menu.addAction(push_action)
+
+        if all_pushed and "remove" in self._config.file_actions:
+            remove_action = QAction(f"Remove ({total} files)", menu)
             remove_action.triggered.connect(
                 lambda: self._batch_toggle(file_nodes, False),
             )
             menu.addAction(remove_action)
-        else:
+
+        if not menu.actions():
             info = QAction(
-                f"{len(file_nodes)} files (mixed push states)", menu,
+                f"{total} files (mixed states — no batch action)", menu,
             )
             info.setEnabled(False)
             menu.addAction(info)
@@ -627,6 +658,27 @@ class LocalHostView(QWidget):
         for node in nodes:
             self._model.pushToggleRequested.emit(node.path, toggle_value)
         self._tree.end_batch()
+
+    def _batch_unmark(self, nodes: list[MountDataNode]) -> None:
+        """Batch unmark — drop multiple files from the marked-push queue.
+
+        Calls ``remove_marked_push`` once with the full path list (one disk
+        write) then runs a single ``request_recompute`` inside a batch so
+        per-node state changes coalesce into one ``stateChanged`` emit.
+        """
+        host_project_root = self._tree.host_project_root
+        scope = self._tree.current_scope
+        if host_project_root is None or not scope:
+            return
+        from ..core.marked_push import remove_marked_push
+        self._tree.begin_batch()
+        try:
+            remove_marked_push(
+                host_project_root, scope, [n.path for n in nodes],
+            )
+            self._tree.request_recompute()
+        finally:
+            self._tree.end_batch()
         self._clear_selection()
 
     def _clear_selection(self) -> None:

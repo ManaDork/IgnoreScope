@@ -161,26 +161,41 @@ def relative_to_safe(path: Path, root: Path) -> Optional[Path]:
 
 
 def to_absolute_paths(paths: list, base_root: Path) -> set[Path]:
-    """Convert list of path strings to absolute Path set.
+    """Convert list of path strings to absolute, canonical-case Path set.
 
     Resolves relative paths against base_root. Absolute paths pass through.
     Replaces 3 identical nested to_absolute() functions that were cloned
     in local_mount_config.py, config.py (SiblingMount), and config.py (ScopeDockerConfig).
+
+    Each resulting path is ``.resolve()``-d so downstream callers (notably
+    ``apply_node_states_from_scope`` Stage 4's case-sensitive ``path in
+    states`` check on Windows) see a canonical form regardless of any case
+    drift in the JSON entries. ``base_root`` is typically already resolved
+    (e.g., ``MountDataTree.host_project_root``), but JSON entries can drift
+    case across multi-contributor checkouts or external tool writes — and
+    Windows' ``Path.__eq__`` is case-sensitive even though the FS is not.
+    ``resolve()`` returns absolute_path_unchanged when the target doesn't
+    exist, which is fine — the goal is canonical *form*, not existence
+    proof.
 
     Args:
         paths: List of path strings (relative POSIX or absolute)
         base_root: Base directory for resolving relative paths
 
     Returns:
-        Set of absolute Path objects
+        Set of absolute, resolved Path objects
     """
     result = set()
     for p in paths:
         path = Path(p)
-        if path.is_absolute():
+        if not path.is_absolute():
+            path = base_root / path
+        try:
+            result.add(path.resolve())
+        except OSError:
+            # resolve() can raise on Windows for malformed paths; fall back
+            # to the un-resolved form so the entry isn't silently dropped.
             result.add(path)
-        else:
-            result.add(base_root / path)
     return result
 
 

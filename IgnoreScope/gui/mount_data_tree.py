@@ -797,7 +797,8 @@ class MountDataTree(QObject):
         """Check membership — used for checkbox state and RMB context.
 
         Args:
-            field_name: One of 'mounted', 'detached_mounted', 'pushed'
+            field_name: One of 'mounted', 'detached_mounted', 'pushed',
+                'marked_push' (alias 'pre_pushed').
             path: Path to check
         """
         if field_name == 'mounted':
@@ -812,6 +813,20 @@ class MountDataTree(QObject):
             )
         elif field_name == 'pushed':
             return path in self._pushed_files
+        elif field_name in ('marked_push', 'pre_pushed'):
+            # Read the queue file each call — cheap (file is small;
+            # callers are RMB-driven, not paint-loop-driven). Returns
+            # False when scope isn't set yet (transient open-project
+            # window before switch_scope completes).
+            if not (self._host_project_root and self._current_scope):
+                return False
+            try:
+                from ..core.marked_push import load_marked_push
+                return path in load_marked_push(
+                    self._host_project_root, self._current_scope,
+                )
+            except Exception:
+                return False
         return False
 
     # ── File Tracking ─────────────────────────────────────────────
