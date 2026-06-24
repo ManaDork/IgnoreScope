@@ -988,6 +988,7 @@ Config toggle that force-hides the IgnoreScope config directory (`IGSC_DIR_NAME`
 
 **JSON Field:** `protection_mode`
 **Default:** `True` (absent ⇒ `True` — pre-existing configs are protected on load)
+**Classification:** Defensive security control. *Threat model:* a container reading or tampering with its own scope's IgnoreScope config directory (`.ignore_scope/`) — which would expose host-side mount/mask layout and let in-container code alter what the container is permitted to see. Secure-by-default (`True`) and absolute by design; see **Why Core** below.
 
 | Mode | Effect on `.ignore_scope/` in-container |
 |------|-----------------------------------------|
@@ -997,6 +998,13 @@ Config toggle that force-hides the IgnoreScope config directory (`IGSC_DIR_NAME`
 **Absolute.** Protection cannot be punched through: any `!`-reveal at or beneath a Protected Path is stripped before pathspec resolution, so a reveal under `.ignore_scope/` can never re-expose it. The only way to surface the config dir is `protection_mode=false`.
 
 **Derived at consume time, never serialized.** Only the boolean persists. The injected hide is computed during the consume-time hierarchy pass (see `mirrored` for the analogous consume-time derivation) and is **never written back** into `mount_specs` or any other JSON field.
+
+**Why Core (security boundary).** Protection is enforced in the Core hierarchy pass — not in the CLI, GUI, or Docker layer — because a security control belongs at the single non-bypassable chokepoint that every container-creation path flows through (`compute_container_hierarchy()` / `_process_root()`):
+
+- **Non-bypassable** — every consumer (CLI, GUI, a direct library import, future entry points) reaches the container through this Core computation, so no caller can route around the protection. The `protection_mode` kwarg defaults to `True` *on the Core function itself*, so even an un-wired caller stays protected.
+- **Fail-safe default** — the secure state is the structural default; opting out (`False`) is explicit and deliberate, never accidental.
+- **Code, not data** — the hide lives in code and is derived at consume time, never serialized, so it cannot be defeated by editing the user-editable, container-visible JSON. The enforcement deliberately lives *outside* the surface it protects.
+- **Single masking source** — hidden-set computation already belongs to Core; enforcing protection anywhere else would fork the masking logic (DRY) and create a second, weaker path. Absoluteness also *requires* Core placement: reveal-suppression must run before pathspec/reveal-priority resolution, which is a Core computation concern, not a downstream filter.
 
 **Implementation:** `core/hierarchy.py` — `_apply_protection()` strips reveals at/under `.ignore_scope` then force-hides the path; `_reveal_targets_protected()` is the suppression predicate. `compute_container_hierarchy()` / `_process_root()` take a `protection_mode` kwarg, wired at the four call sites in `docker/container_lifecycle.py`.
 
