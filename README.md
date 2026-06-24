@@ -54,7 +54,7 @@ Verify:
 ignorescope-docker --help
 ```
 
-This installs two entry points: `ignorescope-docker` and `IgnoreScope` (both run the same tool).
+This installs the `ignorescope-docker` command.
 
 ### Python Dependencies (handled automatically)
 
@@ -82,36 +82,27 @@ ignorescope-docker remove --yes
 
 See [USAGE.md](USAGE.md) for the full step-by-step workflow guide.
 
-## What's New in v0.4
+## What's New
 
-### Undo/Redo System (Phase 1)
-- **Full state capture** — snapshots now include mount_specs + pushed_files (not just mount_specs)
-- **Keyboard shortcuts** — Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z for undo/redo (menu-integrated)
-- **Signal infrastructure** — undoPerformed / redoPerformed signals reserved for UI integration (Phase 2 — deferred to backlog)
-- **DRY refactoring** — consolidated pattern operations, extracted state capture helper (~60 LOC saved)
+### v0.7 — Marked Push
+- **Unmark for Push (Local Host RMB)** — right-click a marked file in the Local Host tree to remove it from the push set.
+- **Marked Push subsystem** — `marked-push` / `marked-staged` queues let you stage files for push *before* the container exists; a single drain engine flushes them on a lifecycle hook.
+- **Config-first push** — the CLI gains `push-marked`; the GUI adds a status-bar badge and a review dialog for the pending push set.
+- **`pre_pushed` node state** — new MatrixState axis with its own placeholder styling. Reveal now reaches the Local Host tree, and Push is disabled when no container is running.
 
-### RMB Menu Logic Refinement
-- **Mutual exclusivity fix** — masked folders no longer show both "Unmask" and "Reveal" options
-- **Nesting support** — folders revealed by ancestor can now be masked (architecture-compliant)
+### v0.6 — Cross-Tree Coordination
+- **Independent selection coordinator** — the Local Host and Scope Config trees no longer fight over selection; multi-select survives programmatic expand/collapse cascades.
+- **Tracked-path overlay** — a teal outline mirrors the *other* tree's selection, decoupled from the selection model so routine updates don't wipe it.
+- **Branch-indicator mirror** — expanding/collapsing a Local Host folder mirrors one-way into the Scope tree.
+- **Cursor-primary RMB** — the row under the cursor is the context-menu action target.
+- **Fixes** — HCR-residency check skips container-only specs (no more false "not under host container root" after installing an extension); empty compose `volumes:` key omitted; wheel packaging corrected.
 
-### Menu Reorganization (v0.4.1)
-- **Extensions menu** — new top-level menu separates optional extensions (Claude CLI, Git) from Docker core
-- **Terminal preference moved** — terminal shell selection now in Edit menu (persistent user setting)
-- **Container menu refined** — groups lifecycle ops (create/update/recreate/remove) + launch terminal + scope config (add sibling, container root name)
-- **Launch menu removed** — terminal-related actions consolidated into Container and Edit menus
-- **Clearer UI hierarchy** — visual distinction between required Docker operations and optional extensions
+### v0.5 — Virtual Mount (per-spec delivery)
+- **Per-spec `delivery`** — each mount spec chooses `bind` (host bind-mount), `detached` (`docker cp`-seeded snapshot), or `volume` (named Docker volume), and a single scope can mix them.
+- **STENCIL nodes** — synthetic-origin nodes (`host_path` / `content_seed` / `preserve_on_update`) for content that lives only in the container.
+- **Unified isolation** — extension-owned volumes fold onto the same per-spec framework under one `vol_*` naming scheme; "isolation" became descriptive vocabulary rather than a separate mode.
 
-### Previous: v0.3
-- **Glassmorphism theme** — single consolidated `glassmorphism_v1_theme.json` drives all colors, gradients, and fonts
-- **Widget gradient backgrounds** — JSON-driven panel gradients for docks, status bar, config panel
-- **Formulaic gradient derivation** — `derive_gradient()` and `derive_file_style()` replace hand-built state definitions
-- **Categorical color system** — state classification with deep navy + vivid accent palette
-- **Tree highlight fix** — suppress Windows accent bleed in branch indicators, focus rects, and palette
-- **Visibility refactor** — pure STATE values (`accessible`, `restricted`, `virtual`) replacing mixed boolean flags
-- **New folder states** — `FOLDER_MOUNTED`, `FOLDER_MOUNTED_REVEALED`, `FOLDER_MIRRORED`, `FOLDER_MIRRORED_REVEALED`
-- **O(1) state resolution** — replaces O(n*states) gradient matching
-- **Config panel collapse/expand** — min/max pin pattern for reliable dock sizing
-- **GitHub-primary VCS** — architecture docs moved to `docs/architecture/`, local configs gitignored
+See [docs/architecture/EVOLUTION.md](docs/architecture/EVOLUTION.md) for the full mount/isolation design history. Earlier milestones — v0.4 (undo/redo, menu reorganization) and v0.3 (glassmorphism theme system) — live in the git history.
 
 ## License
 
