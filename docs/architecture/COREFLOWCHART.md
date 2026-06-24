@@ -228,6 +228,21 @@ PHASE 6: COMPOSE DOCKER
     computed by hierarchy.revealed_parents, consumed by container_ops
     during create — NOT a compose artifact.
 
+    Protection injection (hidden-set, per root). Before the pattern-order
+    volumes above are emitted, `compute_container_hierarchy` / `_process_root`
+    (hierarchy.py) inject the config-dir protection when `protection_mode`
+    is on (default True; absent ⇒ True). At EVERY mirrored root — the primary
+    `host_project_root` and each sibling — `.ignore_scope/` (IGSC_DIR_NAME)
+    is force-added to the hidden set, and any `!`-reveal at or beneath it is
+    stripped before pathspec resolution (`_apply_protection` strips the reveals
+    then force-hides the path; `_reveal_targets_protected` is the suppression
+    predicate). The injection is ABSOLUTE — a reveal under `.ignore_scope/`
+    cannot re-expose it; the only opt-out is `protection_mode=false`. The
+    injected hide is derived here at consume time and is NEVER serialized back
+    into mount_specs — only the `protection_mode` boolean persists. Wired at
+    the four `compute_container_hierarchy(...)` call sites in
+    `docker/container_lifecycle.py`. See glossary → "protection_mode".
+
 
 PHASE 6a: PER-SPEC DELIVERY EMIT (create only)
 ──────────────────────────────────────────────────────────────

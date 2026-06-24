@@ -49,6 +49,16 @@ Walk logic (three loops):
           # find mask, verify mount, walk pushed.parent → ceiling
 ```
 
+> **Note (Protection Mode interaction):** The mirror walk is **reveal-driven** —
+> it only materializes intermediates for paths that lead to a revealed (or pushed)
+> descendant. Protection Mode (`protection_mode`, default True) strips every reveal
+> at or beneath `.ignore_scope/` before resolution (see glossary → "protection_mode"
+> and COREFLOWCHART Phase 6 "Protection injection"). With no surviving reveal under
+> the config dir, Walk 1 / Walk 3 never descend into it, so the mirror never
+> materializes `.ignore_scope/` as an empty/visible folder. This is why protection
+> needs no special-casing in the mirror algorithm — suppressing the reveals upstream
+> is sufficient.
+
 ---
 
 ## Ceiling Matrix (Resolved)

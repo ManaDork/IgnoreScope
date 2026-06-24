@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from ..utils.paths import is_descendant, to_relative_posix_or_name
 from ..utils.strings import sanitize_volume_name
-from .config import get_container_path
+from .config import IGSC_DIR_NAME, get_container_path
 
 if TYPE_CHECKING:
     from .config import SiblingMount
@@ -432,26 +432,94 @@ def _validate_hierarchy(
     return errors
 
 
+def _reveal_targets_protected(pattern: str) -> bool:
+    """True if a negated pattern reveals at/under the protected ``.ignore_scope`` dir.
+
+    Matches the reveal whose folder is exactly ``.ignore_scope`` or any
+    descendant (``.ignore_scope/...``). Mask patterns (non-negated) are left
+    untouched — only reveals can re-expose, and only reveals are suppressed.
+    """
+    if not pattern.startswith("!"):
+        return False
+    folder = pattern[1:].lstrip("/").rstrip("/")
+    return folder == IGSC_DIR_NAME or folder.startswith(IGSC_DIR_NAME + "/")
+
+
+def _apply_protection(
+    mount_specs: list['MountSpecPath'],
+    container_root: str,
+    host_container_root: Path,
+) -> tuple[list['MountSpecPath'], set[str]]:
+    """Enforce absolute ``.ignore_scope`` protection for one root (D3/D6/R1).
+
+    Two halves of a SINGLE mechanism (not a parallel masking path):
+      1. Reveal-suppression — return spec copies with every reveal pattern
+         targeting at/under ``.ignore_scope`` removed, so no Layer-3 bind
+         punch-through is emitted AND the reveal never reaches the mirror
+         walk (``get_revealed_paths``). This is what makes a user ``!`` carve-
+         out unable to win against the force-hide (reveal-priority,
+         node_state.py:271-275, can only fire when the reveal survives).
+      2. Force-hide targets — the ``.ignore_scope`` container path under each
+         spec's ``mount_root``, which the caller adds to the hidden set.
+
+    Roots whose tree has no ``.ignore_scope`` are a harmless no-op: nothing is
+    revealed there to strip, and the force-hide path is inert (Docker's mask
+    volume over a non-existent dir does nothing).
+    """
+    from dataclasses import replace
+
+    sanitized: list['MountSpecPath'] = []
+    force_hidden: set[str] = set()
+    for ms in mount_specs:
+        kept = [p for p in ms.patterns if not _reveal_targets_protected(p)]
+        if len(kept) != len(ms.patterns):
+            ms = replace(ms, patterns=kept)
+        sanitized.append(ms)
+
+        igsc_path = ms.mount_root / IGSC_DIR_NAME
+        force_hidden.add(
+            to_container_path(igsc_path, container_root, host_container_root)
+        )
+    return sanitized, force_hidden
+
+
 def _process_root(
     container_root: str,
     mount_specs: list['MountSpecPath'],
     pushed_files: set[Path],
     host_container_root: Path,
     mirrored: bool,
+    protection_mode: bool = True,
 ) -> tuple[list[str], list[str], set[str], set[str], set[str], list[str]]:
     """Process one root through validate -> volumes -> revealed_parents -> mirrored.
 
     Shared logic for both primary and sibling roots.
 
+    When ``protection_mode`` is on, ``.ignore_scope/`` (dir + contents) is
+    absolutely hidden at this root before volumes are computed: reveal carve-
+    outs beneath it are stripped from the specs and the path is force-added to
+    the hidden set (see ``_apply_protection``).
+
     Returns:
         Tuple of (volume_entries, mask_volume_names, visible_paths,
                   masked_paths, revealed_parents, validation_errors)
     """
+    force_hidden: set[str] = set()
+    if protection_mode:
+        mount_specs, force_hidden = _apply_protection(
+            mount_specs, container_root, host_container_root,
+        )
+
     errors = _validate_hierarchy(mount_specs, host_container_root)
 
     vol_entries, mask_names, visible, hidden = _compute_volume_entries(
         mount_specs, container_root, host_container_root,
     )
+
+    # Force-hide the protected config dir. Added after volume computation so it
+    # cannot be re-revealed; reuses the existing hidden set (no parallel path).
+    hidden.update(force_hidden)
+    visible.difference_update(force_hidden)
 
     # Extract flat sets for revealed_parents and mirrored_parents
     # (these functions operate on sets, not mount_specs)
@@ -485,6 +553,7 @@ def compute_container_hierarchy(
     siblings: list['SiblingMount'] | None = None,
     mirrored: bool = True,
     extensions: list['ExtensionConfig'] | None = None,
+    protection_mode: bool = True,
 ) -> ContainerHierarchy:
     """Compute complete container hierarchy from configuration.
 
@@ -502,6 +571,9 @@ def compute_container_hierarchy(
         host_container_root: Host container root (relative_to base). Defaults to host_project_root.parent
         siblings: Optional list of sibling mounts for external directories
         mirrored: Enable intermediate directory creation in masked areas
+        protection_mode: When True (default), force-hide ``.ignore_scope/`` and
+            its contents at EVERY root (primary + siblings) and suppress any
+            user reveal beneath it so the protection is absolute (D3/D6/R1).
         extensions: Optional list of ExtensionConfig entries. Each extension's
             ``isolation_paths`` are materialized as ``delivery="volume"`` specs
             via ``ExtensionConfig.synthesize_mount_specs()`` and merged into
@@ -532,7 +604,7 @@ def compute_container_hierarchy(
     # Primary root
     vols, masks, vis, hid, parents, errs = _process_root(
         container_root, mount_specs, pushed_files,
-        host_container_root, mirrored,
+        host_container_root, mirrored, protection_mode,
     )
     hierarchy.ordered_volumes = vols
     hierarchy.mask_volume_names = list(masks)
@@ -546,7 +618,7 @@ def compute_container_hierarchy(
         for sibling in siblings:
             s_vols, s_masks, s_vis, s_hid, s_parents, s_errs = _process_root(
                 sibling.container_path, sibling.mount_specs, sibling.pushed_files,
-                sibling.host_path, mirrored,
+                sibling.host_path, mirrored, protection_mode,
             )
             hierarchy.ordered_volumes.extend(s_vols)
             hierarchy.mask_volume_names.extend(s_masks)

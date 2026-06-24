@@ -982,6 +982,28 @@ Config toggle controlling Stage 2 visibility computation and intermediate direct
 
 ---
 
+### protection_mode (Protection Mode / Protected Path)
+
+Config toggle that force-hides the IgnoreScope config directory (`IGSC_DIR_NAME` = `.ignore_scope/`) and all its contents inside the container, at **every** mirrored root — the primary `host_project_root` and each sibling. The force-hidden subtree is the **Protected Path**.
+
+**JSON Field:** `protection_mode`
+**Default:** `True` (absent ⇒ `True` — pre-existing configs are protected on load)
+
+| Mode | Effect on `.ignore_scope/` in-container |
+|------|-----------------------------------------|
+| True | `.ignore_scope/` force-added to the hidden set at every mirrored root; the config dir and its contents are invisible to the container |
+| False | No injection — `.ignore_scope/` is governed by ordinary mount_specs only (the sole opt-out) |
+
+**Absolute.** Protection cannot be punched through: any `!`-reveal at or beneath a Protected Path is stripped before pathspec resolution, so a reveal under `.ignore_scope/` can never re-expose it. The only way to surface the config dir is `protection_mode=false`.
+
+**Derived at consume time, never serialized.** Only the boolean persists. The injected hide is computed during the consume-time hierarchy pass (see `mirrored` for the analogous consume-time derivation) and is **never written back** into `mount_specs` or any other JSON field.
+
+**Implementation:** `core/hierarchy.py` — `_apply_protection()` strips reveals at/under `.ignore_scope` then force-hides the path; `_reveal_targets_protected()` is the suppression predicate. `compute_container_hierarchy()` / `_process_root()` take a `protection_mode` kwarg, wired at the four call sites in `docker/container_lifecycle.py`.
+
+**Domains:** Config (boolean field), Computation (consume-time hierarchy hidden-set injection)
+
+---
+
 ## Presentation Terms
 
 ### MountDataNode

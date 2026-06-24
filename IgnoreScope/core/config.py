@@ -134,6 +134,7 @@ class ScopeDockerConfig(LocalMountConfig):
     extensions: list[ExtensionConfig] = field(default_factory=list)
     ports: list[str] = field(default_factory=list)
     show_hidden: bool = False
+    protection_mode: bool = True
 
     def __post_init__(self):
         """Derive defaults for host_container_root and container_root."""
@@ -170,6 +171,7 @@ class ScopeDockerConfig(LocalMountConfig):
             'dev_mode': self.dev_mode,
             'mirrored': self.mirrored,
             'show_hidden': self.show_hidden,
+            'protection_mode': self.protection_mode,
             'local': base_dict,
         }
 
@@ -261,6 +263,7 @@ class ScopeDockerConfig(LocalMountConfig):
             extensions=extensions,
             ports=data.get('ports', []),
             show_hidden=data.get('show_hidden', False),
+            protection_mode=data.get('protection_mode', True),
         )
 
     def track_extension(

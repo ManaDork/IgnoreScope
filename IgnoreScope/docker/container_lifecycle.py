@@ -503,6 +503,7 @@ def preflight_create(
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
         extensions=config.extensions or None,
+        protection_mode=config.protection_mode,
     )
 
     if hierarchy.validation_errors:
@@ -578,6 +579,7 @@ def execute_create(
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
         extensions=config.extensions or None,
+        protection_mode=config.protection_mode,
     )
 
     # Scope name for config dirs; docker name for Docker resources
@@ -810,6 +812,7 @@ def execute_update(
         host_container_root=old_config.host_container_root,
         siblings=old_config.siblings or None,
         extensions=old_config.extensions or None,
+        protection_mode=old_config.protection_mode,
     )
     old_mask_names = set(old_hierarchy.mask_volume_names)
 
@@ -827,6 +830,7 @@ def execute_update(
         host_container_root=config.host_container_root,
         siblings=config.siblings or None,
         extensions=config.extensions or None,
+        protection_mode=config.protection_mode,
     )
     new_mask_names = set(new_hierarchy.mask_volume_names)
 
