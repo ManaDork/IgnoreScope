@@ -30,6 +30,7 @@ from ..docker.container_ops import (
     ensure_container_running,
     push_file_to_container,
     ensure_container_directories,
+    exec_in_container,
 )
 
 
@@ -876,3 +877,50 @@ def cmd_cp(
         kind = "Directory" if source_path.is_dir() else "File"
         return True, f"{kind} copied: {source_path.name} → {container_path}"
     return False, msg
+
+
+def cmd_exec(
+    host_project_root: Path,
+    scope_name: str,
+    command: list[str],
+) -> tuple[bool, str, str]:
+    """Execute a command in a running container (non-interactive).
+
+    Thin wrapper over the canonical ``exec_in_container``. Container
+    running-state validation lives in the CLI wrapper; this maps the
+    scope to its docker name and forwards the call.
+
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+        command: Command and arguments to execute
+
+    Returns:
+        Tuple of (success, stdout, stderr)
+    """
+    docker_name = build_docker_name(host_project_root, scope_name)
+    return exec_in_container(docker_name, command)
+
+
+def cmd_running(
+    host_project_root: Path,
+    scope_name: str,
+) -> dict:
+    """Report container running-state for a scope.
+
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+
+    Returns:
+        Dict with keys: scope, docker_name, exists, running, status.
+    """
+    docker_name = build_docker_name(host_project_root, scope_name)
+    info = get_container_info(docker_name)
+    return {
+        "scope": scope_name,
+        "docker_name": docker_name,
+        "exists": info is not None,
+        "running": bool(info and info.get("running")),
+        "status": (info.get("status") if info else "absent"),
+    }

@@ -4,18 +4,21 @@ Provides interactive setup for creating Docker container configurations,
 and command wrappers for CLI operations.
 """
 
+import json
 import sys
 from pathlib import Path
 from typing import Set
 
 from ..core.config import ScopeDockerConfig, SiblingMount, list_containers
 from ..docker.names import build_docker_name
+from ..docker.container_ops import get_container_info
 from .commands import (
     cmd_create, cmd_push, cmd_push_marked, cmd_pull, cmd_remove,
     cmd_install_git, cmd_install_p4_mcp,
     cmd_list, cmd_status, cmd_cp,
     cmd_add_mount, cmd_convert,
     cmd_add_folder, cmd_mark_permanent, cmd_unmark_permanent,
+    cmd_exec, cmd_running,
 )
 
 
@@ -658,6 +661,103 @@ def cmd_cp_wrapper(host_project_root: Path, args: list[str]) -> None:
         sys.exit(1)
 
 
+_EXEC_USAGE = (
+    "Usage: python -m IgnoreScope exec [--project PATH] <scope> -- <cmd> [args...]"
+)
+_RUNNING_USAGE = (
+    "Usage: python -m IgnoreScope running [--project PATH] <scope> [--json]"
+)
+
+
+def cmd_exec_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for exec command — run a command in a running container.
+
+    Usage: python -m IgnoreScope exec <scope> -- <cmd> [args...]
+
+    Scope is positional (first non-flag token after ``exec``). Everything
+    after ``--`` is the command. Output is forwarded verbatim; the exit
+    code mirrors the in-container command (0 ok, 1 failed). Argument,
+    scope, and not-running errors exit 2.
+    """
+    # Split on the `--` separator.
+    if "--" not in args:
+        print(_EXEC_USAGE, file=sys.stderr)
+        sys.exit(2)
+    sep = args.index("--")
+    command = args[sep + 1:]
+
+    # Scope is the first positional (non-flag, value-consuming flags skipped)
+    # token between the command name and `--`.
+    pre = _collect_positional(args[:sep])
+    scope = pre[0] if pre else None
+
+    if not scope or not command:
+        print(_EXEC_USAGE, file=sys.stderr)
+        sys.exit(2)
+
+    if scope not in list_containers(host_project_root):
+        print(f"no such scope: {scope}", file=sys.stderr)
+        sys.exit(2)
+
+    docker_name = build_docker_name(host_project_root, scope)
+    info = get_container_info(docker_name)
+    if info is None or not info.get("running"):
+        print(f"container not running: {docker_name}", file=sys.stderr)
+        sys.exit(2)
+
+    ok, stdout, stderr = cmd_exec(host_project_root, scope, command)
+    if stdout:
+        sys.stdout.write(stdout)
+    if stderr:
+        sys.stderr.write(stderr)
+    sys.exit(0 if ok else 1)
+
+
+def cmd_running_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for running command — report container running-state.
+
+    Usage: python -m IgnoreScope running <scope> [--json]
+
+    Scope is positional. Exit code is 0 when running, 1 when stopped or
+    absent, 2 on usage / no-such-scope errors. ``--json`` emits a status
+    object to stdout; otherwise a one-line human status is printed.
+    """
+    as_json = "--json" in args
+    positional = _collect_positional(args, bool_flags={"--json"})
+    scope = positional[0] if positional else None
+
+    if not scope:
+        print(_RUNNING_USAGE, file=sys.stderr)
+        sys.exit(2)
+
+    if scope not in list_containers(host_project_root):
+        if as_json:
+            print(json.dumps({
+                "scope": scope,
+                "exists": False,
+                "running": False,
+                "status": "no-such-scope",
+            }))
+        else:
+            print(f"no such scope: {scope}", file=sys.stderr)
+        sys.exit(2)
+
+    result = cmd_running(host_project_root, scope)
+
+    if as_json:
+        print(json.dumps(result))
+    else:
+        if result["running"]:
+            human = "running"
+        elif result["exists"]:
+            human = "stopped"
+        else:
+            human = "not created"
+        print(f"{result['scope']}: {human}")
+
+    sys.exit(0 if result["running"] else 1)
+
+
 def print_usage() -> None:
     """Print usage information."""
     print("""
@@ -686,6 +786,8 @@ Usage:
     python -m IgnoreScope unmark-permanent [--project PATH] [--container NAME] <container_path>
     python -m IgnoreScope convert [--project PATH] [--container NAME]
                                   <path> --to {bind,detached}
+    python -m IgnoreScope exec [--project PATH] <scope> -- <cmd> [args...]
+    python -m IgnoreScope running [--project PATH] <scope> [--json]
 
 Commands:
     gui              Launch graphical configuration editor (PyQt6)
@@ -704,6 +806,8 @@ Commands:
     mark-permanent   Set preserve_on_update=True on a detached folder spec
     unmark-permanent Set preserve_on_update=False on a detached folder spec
     convert          Flip a mount spec's delivery (bind <-> detached)
+    exec             Run a command in a running container (scope positional; cmd after --)
+    running          Report container running-state for a scope (exit 0 running / 1 not)
 
 Options:
     --project PATH     Project root directory (default: current directory)
@@ -750,4 +854,6 @@ Examples:
     python -m IgnoreScope install-p4-mcp --container dev
     python -m IgnoreScope install-p4-mcp --container dev --devenv-mount /custom
     python -m IgnoreScope install-p4-mcp --container dev --project-dir /MyProject --scope-dir /MyProject/.ignore_scope/dev --p4port ssl:perforce:1666 --p4user myuser --p4client myworkspace
+    python -m IgnoreScope exec dev -- ls -la /workspace
+    python -m IgnoreScope running dev --json
 """.strip())

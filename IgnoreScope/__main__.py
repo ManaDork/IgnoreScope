@@ -10,6 +10,8 @@ Usage:
     python -m IgnoreScope pull [FILES...]
     python -m IgnoreScope cp <source> [<dest>]
     python -m IgnoreScope remove [--yes]
+    python -m IgnoreScope exec <scope> -- <cmd...>
+    python -m IgnoreScope running <scope> [--json]
 """
 
 from __future__ import annotations
@@ -34,6 +36,8 @@ from .cli.interactive import (
     cmd_add_folder_wrapper,
     cmd_mark_permanent_wrapper,
     cmd_unmark_permanent_wrapper,
+    cmd_exec_wrapper,
+    cmd_running_wrapper,
     print_usage,
 )
 
@@ -104,6 +108,10 @@ def main() -> None:
             cmd_unmark_permanent_wrapper(host_project_root, sys.argv)
         elif command == 'convert':
             cmd_convert_wrapper(host_project_root, sys.argv)
+        elif command == 'exec':
+            cmd_exec_wrapper(host_project_root, sys.argv)
+        elif command == 'running':
+            cmd_running_wrapper(host_project_root, sys.argv)
         else:
             print(f"Unknown command: {command}\n")
             print_usage()
