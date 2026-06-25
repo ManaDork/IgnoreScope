@@ -12,6 +12,7 @@ Usage:
     python -m IgnoreScope remove [--yes]
     python -m IgnoreScope exec <scope> -- <cmd...>
     python -m IgnoreScope running <scope> [--json]
+    python -m IgnoreScope install-package <scope> <manifest.json>
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from .cli.interactive import (
     cmd_unmark_permanent_wrapper,
     cmd_exec_wrapper,
     cmd_running_wrapper,
+    cmd_install_package_wrapper,
     print_usage,
 )
 
@@ -112,6 +114,8 @@ def main() -> None:
             cmd_exec_wrapper(host_project_root, sys.argv)
         elif command == 'running':
             cmd_running_wrapper(host_project_root, sys.argv)
+        elif command == 'install-package':
+            cmd_install_package_wrapper(host_project_root, sys.argv)
         else:
             print(f"Unknown command: {command}\n")
             print_usage()

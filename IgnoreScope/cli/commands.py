@@ -924,3 +924,45 @@ def cmd_running(
         "running": bool(info and info.get("running")),
         "status": (info.get("status") if info else "absent"),
     }
+
+
+def cmd_install_package(
+    host_project_root: Path,
+    scope_name: str,
+    manifest: dict,
+) -> tuple[bool, str]:
+    """Run a manifest-driven package install in a running container.
+
+    Generalizes the extension deploy flow (ensure → exec-loop → verify) over
+    the canonical ``exec_in_container`` primitive. This handler is thin: it
+    runs the install steps in order and the optional verify step. Manifest
+    validation and ``ensure_container_running`` live in the CLI wrapper.
+
+    Args:
+        host_project_root: Project root directory
+        scope_name: Scope name
+        manifest: Validated manifest dict with keys ``name`` (str),
+            ``install`` (list of argv lists), and optional ``verify``
+            (argv list).
+
+    Returns:
+        Tuple of (success, message). On install/verify failure the message
+        carries the captured stderr (or stdout fallback).
+    """
+    docker_name = build_docker_name(host_project_root, scope_name)
+    name = manifest["name"]
+
+    for cmd in manifest["install"]:
+        ok, stdout, stderr = exec_in_container(docker_name, cmd, timeout=300)
+        if not ok:
+            return False, f"install step failed: {stderr or stdout or 'unknown error'}"
+
+    verify = manifest.get("verify")
+    if verify:
+        ok, stdout, stderr = exec_in_container(docker_name, verify, timeout=30)
+        if not ok:
+            return False, f"verify failed: {stderr or stdout or 'unknown error'}"
+        verify_out = stdout.strip()
+        return True, f"{name} installed; verify: {verify_out}"
+
+    return True, f"{name} installed"

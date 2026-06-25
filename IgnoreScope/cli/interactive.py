@@ -18,8 +18,9 @@ from .commands import (
     cmd_list, cmd_status, cmd_cp,
     cmd_add_mount, cmd_convert,
     cmd_add_folder, cmd_mark_permanent, cmd_unmark_permanent,
-    cmd_exec, cmd_running,
+    cmd_exec, cmd_running, cmd_install_package,
 )
+from ..docker.container_ops import ensure_container_running
 
 
 def _parse_container_arg(args: list[str]) -> str:
@@ -667,6 +668,10 @@ _EXEC_USAGE = (
 _RUNNING_USAGE = (
     "Usage: python -m IgnoreScope running [--project PATH] <scope> [--json]"
 )
+_INSTALL_PACKAGE_USAGE = (
+    "Usage: python -m IgnoreScope install-package [--project PATH] "
+    "<scope> <manifest.json>"
+)
 
 
 def cmd_exec_wrapper(host_project_root: Path, args: list[str]) -> None:
@@ -758,6 +763,107 @@ def cmd_running_wrapper(host_project_root: Path, args: list[str]) -> None:
     sys.exit(0 if result["running"] else 1)
 
 
+def _load_package_manifest(path: Path) -> dict:
+    """Load and validate a package-install manifest from a JSON file.
+
+    Schema (single portable-command form)::
+
+        { "name": "uv",
+          "install": [ ["sh", "-c", "..."] ],   # non-empty list of non-empty list[str]
+          "verify": ["uv", "--version"] }        # OPTIONAL; list[str]
+
+    Args:
+        path: Path to the manifest JSON file.
+
+    Returns:
+        The validated manifest dict.
+
+    Raises:
+        FileNotFoundError: manifest file does not exist.
+        ValueError: invalid JSON, or schema violation (with a precise message).
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"manifest not found: {path}")
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"invalid JSON in manifest: {e}") from e
+
+    if not isinstance(data, dict):
+        raise ValueError("manifest must be a JSON object")
+
+    name = data.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("manifest 'name' must be a non-empty string")
+
+    install = data.get("install")
+    if not isinstance(install, list) or not install:
+        raise ValueError("manifest 'install' must be a non-empty list")
+    for i, step in enumerate(install):
+        if not isinstance(step, list) or not step:
+            raise ValueError(
+                f"manifest 'install'[{i}] must be a non-empty list of strings"
+            )
+        if not all(isinstance(tok, str) for tok in step):
+            raise ValueError(
+                f"manifest 'install'[{i}] must contain only strings"
+            )
+
+    verify = data.get("verify")
+    if verify is not None:
+        if not isinstance(verify, list) or not all(
+            isinstance(tok, str) for tok in verify
+        ):
+            raise ValueError("manifest 'verify' must be a list of strings")
+
+    return data
+
+
+def cmd_install_package_wrapper(host_project_root: Path, args: list[str]) -> None:
+    """Wrapper for install-package command — manifest-driven package install.
+
+    Usage: python -m IgnoreScope install-package <scope> <manifest.json>
+
+    Scope (1st positional) and manifest path (2nd positional). The container
+    is brought up if stopped via ``ensure_container_running``. Exit codes:
+    0 installed (and verified if a verify step is present); 1 an install step
+    or verify failed; 2 for any argument / scope / manifest / container-availability
+    error.
+    """
+    positional = _collect_positional(args)
+    scope = positional[0] if positional else None
+    manifest_path = positional[1] if len(positional) > 1 else None
+
+    if not scope or not manifest_path:
+        print(_INSTALL_PACKAGE_USAGE, file=sys.stderr)
+        sys.exit(2)
+
+    if scope not in list_containers(host_project_root):
+        print(f"no such scope: {scope}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        manifest = _load_package_manifest(Path(manifest_path))
+    except (FileNotFoundError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
+
+    docker_name = build_docker_name(host_project_root, scope)
+    ok, msg = ensure_container_running(docker_name)
+    if not ok:
+        print(f"container not available: {msg}", file=sys.stderr)
+        sys.exit(2)
+
+    ok, result_msg = cmd_install_package(host_project_root, scope, manifest)
+    if ok:
+        print(result_msg)
+        sys.exit(0)
+    else:
+        print(result_msg, file=sys.stderr)
+        sys.exit(1)
+
+
 def print_usage() -> None:
     """Print usage information."""
     print("""
@@ -788,6 +894,7 @@ Usage:
                                   <path> --to {bind,detached}
     python -m IgnoreScope exec [--project PATH] <scope> -- <cmd> [args...]
     python -m IgnoreScope running [--project PATH] <scope> [--json]
+    python -m IgnoreScope install-package [--project PATH] <scope> <manifest.json>
 
 Commands:
     gui              Launch graphical configuration editor (PyQt6)
@@ -808,6 +915,7 @@ Commands:
     convert          Flip a mount spec's delivery (bind <-> detached)
     exec             Run a command in a running container (scope positional; cmd after --)
     running          Report container running-state for a scope (exit 0 running / 1 not)
+    install-package  Run a manifest-driven package install (install steps + optional verify)
 
 Options:
     --project PATH     Project root directory (default: current directory)
@@ -856,4 +964,5 @@ Examples:
     python -m IgnoreScope install-p4-mcp --container dev --project-dir /MyProject --scope-dir /MyProject/.ignore_scope/dev --p4port ssl:perforce:1666 --p4user myuser --p4client myworkspace
     python -m IgnoreScope exec dev -- ls -la /workspace
     python -m IgnoreScope running dev --json
+    python -m IgnoreScope install-package dev uv.json
 """.strip())
