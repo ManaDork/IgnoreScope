@@ -116,7 +116,8 @@ def _detached_init(
     Returns:
         OpResult with per-spec details aggregated under ``details``.
     """
-    from ..core.hierarchy import to_container_path
+    from ..core.config import IGSC_DIR_NAME
+    from ..core.hierarchy import to_container_path, _reveal_targets_protected
 
     if not config.mount_specs:
         return OpResult(
@@ -162,6 +163,15 @@ def _detached_init(
         cp_pairs.append((ms.mount_root, root_cpath))
         for pattern in ms.patterns:
             is_exception = pattern.startswith("!")
+            # Protection: strip any reveal at/under .ignore_scope so a
+            # !.ignore_scope/secret carve-out is NOT cp'd into the container
+            # (mirrors the bind reveal-suppression in hierarchy._apply_protection).
+            if (
+                config.protection_mode
+                and is_exception
+                and _reveal_targets_protected(pattern)
+            ):
+                continue
             folder = pattern.lstrip("!").rstrip("/")
             if folder.endswith("/**"):
                 folder = folder[:-3]
@@ -177,6 +187,19 @@ def _detached_init(
             else:
                 # Mask → post-cp rm inside the container.
                 rm_container_paths.append(cpath)
+
+        # Protection force-hide: rm the .ignore_scope container path post-cp so
+        # the protected dir (cp'd in as part of the tree-seed root walk) is
+        # removed from the container — the detached analogue of the bind
+        # synthetic mask volume.
+        if config.protection_mode:
+            igsc_cpath = to_container_path(
+                ms.mount_root / IGSC_DIR_NAME,
+                config.container_root,
+                config.host_container_root,
+            )
+            if igsc_cpath not in rm_container_paths:
+                rm_container_paths.append(igsc_cpath)
 
     # mkdir -p: (a) parents of cp targets so cp can land, (b) full folder-seed
     # container paths (no cp follows).

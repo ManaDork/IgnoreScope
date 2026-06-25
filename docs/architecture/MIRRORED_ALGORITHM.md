@@ -57,7 +57,9 @@ Walk logic (three loops):
 > the config dir, Walk 1 / Walk 3 never descend into it, so the mirror never
 > materializes `.ignore_scope/` as an empty/visible folder. This is why protection
 > needs no special-casing in the mirror algorithm — suppressing the reveals upstream
-> is sufficient.
+> is sufficient. (The actual in-container hide is a real mask volume for bind
+> delivery, or a post-cp force-`rm` for detached delivery — the reveal-suppression
+> here only governs what the *mirror walk* materializes, not how the dir is hidden.)
 
 ---
 

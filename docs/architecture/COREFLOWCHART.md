@@ -228,19 +228,30 @@ PHASE 6: COMPOSE DOCKER
     computed by hierarchy.revealed_parents, consumed by container_ops
     during create — NOT a compose artifact.
 
-    Protection injection (hidden-set, per root). Before the pattern-order
+    Protection injection (real mask volume, per root). Before the pattern-order
     volumes above are emitted, `compute_container_hierarchy` / `_process_root`
     (hierarchy.py) inject the config-dir protection when `protection_mode`
     is on (default True; absent ⇒ True). At EVERY mirrored root — the primary
-    `host_project_root` and each sibling — `.ignore_scope/` (IGSC_DIR_NAME)
-    is force-added to the hidden set, and any `!`-reveal at or beneath it is
-    stripped before pathspec resolution (`_apply_protection` strips the reveals
-    then force-hides the path; `_reveal_targets_protected` is the suppression
-    predicate). The injection is ABSOLUTE — a reveal under `.ignore_scope/`
-    cannot re-expose it; the only opt-out is `protection_mode=false`. The
-    injected hide is derived here at consume time and is NEVER serialized back
-    into mount_specs — only the `protection_mode` boolean persists. Wired at
-    the four `compute_container_hierarchy(...)` call sites in
+    `host_project_root` and each sibling — `_apply_protection` (a) strips any
+    `!`-reveal at or beneath `.ignore_scope/` (IGSC_DIR_NAME) from the spec
+    copies, and (b) injects a SYNTHETIC non-negated `.ignore_scope/` mask
+    pattern into the (non-persisted) sanitized copies BEFORE
+    `_compute_volume_entries`, so the normal mask path emits a REAL Docker mask
+    volume (`mask_name` + `vol_entry`) that compose.py materializes as an empty
+    named volume over `<container_root>/.ignore_scope`. The synthetic mask is
+    existence-gated (`_root_has_igsc_on_disk` — only when the host dir exists)
+    and dup-guarded (`_spec_masks_igsc`); `_reveal_targets_protected` is the
+    reveal-suppression predicate. The returned `force_hidden`/`masked_paths`
+    set also gains the path, but that set is UI/debug-only and NEVER reaches
+    Docker — it is NOT the masking mechanism. Detached delivery is handled
+    separately at init time (Phase 6a `_detached_init`): reveals at/under
+    `.ignore_scope` are stripped from the cp walk and the container path is
+    force-`rm -rf`'d post-cp. The injection is ABSOLUTE — a reveal under
+    `.ignore_scope/` cannot re-expose it; the only opt-out is
+    `protection_mode=false`. The synthetic mask and force-hide are derived here
+    at consume time and are NEVER serialized back into mount_specs — only the
+    `protection_mode` boolean persists. Wired at the four
+    `compute_container_hierarchy(...)` call sites in
     `docker/container_lifecycle.py`. See glossary → "protection_mode".
 
 

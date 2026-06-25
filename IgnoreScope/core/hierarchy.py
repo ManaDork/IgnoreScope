@@ -445,6 +445,45 @@ def _reveal_targets_protected(pattern: str) -> bool:
     return folder == IGSC_DIR_NAME or folder.startswith(IGSC_DIR_NAME + "/")
 
 
+def _spec_masks_igsc(ms: 'MountSpecPath') -> bool:
+    """True if the spec already carries a non-negated ``.ignore_scope`` mask.
+
+    Matches a deny pattern whose folder is exactly ``.ignore_scope`` (the dir
+    itself). Used to avoid injecting a duplicate synthetic mask volume at the
+    same container path when the user already masked the protected dir.
+    """
+    for p in ms.patterns:
+        if p.startswith("!"):
+            continue
+        folder = p.rstrip("/")
+        if folder.endswith("/**"):
+            folder = folder[:-3].rstrip("/")
+        elif folder.endswith("/*"):
+            folder = folder[:-2].rstrip("/")
+        if folder == IGSC_DIR_NAME:
+            return True
+    return False
+
+
+def _root_has_igsc_on_disk(ms: 'MountSpecPath') -> bool:
+    """True if this spec's ``<mount_root>/.ignore_scope`` exists on disk.
+
+    Only meaningful for specs whose ``mount_root`` is a real host path — bind
+    delivery (always host-backed) or any spec with ``host_path`` set. For
+    container-only specs (``host_path is None`` and non-bind) ``mount_root`` is
+    a container-logical path, so a host-side disk probe is nonsensical; those
+    return False (they emit no bind mask volume regardless — see
+    ``_compute_volume_entries`` ``emit_volumes`` gate).
+    """
+    host_backed = ms.delivery == "bind" or ms.host_path is not None
+    if not host_backed:
+        return False
+    try:
+        return (ms.mount_root / IGSC_DIR_NAME).is_dir()
+    except OSError:
+        return False
+
+
 def _apply_protection(
     mount_specs: list['MountSpecPath'],
     container_root: str,
@@ -453,18 +492,31 @@ def _apply_protection(
     """Enforce absolute ``.ignore_scope`` protection for one root (D3/D6/R1).
 
     Two halves of a SINGLE mechanism (not a parallel masking path):
-      1. Reveal-suppression — return spec copies with every reveal pattern
-         targeting at/under ``.ignore_scope`` removed, so no Layer-3 bind
-         punch-through is emitted AND the reveal never reaches the mirror
-         walk (``get_revealed_paths``). This is what makes a user ``!`` carve-
-         out unable to win against the force-hide (reveal-priority,
-         node_state.py:271-275, can only fire when the reveal survives).
-      2. Force-hide targets — the ``.ignore_scope`` container path under each
-         spec's ``mount_root``, which the caller adds to the hidden set.
+      1. Reveal-suppression — strip every reveal pattern targeting at/under
+         ``.ignore_scope`` so no Layer-3 bind punch-through is emitted AND the
+         reveal never reaches the mirror walk (``get_revealed_paths``). This is
+         what makes a user ``!`` carve-out unable to win against the force-hide
+         (reveal-priority, node_state.py:271-275, can only fire when the
+         reveal survives).
+      2. Force-hide via a SYNTHETIC mask pattern — inject a non-negated
+         ``.ignore_scope/`` deny pattern into the (already-non-persisted)
+         ``replace`` copy BEFORE ``_compute_volume_entries`` runs, so the
+         existing mask-emission path produces a real ``mask_name`` +
+         ``vol_entry`` naturally (bind delivery). For non-bind specs the
+         injected pattern still lands ``.ignore_scope`` in the ``hidden`` set
+         (UI/detached), with no bind volume emitted. The sanitized copies are
+         never serialized, so protection never leaks into stored patterns (AC2).
 
-    Roots whose tree has no ``.ignore_scope`` are a harmless no-op: nothing is
-    revealed there to strip, and the force-hide path is inert (Docker's mask
-    volume over a non-existent dir does nothing).
+    The synthetic mask is gated per-root on host existence — only injected for a
+    root whose ``<mount_root>/.ignore_scope`` actually exists on disk — so
+    siblings without one stay a true no-op (no empty masked dir materialized).
+    Injection is skipped when the spec already masks ``.ignore_scope`` to avoid
+    a duplicate volume at the same container path.
+
+    The caller still receives the ``.ignore_scope`` container path in the
+    returned ``force_hidden`` set so ``masked_paths`` is populated for the
+    UI/debug surface (and so the detached/non-bind path stays covered) even
+    when no bind mask volume is emitted.
     """
     from dataclasses import replace
 
@@ -472,7 +524,15 @@ def _apply_protection(
     force_hidden: set[str] = set()
     for ms in mount_specs:
         kept = [p for p in ms.patterns if not _reveal_targets_protected(p)]
-        if len(kept) != len(ms.patterns):
+
+        # Inject a synthetic .ignore_scope/ mask so the real mask-emission
+        # path produces a mask volume. Gate on host existence; skip if the
+        # user already masks it (no duplicate volume / container path).
+        inject = _root_has_igsc_on_disk(ms) and not _spec_masks_igsc(ms)
+        if inject:
+            kept = kept + [f"{IGSC_DIR_NAME}/"]
+
+        if kept != ms.patterns:
             ms = replace(ms, patterns=kept)
         sanitized.append(ms)
 

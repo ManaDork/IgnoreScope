@@ -992,12 +992,14 @@ Config toggle that force-hides the IgnoreScope config directory (`IGSC_DIR_NAME`
 
 | Mode | Effect on `.ignore_scope/` in-container |
 |------|-----------------------------------------|
-| True | `.ignore_scope/` force-added to the hidden set at every mirrored root; the config dir and its contents are invisible to the container |
+| True | **Bind delivery:** a synthetic non-negated `.ignore_scope/` mask pattern is injected into the non-persisted sanitized spec copies, so the normal mask path emits a **real Docker mask volume** (`mask_name` + `vol_entry`) — `compose.py` materializes it as an empty named volume mounted over `<container_root>/.ignore_scope`, hiding the dir. **Detached delivery:** reveals at/under `.ignore_scope` are stripped from the cp walk and the container path is force-`rm -rf`'d post-cp. (The `force_hidden`/`masked_paths` set still gains the path, but that set is UI/debug-only and never reaches Docker — it is NOT the masking mechanism.) |
 | False | No injection — `.ignore_scope/` is governed by ordinary mount_specs only (the sole opt-out) |
 
 **Absolute.** Protection cannot be punched through: any `!`-reveal at or beneath a Protected Path is stripped before pathspec resolution, so a reveal under `.ignore_scope/` can never re-expose it. The only way to surface the config dir is `protection_mode=false`.
 
-**Derived at consume time, never serialized.** Only the boolean persists. The injected hide is computed during the consume-time hierarchy pass (see `mirrored` for the analogous consume-time derivation) and is **never written back** into `mount_specs` or any other JSON field.
+**Derived at consume time, never serialized.** Only the boolean persists. The synthetic mask pattern (bind) and the force-hide live only in the non-persisted sanitized spec copies (`dataclasses.replace`) and the `force_hidden` set — they are **never written back** into `mount_specs` or any other JSON field (see `mirrored` for the analogous consume-time derivation).
+
+**Known limitation.** The bind mask volume is declared at compose-generation time and gated on `<mount_root>/.ignore_scope` existing on disk (`_root_has_igsc_on_disk`). A config dir created on the host **after** the hierarchy compute runs is therefore not masked until the next recompute/recreate — inherent to bind delivery (the compose file is static once emitted). Detached delivery has no such gate: it force-`rm`s `.ignore_scope` unconditionally whenever protection is on, regardless of whether the dir was present at compute time.
 
 **Why Core (security boundary).** Protection is enforced in the Core hierarchy pass — not in the CLI, GUI, or Docker layer — because a security control belongs at the single non-bypassable chokepoint that every container-creation path flows through (`compute_container_hierarchy()` / `_process_root()`):
 
@@ -1006,7 +1008,7 @@ Config toggle that force-hides the IgnoreScope config directory (`IGSC_DIR_NAME`
 - **Code, not data** — the hide lives in code and is derived at consume time, never serialized, so it cannot be defeated by editing the user-editable, container-visible JSON. The enforcement deliberately lives *outside* the surface it protects.
 - **Single masking source** — hidden-set computation already belongs to Core; enforcing protection anywhere else would fork the masking logic (DRY) and create a second, weaker path. Absoluteness also *requires* Core placement: reveal-suppression must run before pathspec/reveal-priority resolution, which is a Core computation concern, not a downstream filter.
 
-**Implementation:** `core/hierarchy.py` — `_apply_protection()` strips reveals at/under `.ignore_scope` then force-hides the path; `_reveal_targets_protected()` is the suppression predicate. `compute_container_hierarchy()` / `_process_root()` take a `protection_mode` kwarg, wired at the four call sites in `docker/container_lifecycle.py`.
+**Implementation:** `core/hierarchy.py` — `_apply_protection()` strips reveals at/under `.ignore_scope` **and** injects a synthetic non-negated `.ignore_scope/` mask into the non-persisted sanitized spec copies BEFORE `_compute_volume_entries`, so the normal mask path emits a real mask `vol_entry` (bind). Helpers: `_spec_masks_igsc()` (dup-guard — skip injection when the spec already masks the dir), `_root_has_igsc_on_disk()` (existence gate — inject only when `<mount_root>/.ignore_scope` exists on disk), `_reveal_targets_protected()` (reveal-suppression predicate). `compute_container_hierarchy()` / `_process_root()` take a `protection_mode` kwarg, wired at the four call sites in `docker/container_lifecycle.py`. **Detached delivery** is wired separately in `docker/container_lifecycle.py::_detached_init`: when `config.protection_mode`, reveals at/under `.ignore_scope` are stripped from the cp walk (a `!.ignore_scope/...` is NOT docker-cp'd) and `.ignore_scope` is force-added to `rm_container_paths`, `rm -rf`'d in-container after the cp walk.
 
 **Domains:** Config (boolean field), Computation (consume-time hierarchy hidden-set injection)
 

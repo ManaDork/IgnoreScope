@@ -6,6 +6,14 @@ project root plus each sibling root — and suppresses any user `!` reveal that
 would re-expose content beneath it. The protection is absolute: a deliberate
 reveal carve-out cannot win against the force-hide.
 
+Real masking is materialized as a Docker MASK VOLUME: when a root has an
+`.ignore_scope` directory on disk, protection injects a synthetic non-negated
+`.ignore_scope/` mask pattern so the existing mask-emission path produces a
+`mask_volume_names` entry + an `ordered_volumes` mount line. Assertions target
+that REAL output — not the UI/debug `masked_paths` set, which alone never
+hides anything in-container. Existence-gating: a root with NO `.ignore_scope`
+on disk is a true no-op (no mask volume materialized).
+
 Two surfaces under test:
   - core/config.py     — ScopeDockerConfig.protection_mode serialization
   - core/hierarchy.py  — compute_container_hierarchy(protection_mode=...) masking
@@ -102,16 +110,33 @@ def _make_scope_config(
     )
 
 
+def _mask_vol_name_for(rel_path: str) -> str:
+    """Mirror hierarchy._compute_volume_entries mask-name derivation.
+
+    Lets a test assert the EXACT mask volume name the pipeline emits for a
+    given path relative to host_container_root (e.g. ``.ignore_scope`` →
+    ``mask__ignore_scope``).
+    """
+    from IgnoreScope.utils.strings import sanitize_volume_name
+
+    return f"mask_{sanitize_volume_name(rel_path.replace('/', '_'))}"
+
+
 class TestProtectionMode:
-    """Acceptance criteria for the protection_mode feature (AC1-AC7)."""
+    """Acceptance criteria for the protection_mode feature (AC1-AC7).
 
-    # --- AC1: protection masks .ignore_scope at the primary root ---
+    Assertions target the REAL masking output (``mask_volume_names`` /
+    ``ordered_volumes``), not the UI/debug ``masked_paths`` set.
+    """
 
-    def test_ac1_protection_masks_ignore_scope(self, tmp_path: Path):
-        """protection_mode=True with mount={project_root} ⇒ the `.ignore_scope`
-        container path is force-hidden (in masked_paths, NOT in visible_paths).
+    # --- AC1: protection emits a real .ignore_scope mask VOLUME ---
+
+    def test_ac1_protection_emits_ignore_scope_mask_volume(self, tmp_path: Path):
+        """protection_mode=True with mount={project_root} that has an
+        `.ignore_scope` dir on disk ⇒ a real mask VOLUME is emitted for it
+        (in mask_volume_names AND ordered_volumes), and the path is force-hidden.
         """
-        igsc = tmp_path / IGSC_DIR_NAME
+        (tmp_path / IGSC_DIR_NAME).mkdir()  # on disk → existence gate passes
 
         hierarchy = compute_container_hierarchy(
             container_root="/workspace",
@@ -123,12 +148,22 @@ class TestProtectionMode:
         )
 
         igsc_cpath = "/workspace/" + IGSC_DIR_NAME
-        assert igsc_cpath in hierarchy.masked_paths, (
-            f"{igsc_cpath} must be force-hidden; masked={hierarchy.masked_paths}"
+        expected_mask = _mask_vol_name_for(IGSC_DIR_NAME)
+
+        # CRUX: a real mask volume is materialized — not merely masked_paths.
+        assert expected_mask in hierarchy.mask_volume_names, (
+            f"{expected_mask} must be a mask volume; "
+            f"mask_volume_names={hierarchy.mask_volume_names}"
         )
-        assert igsc_cpath not in hierarchy.visible_paths, (
-            f"{igsc_cpath} must NOT be visible; visible={hierarchy.visible_paths}"
+        assert any(
+            v == f"{expected_mask}:{igsc_cpath}" for v in hierarchy.ordered_volumes
+        ), (
+            f"Mask volume must mount at {igsc_cpath}; "
+            f"ordered_volumes={hierarchy.ordered_volumes}"
         )
+        # And it is force-hidden (UI/debug surface still correct).
+        assert igsc_cpath in hierarchy.masked_paths
+        assert igsc_cpath not in hierarchy.visible_paths
 
     # --- AC2: no-leak round-trip — protection never leaks into patterns ---
 
@@ -168,11 +203,13 @@ class TestProtectionMode:
 
     def test_ac3_reveal_cannot_reexpose_protected(self, tmp_path: Path):
         """A reveal targeting beneath `.ignore_scope` is suppressed: with
-        protection_mode=True the secret path stays masked (the `!` carve-out
+        protection_mode=True the `.ignore_scope` mask VOLUME is still emitted
+        and NO punch-through volume leaks for the secret (the `!` carve-out
         did NOT win against the force-hide).
         """
         igsc = tmp_path / IGSC_DIR_NAME
         secret = igsc / "secret"
+        secret.mkdir(parents=True)  # on disk
 
         # mask .ignore_scope/ then attempt to reveal .ignore_scope/secret/.
         hierarchy = compute_container_hierarchy(
@@ -188,14 +225,13 @@ class TestProtectionMode:
 
         igsc_cpath = "/workspace/" + IGSC_DIR_NAME
         secret_cpath = igsc_cpath + "/secret"
+        expected_mask = _mask_vol_name_for(IGSC_DIR_NAME)
 
-        # The protected dir itself is masked.
-        assert igsc_cpath in hierarchy.masked_paths
-
-        # CRUX: the reveal did NOT re-expose the secret.
-        assert secret_cpath not in hierarchy.visible_paths, (
-            f"Reveal re-exposed protected content: {secret_cpath} leaked into "
-            f"visible_paths={hierarchy.visible_paths}"
+        # The protected dir is masked by a real volume (user's own mask here;
+        # the synthetic inject is skipped to avoid a duplicate).
+        assert expected_mask in hierarchy.mask_volume_names, (
+            f"{expected_mask} must be a mask volume; "
+            f"mask_volume_names={hierarchy.mask_volume_names}"
         )
 
         # Suppression happens before validation — no orphan-reveal error and
@@ -205,6 +241,8 @@ class TestProtectionMode:
             f"A punch-through volume leaked for the suppressed reveal: "
             f"{hierarchy.ordered_volumes}"
         )
+        # CRUX (UI/debug surface): the reveal did NOT re-expose the secret.
+        assert secret_cpath not in hierarchy.visible_paths
 
     # --- AC4: default-on when key absent from serialized dict ---
 
@@ -223,10 +261,17 @@ class TestProtectionMode:
 
     def test_ac5_sibling_ignore_scope_masked(self, tmp_path: Path):
         """A sibling root containing `.ignore_scope` ⇒ that sibling's
-        `.ignore_scope` is force-hidden when protection_mode=True.
+        `.ignore_scope` is masked by a REAL mask VOLUME when protection_mode=True
+        (existence-gated on the sibling's own on-disk `.ignore_scope`).
         """
-        sibling_host = Path("C:/Libs")
+        # Primary root with .ignore_scope on disk.
+        src = tmp_path / "src"
+        (src / IGSC_DIR_NAME).mkdir(parents=True)
+
+        # Sibling host laid out on disk so the existence gate passes.
+        sibling_host = tmp_path / "Libs"
         sibling_common = sibling_host / "common"
+        (sibling_common / IGSC_DIR_NAME).mkdir(parents=True)
         sibling = _make_sibling(
             host_path=sibling_host,
             container_path="/libs",
@@ -235,7 +280,7 @@ class TestProtectionMode:
 
         hierarchy = compute_container_hierarchy(
             container_root="/workspace",
-            mount_specs=_make_mount_specs({tmp_path / "src"}),
+            mount_specs=_make_mount_specs({src}),
             pushed_files=set(),
             host_project_root=tmp_path,
             host_container_root=tmp_path,
@@ -243,26 +288,33 @@ class TestProtectionMode:
             protection_mode=True,
         )
 
-        # Sibling force-hide is computed at the sibling mount_root:
-        # C:/Libs/common → /libs/common, so .ignore_scope → /libs/common/.ignore_scope
+        # Sibling mask volume: sibling root is Libs/common → /libs/common, so
+        # the mask name derives from "common/.ignore_scope" (relative to the
+        # sibling's host_container_root = sibling_host).
+        sibling_mask = _mask_vol_name_for("common/" + IGSC_DIR_NAME)
         sibling_igsc = "/libs/common/" + IGSC_DIR_NAME
-        assert sibling_igsc in hierarchy.masked_paths, (
-            f"Sibling .ignore_scope must be masked; masked={hierarchy.masked_paths}"
+        assert sibling_mask in hierarchy.mask_volume_names, (
+            f"Sibling .ignore_scope must be a mask volume; "
+            f"mask_volume_names={hierarchy.mask_volume_names}"
         )
-        assert sibling_igsc not in hierarchy.visible_paths
+        assert any(
+            v == f"{sibling_mask}:{sibling_igsc}" for v in hierarchy.ordered_volumes
+        ), f"Sibling mask must mount at {sibling_igsc}; {hierarchy.ordered_volumes}"
 
-        # The primary root is still protected too.
-        primary_igsc = "/workspace/src/" + IGSC_DIR_NAME
-        assert primary_igsc in hierarchy.masked_paths
+        # The primary root is masked by a real volume too.
+        primary_mask = _mask_vol_name_for("src/" + IGSC_DIR_NAME)
+        assert primary_mask in hierarchy.mask_volume_names
 
     # --- AC6: opt-out restores prior behavior ---
 
     def test_ac6_opt_out_disables_protection(self, tmp_path: Path):
-        """protection_mode=False ⇒ `.ignore_scope` is NOT force-hidden, and a
-        reveal beneath it works as before (re-exposes the content).
+        """protection_mode=False ⇒ no synthetic mask injected, and a user
+        reveal beneath `.ignore_scope` works as before — its L3 punch-through
+        volume IS emitted (re-exposes the content).
         """
         igsc = tmp_path / IGSC_DIR_NAME
         secret = igsc / "secret"
+        secret.mkdir(parents=True)
 
         hierarchy = compute_container_hierarchy(
             container_root="/workspace",
@@ -278,19 +330,26 @@ class TestProtectionMode:
         igsc_cpath = "/workspace/" + IGSC_DIR_NAME
         secret_cpath = igsc_cpath + "/secret"
 
-        # The mask is honored (user asked for it) but NOT force-injected —
-        # here it exists only because the test config masked it explicitly.
-        assert igsc_cpath in hierarchy.masked_paths
-        # Prior behavior: the reveal re-exposes the secret.
-        assert secret_cpath in hierarchy.visible_paths, (
-            f"With protection off, reveal should re-expose {secret_cpath}; "
-            f"visible={hierarchy.visible_paths}"
+        # The mask volume is honored (user asked for it) — but only because the
+        # test config masked it explicitly, not via a force-inject.
+        assert _mask_vol_name_for(IGSC_DIR_NAME) in hierarchy.mask_volume_names
+        # Prior behavior: the reveal's L3 punch-through volume IS emitted.
+        assert any(
+            v == f"{secret}:{secret_cpath}".replace("\\", "/")
+            or v.endswith(f":{secret_cpath}")
+            for v in hierarchy.ordered_volumes
+        ), (
+            f"With protection off, reveal should emit a punch-through for "
+            f"{secret_cpath}; ordered_volumes={hierarchy.ordered_volumes}"
         )
+        assert secret_cpath in hierarchy.visible_paths
 
     def test_ac6_opt_out_no_forced_hide_without_user_mask(self, tmp_path: Path):
-        """protection_mode=False with a bare mount ⇒ `.ignore_scope` is not
-        injected into masked_paths at all (no force-hide).
+        """protection_mode=False with a bare mount (even with `.ignore_scope` on
+        disk) ⇒ no `.ignore_scope` mask volume is emitted (no force-hide).
         """
+        (tmp_path / IGSC_DIR_NAME).mkdir()  # on disk, but protection is OFF
+
         hierarchy = compute_container_hierarchy(
             container_root="/workspace",
             mount_specs=_make_mount_specs({tmp_path}),
@@ -301,26 +360,28 @@ class TestProtectionMode:
         )
 
         igsc_cpath = "/workspace/" + IGSC_DIR_NAME
-        assert igsc_cpath not in hierarchy.masked_paths, (
-            f"Protection off must not inject a force-hide; "
-            f"masked={hierarchy.masked_paths}"
+        assert _mask_vol_name_for(IGSC_DIR_NAME) not in hierarchy.mask_volume_names, (
+            f"Protection off must not inject a mask volume; "
+            f"mask_volume_names={hierarchy.mask_volume_names}"
         )
+        assert igsc_cpath not in hierarchy.masked_paths
 
     # --- AC7: show_hidden guard — masking independent of show_hidden ---
 
     def test_ac7_show_hidden_does_not_affect_masking(self, tmp_path: Path):
-        """Toggling show_hidden (True vs False) does NOT change whether
-        `.ignore_scope` is in masked_paths — container masking is independent
-        of the show_hidden display flag.
+        """Toggling show_hidden (True vs False) does NOT change the emitted
+        `.ignore_scope` mask VOLUME — container masking is independent of the
+        show_hidden display flag.
 
         show_hidden is a ScopeDockerConfig display flag, not a parameter of
         compute_container_hierarchy; container masking is computed without it.
         The hierarchy call is identical regardless of the config's show_hidden,
-        so the masked set is byte-identical across the toggle.
+        so the emitted mask volumes are byte-identical across the toggle.
         """
-        igsc_cpath = "/workspace/" + IGSC_DIR_NAME
+        (tmp_path / IGSC_DIR_NAME).mkdir()  # on disk → mask volume materializes
+        expected_mask = _mask_vol_name_for(IGSC_DIR_NAME)
 
-        def _masked_for(show_hidden: bool) -> set[str]:
+        def _mask_vols_for(show_hidden: bool) -> list[str]:
             config = _make_scope_config(
                 host_project_root=tmp_path,
                 mounts={tmp_path},
@@ -337,13 +398,13 @@ class TestProtectionMode:
                 host_container_root=tmp_path,
                 protection_mode=config.protection_mode,
             )
-            return hierarchy.masked_paths
+            return hierarchy.mask_volume_names
 
-        masked_shown = _masked_for(True)
-        masked_hidden = _masked_for(False)
+        masks_shown = _mask_vols_for(True)
+        masks_hidden = _mask_vols_for(False)
 
-        assert igsc_cpath in masked_shown
-        assert igsc_cpath in masked_hidden
-        assert masked_shown == masked_hidden, (
+        assert expected_mask in masks_shown
+        assert expected_mask in masks_hidden
+        assert masks_shown == masks_hidden, (
             "show_hidden must not change container masking"
         )

@@ -225,6 +225,99 @@ class TestCpWalk:
 # ──────────────────────────────────────────────
 
 
+class TestProtectionMode:
+    """protection_mode (default True) on detached specs: reveals at/under
+    .ignore_scope are NOT cp'd, and .ignore_scope is force-rm'd post-cp.
+    """
+
+    def _run(self, config: ScopeDockerConfig):
+        """Run _detached_init against fully-mocked Docker seams; return the
+        (push_host_paths, rm_cpaths) the seam computed.
+        """
+        with patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_running",
+            return_value=(True, "ok"),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.ensure_container_directories",
+            return_value=(True, "dirs ok"),
+        ), patch(
+            "IgnoreScope.docker.container_lifecycle.push_file_to_container",
+            return_value=(True, "ok"),
+        ) as push, patch(
+            "IgnoreScope.docker.container_lifecycle.exec_in_container",
+            return_value=(True, "", ""),
+        ) as exec_mock:
+            result = _detached_init("scope-x", config)
+
+        push_host_paths = [call.args[1] for call in push.call_args_list]
+        rm_cpaths = [
+            cmd.args[1][2]
+            for cmd in exec_mock.call_args_list
+            if cmd.args[1][:2] == ["rm", "-rf"]
+        ]
+        return result, push_host_paths, rm_cpaths
+
+    def test_reveal_under_igsc_not_cpd_and_igsc_force_rmd(self, tmp_path: Path):
+        """!.ignore_scope/secret with protection on ⇒ secret NOT cp'd AND
+        .ignore_scope force-rm'd inside the container.
+        """
+        src = tmp_path
+        igsc = src / ".ignore_scope"
+        secret = igsc / "secret"
+        secret.mkdir(parents=True)
+        config = _make_config(
+            tmp_path,
+            specs=[_spec(
+                src,
+                patterns=[".ignore_scope/", "!.ignore_scope/secret/"],
+            )],
+        )
+        config.protection_mode = True
+
+        result, push_host_paths, rm_cpaths = self._run(config)
+
+        assert result.success is True
+        # The revealed secret must NOT be cp'd into the container.
+        assert secret not in push_host_paths, (
+            f"protected reveal leaked into cp: {push_host_paths}"
+        )
+        # .ignore_scope must be force-rm'd post-cp.
+        assert any(
+            p.endswith("/.ignore_scope") for p in rm_cpaths
+        ), f"Expected .ignore_scope force-rm, got: {rm_cpaths}"
+
+    def test_protection_off_restores_prior_behavior(self, tmp_path: Path):
+        """protection_mode=False ⇒ the !.ignore_scope/secret reveal IS cp'd and
+        .ignore_scope is NOT force-rm'd (only the user's explicit mask rm fires).
+        """
+        src = tmp_path
+        igsc = src / ".ignore_scope"
+        secret = igsc / "secret"
+        secret.mkdir(parents=True)
+        config = _make_config(
+            tmp_path,
+            specs=[_spec(
+                src,
+                patterns=[".ignore_scope/", "!.ignore_scope/secret/"],
+            )],
+        )
+        config.protection_mode = False
+
+        result, push_host_paths, rm_cpaths = self._run(config)
+
+        assert result.success is True
+        # Prior behavior: the reveal is cp'd in.
+        assert secret in push_host_paths, (
+            f"With protection off, reveal should be cp'd; got: {push_host_paths}"
+        )
+        # The user's explicit .ignore_scope/ mask still rm's the dir, but no
+        # extra force-rm is injected — exactly one rm for .ignore_scope.
+        igsc_rms = [p for p in rm_cpaths if p.endswith("/.ignore_scope")]
+        assert len(igsc_rms) == 1, (
+            f"Protection off must not inject an extra force-rm; got: {rm_cpaths}"
+        )
+
+
 class TestMixedMode:
     def test_bind_specs_skipped_in_mixed_config(self, tmp_path: Path):
         """Bind spec's mount_root must NOT appear in cp pairs."""
