@@ -171,10 +171,13 @@ QDockWidget("Configuration (JSON)")
 
 ```python
 QStatusBar
-└── QLabel("No project loaded")
+├── QLabel  [+version_label]   "V{__version__}  |  "    # left-most, set once at startup
+├── QLabel  [+status_label]    "No Project Loaded"      # empty state
+└── (right, permanent) MarkedPushBadge  [+marked_push_badge]
 ```
 
-**Updated by logic layer to:** `"Project: {path}  |  Scope: {name}"`
+**Status label updated by logic layer to:** `"Project: {path}  |  Scope: {name}"`
+**Full left segment renders:** `"V{version}  |  No Project Loaded"` → `"V{version}  |  Project: {path}  |  Scope: {name}"`. Version sourced live from `IgnoreScope._version.__version__`.
 
 ---
 

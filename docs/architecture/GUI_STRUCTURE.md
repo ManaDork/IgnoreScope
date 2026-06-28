@@ -20,7 +20,8 @@ QMainWindow (IgnoreScopeApp)                                          app.py
 ├── QWidget  [+central_hidden]                                        app.py:200
 ├── QMenuBar                                                          menus.py
 ├── QStatusBar  [+statusBar]                                          app.py:205
-│   └── QLabel  [+status_label]                                       app.py:207
+│   ├── QLabel  [+version_label]                                      app.py:234
+│   └── QLabel  [+status_label]                                       app.py:236
 │
 ├── QDockWidget  [existing: localHostDock]                             app.py:215
 │   └── QWidget  [+localHost_wrapper]                                  app.py:217
@@ -62,7 +63,8 @@ QMainWindow (IgnoreScopeApp)                                          app.py
 |------|------|----------|-----------|--------|
 | app.py | 200 | `central` | `central_hidden` | new |
 | app.py | 205 | `status_bar` | `statusBar` | new |
-| app.py | 207 | `self.status_label` | `status_label` | new |
+| app.py | 234 | `self.version_label` | `version_label` | new |
+| app.py | 236 | `self.status_label` | `status_label` | new |
 | app.py | 216 | `self.local_host_dock` | `localHostDock` | existing |
 | app.py | 217 | `local_host_widget` | `localHost_wrapper` | new |
 | app.py | 218 | `local_host_layout` | `localHost_wrapperLayout` | new |
@@ -108,7 +110,8 @@ One row per object — every layer, all named.
 | 0 | IgnoreScopeApp | 195-196 | app.py | QMainWindow | constrained | min 1100×700, default 1400×900 | hardcoded | Root window |
 | 1 | `central_hidden` | 200-201 | app.py | QWidget | fixed | maxSize 0×0 | hardcoded | Hides central widget so docks fill window |
 | 1 | `statusBar` | 205 | app.py | QStatusBar | parent | height: auto from font | variable | Status bar stretches full width |
-| 2 | `status_label` | 207 | app.py | QLabel | children | auto | variable | Text determines width |
+| 2 | `version_label` | 234 | app.py | QLabel | children | auto | variable | Version prefix; set once at startup from `__version__` |
+| 2 | `status_label` | 236 | app.py | QLabel | children | auto | variable | Text determines width |
 
 ### Local Host Dock
 

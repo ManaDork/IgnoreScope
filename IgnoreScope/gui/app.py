@@ -36,6 +36,7 @@ from .mount_data_tree import MountDataTree
 from .local_host_view import LocalHostView
 from .scope_view import ScopeView
 from .system_tray import SystemTrayManager
+from .._version import __version__
 
 PLACEHOLDER_SCOPE = "temp"
 
@@ -231,7 +232,10 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
         status_bar._gradient_name = "status_bar"
         status_bar.setObjectName("statusBar")
         self.setStatusBar(status_bar)
-        self.status_label = QLabel("No project loaded")
+        self.version_label = QLabel(f"V{__version__}  |  ")
+        self.version_label.setObjectName("version_label")
+        status_bar.addWidget(self.version_label)
+        self.status_label = QLabel("No Project Loaded")
         self.status_label.setObjectName("status_label")
         status_bar.addWidget(self.status_label)
 
@@ -486,7 +490,7 @@ class IgnoreScopeApp(GradientBackgroundMixin, QMainWindow):
     def _update_status(self) -> None:
         """Update status bar text from current state."""
         if not self.host_project_root:
-            self.status_label.setText("No project loaded")
+            self.status_label.setText("No Project Loaded")
         else:
             self.status_label.setText(
                 f"Project: {self.host_project_root.name}  |  Scope: {self._current_scope}"
